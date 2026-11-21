@@ -246,6 +246,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedCategory = 'Restaurante';
   final Set<String> _selectedCurrencies = <String>{'USD'};
   String _activeCheckoutCurrency = 'USD';
+  /// Independent of [_activeCheckoutCurrency]: FX tabs vs payment-method tabs.
+  String _activePaymentCurrency = 'USD';
   String _primaryCheckoutCurrency = '';
   String _selectedLayoutId = 'cards';
   String _selectedPaletteId = 'smart';
@@ -301,6 +303,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final Map<String, String> _exchangeRateByCurrency = <String, String>{
     'USD': '1',
   };
+  /// Last manual quote-per-base rate per currency. Switching Manual→Auto can
+  /// overwrite `_exchangeRateByCurrency` with the live source; this stash lets
+  /// Manual←Auto restore what the merchant had set (avoids silently saving
+  /// the automatic rate as their manual rate).
+  final Map<String, String> _stashedManualExchangeRateByCurrency =
+      <String, String>{};
   final Map<String, Set<String>> _selectedPaymentsByCurrency =
       <String, Set<String>>{};
   final Map<String, Map<String, _PaymentMethodDraft>>
@@ -941,9 +949,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final dynamicRate = _parseExchangeRate(raw?['exchange_rate_value']);
     final effectiveRate = dynamicRate > 0 ? dynamicRate : rate;
     if (effectiveRate > 0) {
-      _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
-        effectiveRate,
-      );
+      _exchangeRateByCurrency[_activeCheckoutCurrency] =
+          _persistExchangeRateValue(effectiveRate);
       _loadActiveCurrencyIntoController();
       _lastSuggestedRateCurrency = _activeCheckoutCurrency;
     }
@@ -970,6 +977,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     _hydrateExchangeAdjustments(seedBusinessConfig);
     _hydrateCheckoutExchangeConfig(seedBusinessConfig);
+    // Reload after per-currency rates are hydrated so COP→USD inverse
+    // display sees the full-precision value (not a stale/empty controller).
+    _loadActiveCurrencyIntoController();
   }
 
   /// Restores per-currency rates/modes/sources saved in config_negocio.
@@ -1004,7 +1014,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
       final rate = _parseExchangeRate(entry.value);
       if (rate > 0) {
-        _exchangeRateByCurrency[code] = _formatExchangeRate(rate);
+        final stored = _persistExchangeRateValue(rate);
+        _exchangeRateByCurrency[code] = stored;
+        // Seed restore-point for Manual↔Auto toggles this session.
+        _stashedManualExchangeRateByCurrency.putIfAbsent(code, () => stored);
       }
     }
 
@@ -1075,6 +1088,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String get _currentCurrency {
     if (_selectedCurrencies.contains(_activeCheckoutCurrency)) {
       return _activeCheckoutCurrency;
+    }
+    return _selectedCurrencies.isNotEmpty ? _selectedCurrencies.first : 'USD';
+  }
+
+  /// Currency selected in the payment-methods tab bar (includes primary).
+  String get _paymentCurrency {
+    if (_selectedCurrencies.contains(_activePaymentCurrency)) {
+      return _activePaymentCurrency;
+    }
+    if (_selectedCurrencies.contains(_baseCurrency)) {
+      return _baseCurrency;
     }
     return _selectedCurrencies.isNotEmpty ? _selectedCurrencies.first : 'USD';
   }
@@ -1330,8 +1354,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   void _syncActiveCurrencyDataFromController() {
     final currency = _currentCurrency;
     final text = _exchangeRateController.text.trim();
-    _exchangeRateByCurrency[currency] =
-        _requiresExchangeRateForCurrency(currency) ? text : '1';
+    if (!_requiresExchangeRateForCurrency(currency)) {
+      _exchangeRateByCurrency[currency] = '1';
+    } else {
+      final canonical = _canonicalRateTextFromInput(
+        text,
+        baseCurrency: _baseCurrency,
+        quoteCurrency: currency,
+      );
+      _exchangeRateByCurrency[currency] = canonical;
+      if (_parseExchangeRate(canonical) > 0) {
+        _stashedManualExchangeRateByCurrency[currency] = canonical;
+      }
+    }
     _syncExchangeConfigForCurrency(currency);
   }
 
@@ -1341,8 +1376,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _enforceExchangeRulesForCurrency(currency);
     _syncExchangeConfigForCurrency(currency);
     _ensureCurrencyConfig(currency);
-    final value = _requiresExchangeRateForCurrency(currency)
+    final stored = _requiresExchangeRateForCurrency(currency)
         ? (_exchangeRateByCurrency[currency] ?? '')
+        : '1';
+    final value = _requiresExchangeRateForCurrency(currency)
+        ? _inputTextFromCanonicalRate(
+            stored,
+            baseCurrency: _baseCurrency,
+            quoteCurrency: currency,
+          )
         : '1';
     _exchangeRateController.value = TextEditingValue(
       text: value,
@@ -1598,6 +1640,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _activeCheckoutCurrency = _selectedCurrencies.contains(activeCurrency)
           ? activeCurrency
           : _selectedCurrencies.first;
+      final paymentCurrency = (map['activePaymentCurrency'] as String? ?? '')
+          .trim()
+          .toUpperCase();
+      _activePaymentCurrency = _selectedCurrencies.contains(paymentCurrency)
+          ? paymentCurrency
+          : (_selectedCurrencies.contains(primaryCurrency)
+                ? primaryCurrency
+                : _selectedCurrencies.first);
       _primaryCheckoutCurrency = _selectedCurrencies.contains(primaryCurrency)
           ? primaryCurrency
           : _activeCheckoutCurrency;
@@ -1639,9 +1689,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       final exchangeRate = _parseExchangeRate(map['exchangeRate']);
       if (exchangeRate > 0) {
-        _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
-          exchangeRate,
-        );
+        _exchangeRateByCurrency[_activeCheckoutCurrency] =
+            _persistExchangeRateValue(exchangeRate);
       }
 
       final draftMode = (map['exchangeRateMode'] as String? ?? '')
@@ -1756,6 +1805,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           }
           _exchangeRateByCurrency[currencyCode] =
               entry.value?.toString().trim() ?? '';
+        }
+      }
+
+      final stashedManualRates = _toStringDynamicMap(
+        map['stashedManualExchangeRates'],
+      );
+      if (stashedManualRates.isNotEmpty) {
+        for (final entry in stashedManualRates.entries) {
+          final currencyCode = entry.key.trim().toUpperCase();
+          final value = entry.value?.toString().trim() ?? '';
+          if (!_currencies.contains(currencyCode) ||
+              _parseExchangeRate(value) <= 0) {
+            continue;
+          }
+          _stashedManualExchangeRateByCurrency[currencyCode] = value;
+          // Prefer stashed established rate over a draft map that Auto may
+          // have overwritten earlier in the session.
+          _exchangeRateByCurrency[currencyCode] = value;
         }
       }
 
@@ -1949,6 +2016,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'currency': _currentCurrency,
       'currencies': _selectedCurrencies.toList(),
       'activeCurrency': _currentCurrency,
+      'activePaymentCurrency': _paymentCurrency,
       'primaryCurrency': _baseCurrency,
       'layout': _selectedLayoutId,
       'palette': _selectedPaletteId,
@@ -1961,6 +2029,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _exchangeRateByCurrency[_currentCurrency] ??
           _exchangeRateController.text.trim(),
       'exchangeRates': _exchangeRateByCurrency,
+      'stashedManualExchangeRates': _stashedManualExchangeRateByCurrency,
       'exchangeRateMode': _exchangeRateMode,
       'exchangeRateSource': _exchangeRateSource,
       'exchangeRateModes': _exchangeRateModeByCurrency,
@@ -4584,16 +4653,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_step == _SetupStep.checkout &&
-        !_hasPaymentDetailsForSelectedMethods()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Agrega al menos un detalle en cada metodo de pago seleccionado.',
-          ),
-        ),
-      );
-      return;
+    if (_step == _SetupStep.checkout) {
+      final paymentIssue = _paymentDetailsIssueMessage();
+      if (paymentIssue != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(paymentIssue)));
+        return;
+      }
     }
 
     if (_step == _SetupStep.operation) {
@@ -4734,10 +4801,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'Configura una tasa de cambio antes de guardar.',
             );
           }
-          if (!_hasPaymentDetailsForSelectedMethods()) {
-            throw const FormatException(
-              'Completa los datos de cada método de pago.',
-            );
+          final paymentIssue = _paymentDetailsIssueMessage();
+          if (paymentIssue != null) {
+            throw FormatException(paymentIssue);
           }
           final methods = _selectedCurrencies
               .expand(_selectedPaymentsForCurrency)
@@ -4953,6 +5019,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return value.toStringAsFixed(2);
   }
 
+  /// Persists quote-per-base into `_exchangeRateByCurrency`.
+  ///
+  /// Tiny rates (e.g. USD-per-COP ≈ 0.00025) must keep full precision —
+  /// `_formatExchangeRate` would turn them into `"0.00"` and the inverse
+  /// COP→USD field would load empty.
+  String _persistExchangeRateValue(double rate) {
+    if (rate <= 0 || !rate.isFinite) {
+      return '';
+    }
+    // Quote-per-COP (USD/VES) is often < 1; 2 dp would distort 1/2.8 → 0.36.
+    if (rate < 1) {
+      return _storeCanonicalExchangeRate(rate);
+    }
+    return _formatExchangeRate(rate);
+  }
+
   String _formatExchangeRateMasked(double value) {
     if (value <= 0) {
       return '';
@@ -4964,6 +5046,134 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       (_) => ',',
     );
     return '$integerPart.${parts[1]}';
+  }
+
+  /// COP→USD / COP→VES are stored as quote-per-1-COP (often < 1), but
+  /// merchants think in "3200 COP = 1 USD" / "2,8 COP = 1 VES". This flag
+  /// only flips the manual field / summary presentation; canonical storage
+  /// stays quote-per-base.
+  bool _usesInverseManualRateUi(String baseCurrency, String quoteCurrency) {
+    return baseCurrency == 'COP' &&
+        (quoteCurrency == 'USD' || quoteCurrency == 'VES');
+  }
+
+  /// True when [rate] must not replace the merchant's established manual
+  /// value in `_exchangeRateByCurrency` (Auto uses live sources for display).
+  bool _shouldPreserveManualExchangeRate(String currency) {
+    if (!_requiresExchangeRateForCurrency(currency)) {
+      return false;
+    }
+    final existing = _parseExchangeRate(_exchangeRateByCurrency[currency]);
+    if (existing <= 0) {
+      return false;
+    }
+    // Always preserve once a positive rate exists — Auto must not clobber it.
+    return true;
+  }
+
+  String _storeCanonicalExchangeRate(double rate) {
+    if (rate <= 0 || !rate.isFinite) {
+      return '';
+    }
+    // Keep full precision for tiny USD-per-COP values (2 dp would become 0.00).
+    var text = rate.toStringAsFixed(12);
+    if (text.contains('.')) {
+      text = text.replaceFirst(RegExp(r'0+$'), '');
+      text = text.replaceFirst(RegExp(r'\.$'), '');
+    }
+    return text;
+  }
+
+  /// Map/controller bridge: display text → canonical quote-per-base string.
+  String _canonicalRateTextFromInput(
+    String input, {
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final entered = _parseExchangeRate(input);
+    if (entered <= 0) {
+      return input.trim();
+    }
+    if (_usesInverseManualRateUi(baseCurrency, quoteCurrency)) {
+      final canonical = 1 / entered;
+      return _storeCanonicalExchangeRate(canonical);
+    }
+    return input.trim();
+  }
+
+  /// Canonical quote-per-base string → what the merchant types in the field.
+  String _inputTextFromCanonicalRate(
+    String stored, {
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final rate = _parseExchangeRate(stored);
+    if (rate <= 0) {
+      return '';
+    }
+    if (_usesInverseManualRateUi(baseCurrency, quoteCurrency)) {
+      final inverse = 1 / rate;
+      if (!inverse.isFinite || inverse <= 0) {
+        return '';
+      }
+      return _formatExchangeRateMasked(inverse);
+    }
+    return stored;
+  }
+
+  /// Writes a canonical quote-per-base rate into the map and, when active,
+  /// into the text field using the friendly display form.
+  ///
+  /// When [preserveManualIfSet] is true (default for Auto-driven updates),
+  /// an existing positive manual rate is left untouched so switching
+  /// Manual→Auto→Manual (or refreshing market rates) cannot silently
+  /// replace e.g. 2,8 COP/VES with the live 0,33 source.
+  void _setCanonicalExchangeRateForCurrency(
+    String currency,
+    double rate, {
+    bool preserveManualIfSet = false,
+  }) {
+    if (rate <= 0 || !rate.isFinite) {
+      return;
+    }
+    if (preserveManualIfSet && _shouldPreserveManualExchangeRate(currency)) {
+      // Keep map; only refresh the visible field when this currency is active
+      // and we are in Manual (Auto hides the field / uses live summary).
+      if (currency == _currentCurrency &&
+          _exchangeRateMode == _exchangeModeManual) {
+        final stored = _exchangeRateByCurrency[currency] ?? '';
+        final display = _inputTextFromCanonicalRate(
+          stored,
+          baseCurrency: _baseCurrency,
+          quoteCurrency: currency,
+        );
+        _exchangeRateController.value = TextEditingValue(
+          text: display,
+          selection: TextSelection.collapsed(offset: display.length),
+        );
+      }
+      return;
+    }
+    final stored = _usesInverseManualRateUi(_baseCurrency, currency)
+        ? _storeCanonicalExchangeRate(rate)
+        : (rate < 0.01
+              ? _storeCanonicalExchangeRate(rate)
+              : _formatExchangeRateMasked(rate));
+    _exchangeRateByCurrency[currency] = stored;
+    if (_parseExchangeRate(stored) > 0) {
+      _stashedManualExchangeRateByCurrency.putIfAbsent(currency, () => stored);
+    }
+    if (currency == _currentCurrency) {
+      final display = _inputTextFromCanonicalRate(
+        stored,
+        baseCurrency: _baseCurrency,
+        quoteCurrency: currency,
+      );
+      _exchangeRateController.value = TextEditingValue(
+        text: display,
+        selection: TextSelection.collapsed(offset: display.length),
+      );
+    }
   }
 
   int _exchangeRateInputDecimalDigits(String quoteCurrency) {
@@ -5807,6 +6017,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     };
   }
 
+  String _formatExchangeRateCompact(double value) {
+    if (value <= 0 || !value.isFinite) {
+      return '';
+    }
+    if (value >= 0.01) {
+      return _formatExchangeRateMasked(value);
+    }
+    var text = value.toStringAsFixed(6);
+    text = text.replaceFirst(RegExp(r'0+$'), '');
+    text = text.replaceFirst(RegExp(r'\.$'), '');
+    return text;
+  }
+
   String _formatConversionRateText({
     required double rate,
     required String baseCurrency,
@@ -5815,7 +6038,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (rate <= 0) {
       return '--';
     }
-    return '${_formatExchangeRateMasked(rate)} $quoteCurrency por 1 $baseCurrency';
+    return '${_formatExchangeRateCompact(rate)} $quoteCurrency por 1 $baseCurrency';
   }
 
   String _formatConversionEquivalenceText({
@@ -5833,7 +6056,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       quoteCurrency: quoteCurrency,
     );
     final inverse =
-        '${_formatExchangeRateMasked(1 / rate)} $baseCurrency por 1 $quoteCurrency';
+        '${_formatExchangeRateCompact(1 / rate)} $baseCurrency por 1 $quoteCurrency';
     return '$direct  |  $inverse';
   }
 
@@ -5978,9 +6201,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _enforceExchangeRulesForCurrency(_currentCurrency);
           final synced = _rateForSource(_exchangeRateSource);
           if (synced > 0) {
-            final formatted = _formatExchangeRateMasked(synced);
-            _exchangeRateByCurrency[_currentCurrency] = formatted;
-            _exchangeRateController.text = formatted;
+            // Never clobber the merchant's established manual rate.
+            _setCanonicalExchangeRateForCurrency(
+              _currentCurrency,
+              synced,
+              preserveManualIfSet: true,
+            );
             _exchangeRateMessage = null;
             _exchangeRateIsError = false;
             _lastSuggestedRateCurrency = _currentCurrency;
@@ -6072,7 +6298,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (local.isEmpty) {
         return 'Ingresa un numero de telefono.';
       }
-      // Merchants often mix VE/CO account phones under one WhatsApp country.
+      // Merchants mix VE/CO WhatsApp with USD accounts (Zelle US phones, etc.).
       // Never call intl_phone_field.isValidNumber() here: it throws bare
       // Exception subclasses (no message) → "Instance of 'minified:…'" in
       // release, and this path runs during Cobros build via configured-count.
@@ -6081,6 +6307,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _selectedPhoneCountryIso.trim().toUpperCase(),
         'VE',
         'CO',
+        // USD checkout / Zelle and similar US numbers
+        'US',
+        'CA',
       }.where((iso) => iso.isNotEmpty);
       final accepted = candidateIsos.any(
         (iso) => isPlausibleNationalForCountry(local, iso: iso),
@@ -6574,40 +6803,51 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return rate > 0 && !_adjustmentBlocksSave(currency);
   }
 
-  bool _hasPaymentDetailsForCurrency(String currency) {
+  String? _paymentDetailsIssueForCurrency(String currency) {
     final selected = _selectedPaymentsForCurrency(currency);
     if (selected.isEmpty) {
-      return false;
+      return 'Selecciona al menos un método de pago en $currency.';
     }
 
     final drafts = _paymentDraftsForCurrency(currency);
     for (final method in selected) {
       final draft = drafts[method];
       if (draft == null || !draft.hasAnyDetail) {
-        return false;
+        return '$currency · $method: completa los datos del método.';
       }
 
       if (method == 'Efectivo') {
         final message = _cashValidationMessage(draft.extraDetails);
         if (message != null) {
-          return false;
+          return '$currency · Efectivo: $message';
         }
       }
 
       if (method == 'Transferencia') {
-        if (draft.transferAccounts.isEmpty ||
-            draft.transferAccounts.length > _maxTransferAccountsPerCurrency) {
-          return false;
+        if (draft.transferAccounts.isEmpty) {
+          return '$currency · Transferencia: agrega al menos una cuenta digital.';
+        }
+        if (draft.transferAccounts.length > _maxTransferAccountsPerCurrency) {
+          return '$currency · Transferencia: máximo '
+              '$_maxTransferAccountsPerCurrency cuentas.';
         }
 
         for (final account in draft.transferAccounts) {
-          if (_transferAccountValidationMessage(account) != null) {
-            return false;
+          final accountName = account.name.trim().isEmpty
+              ? 'Cuenta sin nombre'
+              : account.name.trim();
+          final message = _transferAccountValidationMessage(account);
+          if (message != null) {
+            return '$currency · $accountName: $message';
           }
         }
       }
     }
-    return true;
+    return null;
+  }
+
+  bool _hasPaymentDetailsForCurrency(String currency) {
+    return _paymentDetailsIssueForCurrency(currency) == null;
   }
 
   bool _isCurrencyCheckoutConfigured(String currency) {
@@ -6638,17 +6878,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return true;
   }
 
-  bool _hasPaymentDetailsForSelectedMethods() {
+  String? _paymentDetailsIssueMessage() {
     if (_selectedCurrencies.isEmpty) {
-      return false;
+      return 'Selecciona al menos una moneda de cobro.';
     }
 
     for (final currency in _selectedCurrencies) {
-      if (!_hasPaymentDetailsForCurrency(currency)) {
-        return false;
+      final issue = _paymentDetailsIssueForCurrency(currency);
+      if (issue != null) {
+        return issue;
       }
     }
-    return true;
+    return null;
+  }
+
+  bool _hasPaymentDetailsForSelectedMethods() {
+    return _paymentDetailsIssueMessage() == null;
   }
 
   List<String> _paymentSummaryLines(String method, _PaymentMethodDraft draft) {
@@ -6695,7 +6940,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openCashEditor() async {
-    final currency = _currentCurrency;
+    final currency = _paymentCurrency;
     final drafts = _paymentDraftsForCurrency(currency);
     final current =
         drafts['Efectivo'] ?? _PaymentMethodDraft(method: 'Efectivo');
@@ -6843,7 +7088,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openTransferAccountEditor({int? index}) async {
-    final currency = _currentCurrency;
+    final currency = _paymentCurrency;
     final currencyLabel = _currencyLabel(currency);
     final drafts = _paymentDraftsForCurrency(currency);
     final current =
@@ -7760,12 +8005,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final fallback = canUseAuto
         ? _rateForSource(_exchangeRateSource)
         : _defaultExchangeRateFor(currency);
-    final formattedFallback = canUseAuto
-        ? _formatExchangeRateMasked(fallback)
-        : _formatExchangeRate(fallback);
     setState(() {
-      if (_exchangeRateController.text.trim().isEmpty || force) {
-        _exchangeRateController.text = formattedFallback;
+      if ((_exchangeRateController.text.trim().isEmpty || force) &&
+          fallback > 0) {
+        _setCanonicalExchangeRateForCurrency(
+          currency,
+          fallback,
+          // Auto suggestions must not wipe an established manual rate.
+          preserveManualIfSet: canUseAuto,
+        );
       }
       _isExchangeRateLoading = true;
       _exchangeRateIsError = false;
@@ -7778,12 +8026,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     setState(() {
-      if (!_exchangeRateManuallyEdited ||
-          force ||
-          _lastSuggestedRateCurrency != currency) {
-        _exchangeRateController.text = formattedFallback;
+      if ((!_exchangeRateManuallyEdited ||
+              force ||
+              _lastSuggestedRateCurrency != currency) &&
+          fallback > 0) {
+        _setCanonicalExchangeRateForCurrency(
+          currency,
+          fallback,
+          preserveManualIfSet: canUseAuto && !force,
+        );
+      } else {
+        // Keep whatever the merchant typed; persist canonical form.
+        _syncActiveCurrencyDataFromController();
       }
-      _exchangeRateByCurrency[currency] = _exchangeRateController.text.trim();
       _lastSuggestedRateCurrency = currency;
       _exchangeRateIsError = false;
       _exchangeRateMessage = canUseAuto
@@ -8156,12 +8411,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (currency == _baseCurrency) {
         continue;
       }
-      final rate = _effectiveExchangeRateForCurrency(currency);
+      final mode =
+          _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+      // Persist the established (manual/map) rate — never the live Auto
+      // source — so saving while mode is Auto cannot replace e.g. 2,8 with
+      // 0,33 in branding. Live conversion still uses sources when mode=auto.
+      final established = _parseExchangeRate(
+        _stashedManualExchangeRateByCurrency[currency] ??
+            _exchangeRateByCurrency[currency],
+      );
+      final rate = established > 0
+          ? established
+          : _effectiveExchangeRateForCurrency(currency);
       if (rate > 0) {
         exchangeRates[currency] = rate;
       }
-      exchangeRateModes[currency] =
-          _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+      exchangeRateModes[currency] = mode;
       exchangeRateSources[currency] =
           _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
     }
@@ -8502,14 +8767,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (!_hasPaymentDetailsForSelectedMethods()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Completa al menos un detalle en cada metodo de pago seleccionado.',
-          ),
-        ),
-      );
+    final paymentIssue = _paymentDetailsIssueMessage();
+    if (paymentIssue != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(paymentIssue)));
       return;
     }
 
@@ -9424,6 +9686,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     unawaited(_saveDraft());
   }
 
+  void _switchPaymentEditingCurrency(String currency) {
+    if (_activePaymentCurrency == currency) {
+      return;
+    }
+    setState(() {
+      _activePaymentCurrency = currency;
+      _ensureCurrencyConfig(currency);
+    });
+    unawaited(_saveDraft());
+  }
+
   Widget _checkoutEditingCurrencyTabs({
     required List<String> currencies,
     required String activeCurrency,
@@ -9824,14 +10097,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     final baseCurrency = _baseCurrency;
+    // Secondary currencies only (need FX). Payment methods use ALL selected
+    // currencies including the primary (COP) — merchants also receive in base.
     final editingCurrencies = _selectedCurrencies
         .where((currency) => currency != baseCurrency)
         .toList(growable: false);
+    final paymentCurrencies = _selectedCurrencies.toList(growable: false);
     final hasSecondary = editingCurrencies.isNotEmpty;
-    // Keep the editor on an accepted secondary currency so rate/payment tabs
-    // stay visible instead of bouncing back to the primary empty state.
-    if (hasSecondary && !editingCurrencies.contains(_activeCheckoutCurrency)) {
-      _activeCheckoutCurrency = editingCurrencies.first;
+    // FX tab: prefer a secondary currency (primary has no rate to edit).
+    if (!_selectedCurrencies.contains(_activeCheckoutCurrency) ||
+        (_activeCheckoutCurrency == baseCurrency &&
+            editingCurrencies.isNotEmpty)) {
+      _activeCheckoutCurrency = editingCurrencies.isNotEmpty
+          ? editingCurrencies.first
+          : (paymentCurrencies.isNotEmpty
+                ? paymentCurrencies.first
+                : baseCurrency);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
@@ -9839,8 +10120,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _loadActiveCurrencyIntoController();
       });
     }
+    // Payment tab: independent; may be the primary (COP).
+    if (!_selectedCurrencies.contains(_activePaymentCurrency)) {
+      _activePaymentCurrency = paymentCurrencies.contains(baseCurrency)
+          ? baseCurrency
+          : (paymentCurrencies.isNotEmpty
+                ? paymentCurrencies.first
+                : baseCurrency);
+    }
     final currentCurrency = _currentCurrency;
+    final paymentCurrency = _paymentCurrency;
     _ensureCurrencyConfig(currentCurrency);
+    _ensureCurrencyConfig(paymentCurrency);
     _loadExchangeConfigForCurrency(currentCurrency);
     _enforceExchangeRulesForCurrency(currentCurrency);
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
@@ -9886,8 +10177,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (safeExchangeSource != _exchangeRateSource) {
       _exchangeRateSource = safeExchangeSource;
     }
-    final currentPayments = _selectedPaymentsForCurrency(currentCurrency);
-    final currentDrafts = _paymentDraftsForCurrency(currentCurrency);
+    final currentPayments = _selectedPaymentsForCurrency(paymentCurrency);
+    final currentDrafts = _paymentDraftsForCurrency(paymentCurrency);
     final isExchangeRateEditable =
         requiresRate && _exchangeRateMode == _exchangeModeManual;
     final isAutoMode =
@@ -9898,17 +10189,48 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     Future<void> setExchangeMode(bool enabled) async {
       setState(() {
-        _exchangeRateMode =
-            enabled ? _exchangeModeAuto : _exchangeModeManual;
-        _syncExchangeConfigForCurrency(currentCurrency);
         if (enabled) {
-          final synced = _rateForSource(_exchangeRateSource);
-          if (synced > 0) {
-            final masked = _formatExchangeRateMasked(synced);
-            _exchangeRateByCurrency[currentCurrency] = masked;
-            _exchangeRateController.text = masked;
-            _exchangeRateManuallyEdited = false;
+          // Leaving Manual: remember the established rate. Do NOT write the
+          // live Auto rate into `_exchangeRateByCurrency` — the summary already
+          // reads live sources while mode is Auto, and overwriting here was
+          // silently replacing e.g. 2,8 with 0,33 on Manual→Auto→Manual.
+          final fromController = _canonicalRateTextFromInput(
+            _exchangeRateController.text.trim(),
+            baseCurrency: baseCurrency,
+            quoteCurrency: currentCurrency,
+          );
+          final fromMap =
+              _exchangeRateByCurrency[currentCurrency]?.trim() ?? '';
+          final established = _parseExchangeRate(fromController) > 0
+              ? fromController
+              : fromMap;
+          if (_parseExchangeRate(established) > 0) {
+            _exchangeRateByCurrency[currentCurrency] = established;
+            _stashedManualExchangeRateByCurrency[currentCurrency] =
+                established;
           }
+          _exchangeRateMode = _exchangeModeAuto;
+          _syncExchangeConfigForCurrency(currentCurrency);
+          _exchangeRateManuallyEdited = false;
+        } else {
+          // Returning to Manual: prefer stash, else whatever is still in map.
+          _exchangeRateMode = _exchangeModeManual;
+          _syncExchangeConfigForCurrency(currentCurrency);
+          final stashed =
+              _stashedManualExchangeRateByCurrency[currentCurrency];
+          if (stashed != null && _parseExchangeRate(stashed) > 0) {
+            _exchangeRateByCurrency[currentCurrency] = stashed;
+          }
+          final stored = _exchangeRateByCurrency[currentCurrency] ?? '';
+          final display = _inputTextFromCanonicalRate(
+            stored,
+            baseCurrency: baseCurrency,
+            quoteCurrency: currentCurrency,
+          );
+          _exchangeRateController.value = TextEditingValue(
+            text: display,
+            selection: TextSelection.collapsed(offset: display.length),
+          );
         }
       });
       await _saveDraft();
@@ -9929,9 +10251,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _exchangeRateSource = value;
         _syncExchangeConfigForCurrency(currentCurrency);
         final synced = _rateForSource(value);
-        final masked = _formatExchangeRateMasked(synced);
-        _exchangeRateByCurrency[currentCurrency] = masked;
-        _exchangeRateController.text = masked;
+        if (synced > 0) {
+          // Only seed the map when empty; never replace an established rate.
+          _setCanonicalExchangeRateForCurrency(
+            currentCurrency,
+            synced,
+            preserveManualIfSet: true,
+          );
+        }
       });
       await _saveDraft();
     }
@@ -10059,45 +10386,69 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ],
       if (isExchangeRateEditable) ...[
         const SizedBox(height: 14),
-        TextField(
-          controller: _exchangeRateController,
-          enabled: true,
-          enableInteractiveSelection: false,
-          onTap: _forceExchangeRateCursorAtEnd,
-          textAlign: TextAlign.right,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: <TextInputFormatter>[
-            _MoneyAmountInputFormatter(
-              decimalDigits: _exchangeRateInputDecimalDigits(currentCurrency),
-              maxIntegerDigits: 7,
-            ),
-          ],
-          style: const TextStyle(color: _setupTextHigh),
-          decoration: InputDecoration(
-            labelText: 'Tasa manual',
-            prefixText: '1 $baseCurrency = ',
-            suffixText: ' $currentCurrency',
-            hintText: _formatExchangeRateMasked(
-              _defaultExchangeRateFor(currentCurrency),
-            ),
-            filled: true,
-            fillColor: const Color(0xFF120E25),
-            labelStyle: const TextStyle(color: _setupTextLow),
-            hintStyle: const TextStyle(color: _setupTextLow),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-            ),
-          ),
-          onChanged: (_) {
-            _exchangeRateManuallyEdited = true;
-            _exchangeRateByCurrency[currentCurrency] =
-                _exchangeRateController.text.trim();
-            unawaited(_saveDraft());
+        Builder(
+          builder: (context) {
+            final inverseUi = _usesInverseManualRateUi(
+              baseCurrency,
+              currentCurrency,
+            );
+            final defaultCanonical = _defaultExchangeRateFor(currentCurrency);
+            final hint = inverseUi && defaultCanonical > 0
+                ? _formatExchangeRateMasked(1 / defaultCanonical)
+                : _formatExchangeRateMasked(defaultCanonical);
+            return TextField(
+              controller: _exchangeRateController,
+              enabled: true,
+              enableInteractiveSelection: false,
+              onTap: _forceExchangeRateCursorAtEnd,
+              textAlign: TextAlign.right,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: <TextInputFormatter>[
+                _MoneyAmountInputFormatter(
+                  decimalDigits: _exchangeRateInputDecimalDigits(
+                    currentCurrency,
+                  ),
+                  maxIntegerDigits: 7,
+                ),
+              ],
+              style: const TextStyle(color: _setupTextHigh),
+              decoration: InputDecoration(
+                labelText: 'Tasa manual',
+                prefixText: inverseUi ? null : '1 $baseCurrency = ',
+                suffixText: inverseUi
+                    ? ' $baseCurrency = 1 $currentCurrency'
+                    : ' $currentCurrency',
+                hintText: hint,
+                filled: true,
+                fillColor: const Color(0xFF120E25),
+                labelStyle: const TextStyle(color: _setupTextLow),
+                hintStyle: const TextStyle(color: _setupTextLow),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                ),
+              ),
+              onChanged: (_) {
+                _exchangeRateManuallyEdited = true;
+                final canonical = _canonicalRateTextFromInput(
+                  _exchangeRateController.text.trim(),
+                  baseCurrency: baseCurrency,
+                  quoteCurrency: currentCurrency,
+                );
+                _exchangeRateByCurrency[currentCurrency] = canonical;
+                if (_parseExchangeRate(canonical) > 0) {
+                  _stashedManualExchangeRateByCurrency[currentCurrency] =
+                      canonical;
+                }
+                unawaited(_saveDraft());
+              },
+            );
           },
         ),
       ],
@@ -10278,8 +10629,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _checkoutStepCard(
               number: 3,
               title: 'Configurar tasa de cambio',
-              subtitle:
-                  'Editando ${_checkoutCurrencyTitle(currentCurrency)}. Define cuánto vale 1 $baseCurrency en $currentCurrency.',
+              subtitle: _usesInverseManualRateUi(baseCurrency, currentCurrency)
+                  ? 'Editando ${_checkoutCurrencyTitle(currentCurrency)}. Indica cuántos $baseCurrency equivalen a 1 $currentCurrency.'
+                  : 'Editando ${_checkoutCurrencyTitle(currentCurrency)}. Define cuánto vale 1 $baseCurrency en $currentCurrency.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -10305,10 +10657,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: rateControls,
                         );
+                        final inverseUi = _usesInverseManualRateUi(
+                          baseCurrency,
+                          currentCurrency,
+                        );
+                        final summaryRate = inverseUi && currentDisplayedRate > 0
+                            ? 1 / currentDisplayedRate
+                            : currentDisplayedRate;
                         final summary = _checkoutRateSummaryCard(
-                          rate: currentDisplayedRate,
-                          baseCurrency: baseCurrency,
-                          quoteCurrency: currentCurrency,
+                          rate: summaryRate,
+                          baseCurrency: inverseUi
+                              ? currentCurrency
+                              : baseCurrency,
+                          quoteCurrency: inverseUi
+                              ? baseCurrency
+                              : currentCurrency,
                           freshnessText:
                               isAutoMode ? marketRatesFreshnessText : null,
                           healthColor: providerHealth.color,
@@ -10340,16 +10703,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           const SizedBox(height: 14),
           _checkoutStepCard(
             number: 4,
-            title: 'Métodos de pago en $currentCurrency',
+            title: 'Métodos de pago en $paymentCurrency',
             subtitle:
-                'Configura cómo recibes pagos en ${_currencyLabel(currentCurrency)}.',
+                'Configura cómo recibes pagos en ${_currencyLabel(paymentCurrency)}.',
             child: Column(
               children: [
-                if (hasSecondary) ...[
+                if (paymentCurrencies.length > 1) ...[
                   _checkoutEditingCurrencyTabs(
-                    currencies: editingCurrencies,
-                    activeCurrency: currentCurrency,
-                    onSelected: _switchCheckoutEditingCurrency,
+                    currencies: paymentCurrencies,
+                    activeCurrency: paymentCurrency,
+                    onSelected: _switchPaymentEditingCurrency,
                   ),
                   const SizedBox(height: 12),
                 ],

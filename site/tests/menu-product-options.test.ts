@@ -22,6 +22,11 @@ import {
   buildOrderLineLabel,
   summarizeCartLineSelection,
   weightSalePresets,
+  parseProductDeliveryConfig,
+  isProductExcludedFromDelivery,
+  getProductDeliverySurcharge,
+  productHasOptionDeliverySurcharge,
+  summarizeProductDeliverySurcharges,
 } from '../app/_lib/menu-product-options';
 
 describe('combined second product is never configured by the shopper', () => {
@@ -326,5 +331,73 @@ describe('venta por peso', () => {
   it('counts each weight line as 1 for cart badges', () => {
     expect(cartBadgeQuantity(papa, 1.5)).toBe(1);
     expect(formatProductPriceLabel(papa, (v) => `$${v}`)).toBe('$1.92 / kg');
+  });
+});
+
+describe('optional product delivery config', () => {
+  it('treats missing delivery config as legacy-compatible defaults', () => {
+    const burger = { id: 'b', nombre: 'Burger', precio: 5, opciones_menu: null };
+    expect(parseProductDeliveryConfig(undefined)).toBeNull();
+    expect(isProductExcludedFromDelivery(burger)).toBe(false);
+    expect(getProductDeliverySurcharge(burger, true)).toBe(0);
+    expect(summarizeProductDeliverySurcharges([{ product: burger, quantity: 2 }], true)).toEqual({
+      total: 0,
+      lines: [],
+    });
+  });
+
+  it('parses exclude and surcharge without affecting pickup', () => {
+    const product = {
+      id: 'soup',
+      nombre: 'Sopa',
+      precio: 4,
+      opciones_menu: {
+        delivery: { exclude: false, surcharge: 1.5, surcharge_label: 'Envase térmico' },
+      },
+    };
+    expect(parseProductMenuOptions(product.opciones_menu)?.delivery).toEqual({
+      exclude: false,
+      surcharge: 1.5,
+      surchargeLabel: 'Envase térmico',
+    });
+    expect(getProductDeliverySurcharge(product, false)).toBe(0);
+    expect(getProductDeliverySurcharge(product, true)).toBe(1.5);
+    expect(summarizeProductDeliverySurcharges([{ product, quantity: 2 }], true).total).toBe(3);
+  });
+
+  it('excludes products from delivery when flagged', () => {
+    const product = {
+      id: 'buffet',
+      nombre: 'Buffet',
+      opciones_menu: { delivery: { excluido: true } },
+    };
+    expect(isProductExcludedFromDelivery(product)).toBe(true);
+    expect(getProductDeliverySurcharge(product, true)).toBe(0);
+  });
+
+  it('resolves packaging surcharge from the selected option (like dependent prices)', () => {
+    const product = {
+      id: 'pork',
+      nombre: 'Pork Belly',
+      precio: 60000,
+      opciones_menu: {
+        delivery: {
+          surcharge_label: 'Empaque',
+          surcharge_grupo: 'tamano',
+          surcharge_por_opcion: { o_500: 1000, o_1kg: 2000 },
+        },
+      },
+    };
+    expect(productHasOptionDeliverySurcharge(product)).toBe(true);
+    expect(getProductDeliverySurcharge(product, true)).toBe(0);
+    expect(getProductDeliverySurcharge(product, true, { grupos: { tamano: ['o_500'] } })).toBe(1000);
+    expect(getProductDeliverySurcharge(product, true, { grupos: { tamano: ['o_1kg'] } })).toBe(2000);
+    expect(getProductDeliverySurcharge(product, false, { grupos: { tamano: ['o_1kg'] } })).toBe(0);
+    expect(
+      summarizeProductDeliverySurcharges(
+        [{ product, quantity: 2, selection: { grupos: { tamano: ['o_1kg'] } } }],
+        true,
+      ).total,
+    ).toBe(4000);
   });
 });

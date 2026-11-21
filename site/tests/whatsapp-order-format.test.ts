@@ -258,6 +258,25 @@ describe('merchant comanda from stored snapshots', () => {
       'query=7.8,-72.2',
     ]) expect(message).toContain(value);
   });
+  it('delivery product packaging surcharge appears in payment summary', () => {
+    const message = buildDetailedMerchantWhatsappText({
+      ...order,
+      details: {
+        ...order.details,
+        subtotal_moneda_checkout: 35000,
+        recargo_delivery_productos_moneda_checkout: 2000,
+        recargo_delivery_productos_detalle: [
+          { label: 'Envase térmico', total: 2000 },
+        ],
+        costo_delivery_moneda_checkout: 3500,
+        total_moneda_checkout: 40500,
+        delivery: { mode: 'delivery', address: 'Calle Preview 1' },
+      },
+    });
+    expect(message).toContain('Envase térmico');
+    expect(message).toContain('2.000');
+    expect(message).toContain('Costo de delivery');
+  });
   it('out-of-zone delivery with fee pending shows A Acordar title and total + DELIVERY', () => {
     const message = buildDetailedMerchantWhatsappText({
       ...order,

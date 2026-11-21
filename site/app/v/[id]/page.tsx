@@ -112,9 +112,13 @@ import {
   formatProductPriceLabel,
   cartBadgeQuantity,
   formatWeightLabel,
+  getProductDeliverySurcharge,
+  getProductDeliverySurchargeLabel,
   getProductOptionsSummary,
   getProductMinimumPrice,
   getWeightSaleConfig,
+  isProductExcludedFromDelivery,
+  productHasOptionDeliverySurcharge,
   isServicioAdicionalName,
   isSoldByWeight,
   normalizeWeightKg,
@@ -125,6 +129,7 @@ import {
   parseProductPersonalization,
   validateCustomizationSelection,
   summarizeCartLineSelection,
+  summarizeProductDeliverySurcharges,
   validateOptionGroupSelection,
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
@@ -3206,7 +3211,20 @@ export default function PublicMenuPage() {
       }),
   });
   const deliveryCost = deliveryQuote.fee;
-  const orderGrandTotal = orderSubtotal + deliveryCost;
+  const productDeliverySurchargeSummary = useMemo(
+    () =>
+      summarizeProductDeliverySurcharges(
+        cartItems.map((item) => ({
+          product: item.product,
+          quantity: item.quantity,
+          selection: item.selection,
+        })),
+        isDeliveryOrder,
+      ),
+    [cartItems, isDeliveryOrder],
+  );
+  const productDeliverySurcharge = productDeliverySurchargeSummary.total;
+  const orderGrandTotal = orderSubtotal + productDeliverySurcharge + deliveryCost;
   const brandingCheckoutConfig = useMemo(
     () => ({
       currencies: menuData?.checkoutExchange?.currencies ?? [],
@@ -3383,12 +3401,31 @@ export default function PublicMenuPage() {
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+  const productDeliverySurchargeConverted = convertFromBaseCurrency(
+    productDeliverySurcharge,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
   const orderGrandTotalConverted = convertFromBaseCurrency(
     orderGrandTotal,
     businessBaseCurrency,
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+  const productDeliverySurchargeLineLabel = (() => {
+    if (!isDeliveryOrder || productDeliverySurcharge <= 0) return null;
+    const labels = [
+      ...new Set(
+        productDeliverySurchargeSummary.lines
+          .map((line) => line.label.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (labels.length === 1) return labels[0];
+    if (labels.length > 1) return 'Recargos de delivery';
+    return 'Empaque / delivery';
+  })();
   const showEngineDeliveryLine = isDeliveryOrder && deliveryQuote.applied;
   const deliveryOutOfZoneAllowed = Boolean(deliveryQuote.outOfZone && !deliveryQuote.blocked);
   const deliveryAreaZonesForMap = useMemo(() => {
@@ -4011,23 +4048,41 @@ export default function PublicMenuPage() {
       imageUrl: string | null;
       imageSourceUrl: string | null;
       available: boolean;
+      unavailableLabel: string | null;
       optionsSummary: string | null;
     }>> = {};
     for (const categoria of categoriasConProductos) {
-      map[categoria.id] = categoria.productos.map((producto) => ({
-        id: producto.id,
-        name: producto.nombre,
-        description: (producto.descripcion ?? '').trim(),
-        priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
-        // List tiles ~124 CSS px @2–3x → cold card WebP (360w) for sharpness.
-        imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
-        imageSourceUrl: (producto.imagen_url ?? '').trim() || null,
-        available: producto.disponible !== false,
-        optionsSummary: getProductOptionsSummary(producto),
-      }));
+      map[categoria.id] = categoria.productos.map((producto) => {
+        const excludedFromDelivery =
+          isDeliveryOrder && isProductExcludedFromDelivery(producto);
+        const deliverySurcharge = getProductDeliverySurcharge(producto, isDeliveryOrder);
+        const surchargeLabel = getProductDeliverySurchargeLabel(producto);
+        const basePriceLabel = formatProductPriceLabel(producto, formatUpsellPrice);
+        const priceLabel = excludedFromDelivery
+          ? basePriceLabel
+          : productHasOptionDeliverySurcharge(producto) && isDeliveryOrder
+            ? `${basePriceLabel} · +${surchargeLabel || 'empaque'} según opción`
+            : deliverySurcharge > 0
+              ? `${basePriceLabel} + ${formatUpsellPrice(deliverySurcharge)}${
+                  surchargeLabel ? ` (${surchargeLabel})` : ''
+                }`
+              : basePriceLabel;
+        return {
+          id: producto.id,
+          name: producto.nombre,
+          description: (producto.descripcion ?? '').trim(),
+          priceLabel,
+          // List tiles ~124 CSS px @2–3x → cold card WebP (360w) for sharpness.
+          imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
+          imageSourceUrl: (producto.imagen_url ?? '').trim() || null,
+          available: producto.disponible !== false && !excludedFromDelivery,
+          unavailableLabel: excludedFromDelivery ? 'No delivery' : null,
+          optionsSummary: getProductOptionsSummary(producto),
+        };
+      });
     }
     return map;
-  }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice]);
+  }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice, isDeliveryOrder]);
 
   function selectKioskFulfillment(next: KioskFulfillment): KioskFulfillment | null {
     if (scheduleClosed) return null;
@@ -4042,6 +4097,21 @@ export default function PublicMenuPage() {
     setKioskFulfillment(resolved);
     setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
     setSearchQuery('');
+    if (resolved === 'delivery') {
+      setCart((prev) => {
+        let changed = false;
+        const nextCart = { ...prev };
+        for (const cartKey of Object.keys(nextCart)) {
+          const { productId } = parseCartLineKey(cartKey);
+          const product = productById.get(productId);
+          if (product && isProductExcludedFromDelivery(product)) {
+            delete nextCart[cartKey];
+            changed = true;
+          }
+        }
+        return changed ? nextCart : prev;
+      });
+    }
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, resolved);
     }
@@ -4470,6 +4540,14 @@ export default function PublicMenuPage() {
                   <span>Subtotal</span>
                   <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                 </div>
+                {productDeliverySurchargeLineLabel ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{productDeliverySurchargeLineLabel}</span>
+                    <span className="font-semibold">
+                      {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                    </span>
+                  </div>
+                ) : null}
                 {isDeliveryOrder && deliveryLineLabel ? (
                   <div className="flex items-center justify-between gap-3">
                     <span>{deliveryLineLabel}</span>
@@ -5223,6 +5301,10 @@ export default function PublicMenuPage() {
     }
     const product = productById.get(productId);
     if (!product) return;
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
 
     const category = categoryByProductId.get(productId) ?? null;
     if (menuLineInvalid(product, selection, productById)) return;
@@ -5246,6 +5328,10 @@ export default function PublicMenuPage() {
     const product = productById.get(productId);
     const category = categoryByProductId.get(productId) ?? null;
     if (!product) return;
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
 
     if (productRequiresConfiguration(product, category)) {
       setProductOptionsSheet({ open: true, productId });
@@ -5589,6 +5675,12 @@ export default function PublicMenuPage() {
       paymentMeta.currency,
       paymentMeta.exchangeRate,
     );
+    const productDeliverySurchargeCheckoutConverted = convertFromBaseCurrency(
+      productDeliverySurcharge,
+      businessBaseCurrency,
+      paymentMeta.currency,
+      paymentMeta.exchangeRate,
+    );
     const totalConverted = convertFromBaseCurrency(
       orderGrandTotal,
       businessBaseCurrency,
@@ -5650,6 +5742,13 @@ export default function PublicMenuPage() {
       subtotal_moneda_checkout: subtotalConverted,
       costo_delivery: deliveryCost,
       costo_delivery_moneda_checkout: deliveryConverted,
+      ...(productDeliverySurcharge > 0
+        ? {
+            recargo_delivery_productos: productDeliverySurcharge,
+            recargo_delivery_productos_moneda_checkout: productDeliverySurchargeCheckoutConverted,
+            recargo_delivery_productos_detalle: productDeliverySurchargeSummary.lines,
+          }
+        : {}),
       total: orderGrandTotal,
       total_moneda_checkout: totalConverted,
       items: orderItems,
@@ -7136,7 +7235,13 @@ export default function PublicMenuPage() {
           canAdd={
             !scheduleClosed &&
             (inCatalogSession || isAssistedMode || checkoutFulfillmentOptions.length > 0) &&
-            productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
+            productById.get(productOptionsSheet.productId ?? '')?.disponible !== false &&
+            !(
+              isDeliveryOrder &&
+              isProductExcludedFromDelivery(
+                productById.get(productOptionsSheet.productId ?? '') ?? {},
+              )
+            )
           }
           product={
             productOptionsSheet.productId
@@ -9099,6 +9204,14 @@ export default function PublicMenuPage() {
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                         </p>
+                        {productDeliverySurchargeLineLabel ? (
+                          <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
+                            <span>{productDeliverySurchargeLineLabel}</span>
+                            <span className="font-semibold">
+                              {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                            </span>
+                          </p>
+                        ) : null}
                         {isDeliveryOrder && deliveryLineLabel ? (
                           <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
                             <span>{deliveryLineLabel}</span>
@@ -9268,6 +9381,14 @@ export default function PublicMenuPage() {
                         {formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}
                       </span>
                     </div>
+                    {productDeliverySurchargeLineLabel ? (
+                      <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                        <span>{productDeliverySurchargeLineLabel}</span>
+                        <span className="font-semibold tabular-nums">
+                          {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                        </span>
+                      </div>
+                    ) : null}
                     {isDeliveryOrder && deliveryLineLabel ? (
                       <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
                         <span>{deliveryLineLabel}</span>

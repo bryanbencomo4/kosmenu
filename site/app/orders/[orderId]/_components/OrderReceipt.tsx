@@ -34,6 +34,9 @@ type OrderReceiptProps = {
   currentStep: number;
   items: ReceiptItem[];
   subtotalLabel: string;
+  /** Optional packaging / product delivery surcharge line (label + amount). */
+  packagingLabel?: string | null;
+  packagingAmountLabel?: string | null;
   deliveryLabel: string | null;
   deliveryFeeNote: string | null;
   cashPaidLabel: string | null;
@@ -547,6 +550,12 @@ export function OrderReceipt(props: OrderReceiptProps) {
               <span>Subtotal</span>
               <span className="tabular-nums text-slate-700">{props.subtotalLabel}</span>
             </p>
+            {props.packagingLabel && props.packagingAmountLabel ? (
+              <p className="flex items-center justify-between">
+                <span>{props.packagingLabel}</span>
+                <span className="tabular-nums text-slate-700">{props.packagingAmountLabel}</span>
+              </p>
+            ) : null}
             {props.deliveryLabel ? (
               <p className="flex items-center justify-between">
                 <span>Entrega</span>

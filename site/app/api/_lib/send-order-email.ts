@@ -25,6 +25,9 @@ export type SendOrderEmailInput = {
   items?: SendOrderEmailItem[];
   currency?: string;
   subtotal?: number | null;
+  /** Optional packaging / product delivery surcharge (checkout currency). */
+  packagingFee?: number | null;
+  packagingLabel?: string | null;
   deliveryFee?: number | null;
   total?: number | null;
   fulfillmentLabel?: string;
@@ -119,10 +122,14 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
   }, 0);
 
   const subtotalValue = Number.isFinite(input.subtotal ?? NaN) ? Number(input.subtotal) : itemsSum;
+  const packagingValue = Number.isFinite(input.packagingFee ?? NaN)
+    ? Math.max(0, Number(input.packagingFee))
+    : 0;
+  const packagingLabel = (input.packagingLabel ?? '').toString().trim().slice(0, 80) || 'Empaque / delivery';
   const deliveryValue = Number.isFinite(input.deliveryFee ?? NaN) ? Math.max(0, Number(input.deliveryFee)) : 0;
   const totalValue = Number.isFinite(input.total ?? NaN)
     ? Number(input.total)
-    : subtotalValue + deliveryValue;
+    : subtotalValue + packagingValue + deliveryValue;
 
   const itemRows = items
     .map((item) => {
@@ -270,6 +277,16 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
               <td style="padding:18px 28px 8px 28px;">
                 <p style="margin:0 0 8px 0;color:#FFFFFF;font-size:16px;font-weight:800;">Resumen de tu compra</p>
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${itemRows}</table>
+                ${
+                  packagingValue > 0
+                    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;">
+                  <tr>
+                    <td style="color:#A1A1AA;font-size:14px;">${escapeHtml(packagingLabel)}</td>
+                    <td align="right" style="color:#A1A1AA;font-size:14px;font-weight:700;">${escapeHtml(formatMoney(packagingValue, currency))}</td>
+                  </tr>
+                </table>`
+                    : ''
+                }
                 ${
                   deliveryValue > 0
                     ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;">

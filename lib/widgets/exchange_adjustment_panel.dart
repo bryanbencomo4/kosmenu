@@ -95,6 +95,21 @@ class ExchangeAdjustmentPanel extends StatelessWidget {
               ),
               if (enabled) ...[
                 const SizedBox(height: 8),
+                // Same orientation as the reference field ("1 VES = X COP").
+                // Never write this into the TextField — that would re-anchor
+                // the factor and break the floating adjustment.
+                if (showApplied &&
+                    referenceValue != null &&
+                    _currentEquivalentReference() != null) ...[
+                  _ReferenceSnapshotCard(
+                    establishedLabel:
+                        '1 $referenceFromCode = ${formatAdjustmentReferenceInput(referenceValue!)} $referenceToCode',
+                    currentLabel:
+                        '1 $referenceFromCode ≈ ${formatAdjustmentReferenceInput(_currentEquivalentReference()!)} $referenceToCode',
+                    accent: accent,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextField(
                   controller: referenceController,
                   keyboardType: const TextInputType.numberWithOptions(
@@ -111,7 +126,9 @@ class ExchangeAdjustmentPanel extends StatelessWidget {
                   decoration: InputDecoration(
                     labelText: '1 $referenceFromCode equivale a',
                     suffixText: ' $referenceToCode',
-                    helperText: 'Referencia inicial del ajuste',
+                    helperText: referenceValue == null
+                        ? 'Referencia inicial del ajuste'
+                        : 'Escribe un valor nuevo para actualizar el ajuste',
                     helperStyle: const TextStyle(color: _soft, fontSize: 11),
                     errorText: issue.isEmpty ? null : issue,
                     errorMaxLines: 3,
@@ -233,12 +250,103 @@ class ExchangeAdjustmentPanel extends StatelessWidget {
     );
   }
 
+  /// Reference-field orientation of [effectiveRate].
+  /// inverted (1 VES = X COP) => 1 / effectiveRate; else effectiveRate.
+  double? _currentEquivalentReference() {
+    if (!effectiveRate.isFinite || effectiveRate <= 0) {
+      return null;
+    }
+    final inverted = referenceFromCode == quoteCurrency;
+    final value = inverted ? 1 / effectiveRate : effectiveRate;
+    if (!value.isFinite || value <= 0) {
+      return null;
+    }
+    return value;
+  }
+
   static Widget _detail(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Text(
         text,
         style: const TextStyle(color: _muted, fontSize: 11, height: 1.35),
+      ),
+    );
+  }
+}
+
+/// Read-only snapshot: what the merchant locked in vs what it equals now.
+/// Display-only — never feeds back into [referenceController].
+class _ReferenceSnapshotCard extends StatelessWidget {
+  const _ReferenceSnapshotCard({
+    required this.establishedLabel,
+    required this.currentLabel,
+    required this.accent,
+  });
+
+  final String establishedLabel;
+  final String currentLabel;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF120E25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Referencia establecida',
+            style: TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            establishedLabel,
+            style: const TextStyle(
+              color: Color(0xFFCBD5E1),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Equivalente actual',
+            style: TextStyle(
+              color: accent.withValues(alpha: 0.9),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            currentLabel,
+            style: const TextStyle(
+              color: Color(0xFFF8FAFC),
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Solo lectura. Si quieres cambiar el ajuste, edita el campo de abajo.',
+            style: TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 11,
+              height: 1.3,
+            ),
+          ),
+        ],
       ),
     );
   }

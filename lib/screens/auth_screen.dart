@@ -32,9 +32,55 @@ import 'package:url_launcher/url_launcher.dart';
 /// mounted by the time a merchant reaches the profile. Popping then revealed
 /// the dashboard itself (the first route) with a dead session instead of the
 /// login screen.
+const String kMerchantLastComercioKeyPrefix = 'merchant_last_comercio_v1';
+
 void returnToAuthGate(BuildContext context) {
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const AuthGate()),
+    (route) => false,
+  );
+}
+
+/// Clears the remembered comercio and remounts [AuthGate] so multi-comercio
+/// accounts see the picker again without signing out. Safe for single-comercio
+/// accounts: AuthGate auto-enters their only option.
+Future<void> switchMerchantAccess(BuildContext context) async {
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  if (userId != null && userId.isNotEmpty) {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$kMerchantLastComercioKeyPrefix:$userId');
+  }
+  SupabaseConfig.clearCurrentComercioId();
+  MerchantSession.clear();
+  clearMerchantPresence();
+  if (!context.mounted) return;
+  returnToAuthGate(context);
+}
+
+/// Applies [option] and remounts the panel for that comercio (no login, no
+/// picker). Used from account/profile when the user already has a session.
+Future<void> enterMerchantAccess(
+  BuildContext context,
+  MerchantAccessOption option,
+) async {
+  final userId = Supabase.instance.client.auth.currentUser?.id.trim() ?? '';
+  if (userId.isEmpty) return;
+
+  final prefs = await SharedPreferences.getInstance();
+  MerchantSession.set(role: option.role, isOwner: option.isOwner);
+  await prefs.setString(
+    '$kMerchantLastComercioKeyPrefix:$userId',
+    option.comercioId,
+  );
+  syncMerchantPresence(
+    name: option.nombre.trim().isEmpty ? 'Tu cuenta' : option.nombre,
+    logoUrl: option.logoUrl,
+    slug: option.slug,
+  );
+  SupabaseConfig.setCurrentComercioId(option.comercioId, slug: option.slug);
+  if (!context.mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => AuthGate(forcedAccess: option)),
     (route) => false,
   );
 }
@@ -52,7 +98,11 @@ class _AuthBootResult {
 }
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
+  const AuthGate({super.key, this.forcedAccess});
+
+  /// When set (e.g. after switching menú from profile), skip the picker and
+  /// enter this comercio directly.
+  final MerchantAccessOption? forcedAccess;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -60,69 +110,25 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
-  static const String _lastComercioKeyPrefix = 'merchant_last_comercio_v1';
+  static const String _lastComercioKeyPrefix = kMerchantLastComercioKeyPrefix;
   Future<_AuthBootResult>? _targetFuture;
   String _targetUserId = '';
   MerchantAccessOption? _forcedAccess;
   late final Future<AndroidAppRelease?> _androidUpdateFuture =
       AppUpdateService.checkRequiredAndroidUpdate();
 
+  @override
+  void initState() {
+    super.initState();
+    _forcedAccess = widget.forcedAccess;
+  }
+
   Future<_AuthBootResult> _resolveTargetForUser(String userId) async {
     Future<_AuthBootResult> resolveOnce() async {
-      try {
-        await Supabase.instance.client.rpc('accept_pending_comercio_invites');
-      } catch (_) {}
-
-      final ownedRows = await Supabase.instance.client
-          .from('comercios')
-          .select('id, slug, nombre, logo_url')
-          .eq('owner_id', userId);
-      final memberRows = await Supabase.instance.client
-          .from('comercio_members')
-          .select('comercio_id, role, comercios(id, slug, nombre, logo_url)')
-          .eq('user_id', userId)
-          .eq('status', 'active');
-
-      final options = <MerchantAccessOption>[];
-      final seen = <String>{};
-
-      for (final raw in ownedRows as List? ?? const []) {
-        if (raw is! Map) continue;
-        final map = Map<String, dynamic>.from(raw);
-        final id = (map['id'] ?? '').toString().trim();
-        if (id.isEmpty || !seen.add(id)) continue;
-        options.add(
-          MerchantAccessOption(
-            comercioId: id,
-            nombre: (map['nombre'] ?? 'Tu restaurante').toString(),
-            slug: map['slug']?.toString(),
-            logoUrl: map['logo_url']?.toString(),
-            role: MerchantStaffRole.administrador,
-            isOwner: true,
-          ),
-        );
-      }
-
-      for (final raw in memberRows as List? ?? const []) {
-        if (raw is! Map) continue;
-        final map = Map<String, dynamic>.from(raw);
-        final nested = map['comercios'];
-        final comercio = nested is Map
-            ? Map<String, dynamic>.from(nested)
-            : <String, dynamic>{'id': map['comercio_id']};
-        final id = (comercio['id'] ?? map['comercio_id'] ?? '').toString().trim();
-        if (id.isEmpty || !seen.add(id)) continue;
-        options.add(
-          MerchantAccessOption(
-            comercioId: id,
-            nombre: (comercio['nombre'] ?? 'Tu restaurante').toString(),
-            slug: comercio['slug']?.toString(),
-            logoUrl: comercio['logo_url']?.toString(),
-            role: MerchantStaffRoleUi.fromRaw(map['role']?.toString()),
-            isOwner: false,
-          ),
-        );
-      }
+      final options = await loadMerchantAccessOptions(
+        userId: userId,
+        acceptPendingInvites: true,
+      );
 
       if (options.isEmpty) {
         SupabaseConfig.clearCurrentComercioId();
@@ -145,9 +151,11 @@ class _AuthGateState extends State<AuthGate> {
         selected = options.firstWhere(
           (o) => o.comercioId == _forcedAccess!.comercioId,
         );
-      } else if (options.length > 1 &&
-          (lastId == null ||
-              !options.any((o) => o.comercioId == lastId))) {
+      } else if (options.length > 1) {
+        // Multi-comercio accounts (e.g. two menus under one owner) always
+        // pick explicitly. Never auto-enter via lastId — otherwise adding a
+        // second comercio never surfaces the picker. Single-comercio accounts
+        // never hit this branch.
         return _AuthBootResult(options: options);
       } else if (lastId != null &&
           options.any((o) => o.comercioId == lastId)) {

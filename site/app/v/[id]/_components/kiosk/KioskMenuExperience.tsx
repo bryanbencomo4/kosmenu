@@ -861,7 +861,11 @@ export const KioskMenuExperience = forwardRef<
                           )
                         ) : null}
                         <span className={product.available ? 'hidden sm:inline' : undefined}>
-                          {!product.available ? 'No disponible' : product.optionsSummary ? 'Elegir' : 'Agregar'}
+                          {!product.available
+                            ? product.unavailableLabel || 'No disponible'
+                            : product.optionsSummary
+                              ? 'Elegir'
+                              : 'Agregar'}
                         </span>
                       </span>
                     ) : null}

@@ -98,6 +98,9 @@ class PedidoModel {
   double? get checkoutDeliverySnapshot =>
       _toDoubleOrNull(detalles['costo_delivery_moneda_checkout']);
 
+  double? get checkoutPackagingSnapshot =>
+      _toDoubleOrNull(detalles['recargo_delivery_productos_moneda_checkout']);
+
   double? get exchangeRateSnapshot =>
       _toDoubleOrNull(detalles['tasa_cambio_snapshot']);
 
@@ -133,6 +136,37 @@ class PedidoModel {
     return deliveryCost;
   }
 
+  double packagingForDisplay(String currency) {
+    final checkout = checkoutCurrencySnapshot;
+    final checkoutPackaging = checkoutPackagingSnapshot;
+    if (checkout != null &&
+        checkoutPackaging != null &&
+        currency.trim().toUpperCase() == checkout) {
+      return checkoutPackaging;
+    }
+    return _toDoubleOrNull(detalles['recargo_delivery_productos']) ?? 0;
+  }
+
+  String packagingLabelForDisplay() {
+    final amount = packagingForDisplay(currencyForDisplay());
+    if (amount <= 0) return '';
+    final raw = detalles['recargo_delivery_productos_detalle'];
+    if (raw is List) {
+      final labels = <String>{};
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        final label =
+            (entry['label'] ?? entry['surchargeLabel'] ?? '')
+                .toString()
+                .trim();
+        if (label.isNotEmpty) labels.add(label);
+      }
+      if (labels.length == 1) return labels.first;
+      if (labels.length > 1) return 'Recargos de delivery';
+    }
+    return 'Empaque / delivery';
+  }
+
   double subtotalForDisplay(String currency, double displayTotal) {
     final checkout = checkoutCurrencySnapshot;
     final checkoutSubtotal = checkoutSubtotalSnapshot;
@@ -143,7 +177,10 @@ class PedidoModel {
     }
     final stored = _toDoubleOrNull(detalles['subtotal']);
     if (stored != null && stored > 0) return stored;
-    final inferred = displayTotal - deliveryForDisplay(currency);
+    final inferred =
+        displayTotal -
+        deliveryForDisplay(currency) -
+        packagingForDisplay(currency);
     return inferred > 0 ? inferred : displayTotal;
   }
 

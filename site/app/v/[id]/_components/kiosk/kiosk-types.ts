@@ -23,6 +23,8 @@ export type KioskProduct = {
   /** Original Storage URL for cold-variant upgrade / hot fallback. */
   imageSourceUrl?: string | null;
   available: boolean;
+  /** Overrides the default "No disponible" chip when `available` is false. */
+  unavailableLabel?: string | null;
   /** Only set for products with option groups enabled ("3 tamaños disponibles"). */
   optionsSummary?: string | null;
 };

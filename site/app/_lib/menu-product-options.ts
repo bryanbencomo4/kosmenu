@@ -59,12 +59,36 @@ export type WeightSaleConfig = {
   maximo: number;
 };
 
+/**
+ * Optional per-product delivery rules (stored under `opciones_menu.delivery`).
+ * Missing / null / empty ⇒ current behavior (allowed for delivery, no surcharge).
+ *
+ * Surcharge modes (retrocompatible):
+ * - Fixed: `surcharge` > 0 and no `surcharge_por_opcion`
+ * - By option: non-empty `surcharge_por_opcion` (+ `surcharge_grupo`) —
+ *   amount depends on the selected choice in that group (same idea as
+ *   dependent option prices / `precios_por_tamano`).
+ */
+export type ProductDeliveryConfig = {
+  /** When true, product cannot be ordered with delivery fulfillment. */
+  exclude: boolean;
+  /** Fixed extra amount (base currency) per unit when the order is delivery. */
+  surcharge: number;
+  /** Why the surcharge applies (e.g. packaging). Shown to the customer. */
+  surchargeLabel: string;
+  /** Option group whose selection drives `surchargePorOpcion`. */
+  surchargeGrupo?: string;
+  /** Map of option id → surcharge amount (base currency). */
+  surchargePorOpcion?: Record<string, number>;
+};
+
 export type ProductMenuOptions = {
   tamanos?: MenuSizeOption[];
   ajustes?: MenuAdjustmentOption[];
   grupos?: MenuOptionGroup[];
   personalizacion?: ProductPersonalization;
   venta_por_peso?: WeightSaleConfig;
+  delivery?: ProductDeliveryConfig;
 };
 
 /** Common quick picks shown in the weight sheet (kg). */
@@ -197,6 +221,139 @@ export function parseWeightSaleConfig(raw: unknown): WeightSaleConfig | null {
   return { unidad: 'kg', paso, minimo, maximo };
 }
 
+const DELIVERY_OPTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Parse optional product delivery rules. Returns null when unset (legacy products). */
+export function parseProductDeliveryConfig(raw: unknown): ProductDeliveryConfig | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const exclude = row.exclude === true || row.excluido === true || row.excluded === true;
+  const surchargeRaw = toNumber(row.surcharge ?? row.recargo ?? row.extra);
+  const surcharge =
+    surchargeRaw != null && Number.isFinite(surchargeRaw) && surchargeRaw > 0
+      ? Math.round(surchargeRaw * 100) / 100
+      : 0;
+  const surchargeLabel = (row.surcharge_label ?? row.surchargeLabel ?? row.motivo ?? row.reason ?? '')
+    .toString()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  const surchargeGrupo = (row.surcharge_grupo ?? row.surchargeGrupo ?? row.grupo ?? '')
+    .toString()
+    .trim()
+    .slice(0, 64);
+  const surchargePorOpcion: Record<string, number> = {};
+  const rawMap = row.surcharge_por_opcion ?? row.surchargePorOpcion ?? row.recargo_por_opcion;
+  if (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) {
+    for (const [optionId, value] of Object.entries(rawMap as Record<string, unknown>)) {
+      const id = optionId.trim();
+      if (!DELIVERY_OPTION_ID_PATTERN.test(id)) continue;
+      const amount = toNumber(value);
+      if (amount == null || !Number.isFinite(amount) || amount <= 0) continue;
+      surchargePorOpcion[id] = Math.round(amount * 100) / 100;
+    }
+  }
+  const hasByOption = Object.keys(surchargePorOpcion).length > 0;
+  if (!exclude && surcharge <= 0 && !hasByOption) return null;
+  const hasSurcharge = surcharge > 0 || hasByOption;
+  return {
+    exclude,
+    surcharge,
+    surchargeLabel: hasSurcharge ? surchargeLabel || 'Empaque / delivery' : '',
+    ...(hasByOption && DELIVERY_OPTION_ID_PATTERN.test(surchargeGrupo)
+      ? { surchargeGrupo, surchargePorOpcion }
+      : hasByOption
+        ? { surchargePorOpcion }
+        : {}),
+  };
+}
+
+export function getProductDeliveryConfig(product: ProductLike): ProductDeliveryConfig | null {
+  if (!product.opciones_menu || typeof product.opciones_menu !== 'object') return null;
+  const record = product.opciones_menu as Record<string, unknown>;
+  return parseProductDeliveryConfig(record.delivery);
+}
+
+export function isProductExcludedFromDelivery(product: ProductLike): boolean {
+  return getProductDeliveryConfig(product)?.exclude === true;
+}
+
+export function productHasOptionDeliverySurcharge(product: ProductLike): boolean {
+  const config = getProductDeliveryConfig(product);
+  if (!config || config.exclude) return false;
+  return Boolean(config.surchargePorOpcion && Object.keys(config.surchargePorOpcion).length > 0);
+}
+
+/**
+ * Per-unit delivery surcharge in base currency (0 when not delivery or unset).
+ * When `surcharge_por_opcion` is set, requires `selection` to resolve the amount.
+ */
+export function getProductDeliverySurcharge(
+  product: ProductLike,
+  isDelivery: boolean,
+  selection?: CartLineSelection | null,
+): number {
+  if (!isDelivery) return 0;
+  const config = getProductDeliveryConfig(product);
+  if (!config || config.exclude) return 0;
+  const map = config.surchargePorOpcion;
+  if (map && Object.keys(map).length > 0) {
+    const groupId = config.surchargeGrupo;
+    if (!groupId || !selection?.grupos) return 0;
+    const selected = selection.grupos[groupId] ?? [];
+    for (const optionId of selected) {
+      const amount = map[optionId];
+      if (amount != null && amount > 0) return amount;
+    }
+    return 0;
+  }
+  return config.surcharge > 0 ? config.surcharge : 0;
+}
+
+export function getProductDeliverySurchargeLabel(product: ProductLike): string {
+  const config = getProductDeliveryConfig(product);
+  if (!config || config.exclude) return '';
+  const hasByOption = Boolean(config.surchargePorOpcion && Object.keys(config.surchargePorOpcion).length > 0);
+  if (!hasByOption && config.surcharge <= 0) return '';
+  return config.surchargeLabel || 'Empaque / delivery';
+}
+
+export type ProductDeliverySurchargeLine = {
+  productId: string;
+  productName: string;
+  label: string;
+  unitSurcharge: number;
+  quantity: number;
+  total: number;
+};
+
+/** Aggregate delivery packaging/surcharge lines for cart items (delivery only). */
+export function summarizeProductDeliverySurcharges(
+  items: Array<{ product: ProductLike; quantity: number; selection?: CartLineSelection | null }>,
+  isDelivery: boolean,
+): { total: number; lines: ProductDeliverySurchargeLine[] } {
+  if (!isDelivery) return { total: 0, lines: [] };
+  const lines: ProductDeliverySurchargeLine[] = [];
+  let total = 0;
+  for (const item of items) {
+    const unit = getProductDeliverySurcharge(item.product, true, item.selection);
+    if (unit <= 0) continue;
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    const lineTotal = Math.round(unit * quantity * 100) / 100;
+    total += lineTotal;
+    lines.push({
+      productId: (item.product.id ?? '').toString(),
+      productName: (item.product.nombre ?? 'Producto').toString().trim() || 'Producto',
+      label: getProductDeliverySurchargeLabel(item.product),
+      unitSurcharge: unit,
+      quantity,
+      total: lineTotal,
+    });
+  }
+  return { total: Math.round(total * 100) / 100, lines };
+}
+
 /** Round to grams precision and clamp to the product weight rules. */
 export function normalizeWeightKg(value: number, config: WeightSaleConfig): number {
   if (!Number.isFinite(value) || value <= 0) return config.minimo;
@@ -266,13 +423,15 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
   const grupos = record.activadas === true ? parseOptionGroups(record.grupos) : [];
   const personalizacion = parseProductPersonalization(raw);
   const venta_por_peso = parseWeightSaleConfig(record.venta_por_peso);
+  const delivery = parseProductDeliveryConfig(record.delivery);
 
   if (
     tamanos.length === 0 &&
     ajustes.length === 0 &&
     grupos.length === 0 &&
     !personalizacion &&
-    !venta_por_peso
+    !venta_por_peso &&
+    !delivery
   ) {
     return null;
   }
@@ -283,6 +442,7 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
     ...(grupos.length > 0 ? { grupos } : {}),
     ...(personalizacion ? { personalizacion } : {}),
     ...(venta_por_peso ? { venta_por_peso } : {}),
+    ...(delivery ? { delivery } : {}),
   };
 }
 

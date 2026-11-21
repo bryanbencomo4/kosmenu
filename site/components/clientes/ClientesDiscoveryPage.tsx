@@ -83,6 +83,32 @@ const MERCHANT_BANNER_MESSAGES = [
   'Llega a más clientes cerca de ti. Publica tu menú hoy por $10',
 ] as const;
 
+/** Hero slogans — short, salesy, local-discovery hooks. */
+function HeroBusinessLogo({
+  logoUrl,
+  name,
+}: {
+  logoUrl: string | null | undefined;
+  name: string;
+}) {
+  const initial = (name.trim().charAt(0) || '?').toUpperCase();
+  return (
+    <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-white/95 text-sm font-black text-[#6D28D9] shadow-md ring-2 ring-white/80 sm:h-12 sm:w-12 sm:text-base">
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <span aria-hidden>{initial}</span>
+      )}
+    </span>
+  );
+}
+
 function nextMerchantBannerMessage(): string {
   if (typeof window === 'undefined') return MERCHANT_BANNER_MESSAGES[0];
   const last = Number.parseInt(window.localStorage.getItem(MERCHANT_BANNER_MSG_KEY) ?? '-1', 10);
@@ -128,9 +154,14 @@ type DirectoryBusiness = {
   openLabel?: string | null;
   productNames?: string[];
   showcaseDishes?: DirectoryShowcaseDish[];
+  currencies?: string[];
+  paymentChannels?: string[];
+  acceptsVesBcv?: boolean;
   matchedDish?: string | null;
   matchScore?: number;
 };
+
+const CURRENCY_FILTER_OPTIONS = ['USD', 'VES', 'COP'] as const;
 
 function mergeUniqueNames(base: string[] | undefined, extra: string[] | undefined) {
   const out = [...(base ?? [])];
@@ -245,7 +276,7 @@ function buildCardMediaSlides(business: DirectoryBusiness): CardMediaSlide[] {
 
 const CARD_MEDIA_HOLD_MS = 4200;
 const CARD_MEDIA_FADE_MS = 480;
-const HERO_MEDIA_HOLD_MS = 4500;
+const HERO_MEDIA_HOLD_MS = 7000;
 const preloadedImages = new Map<string, Promise<boolean>>();
 const preloadedImageResults = new Map<string, boolean>();
 
@@ -549,18 +580,38 @@ function writeFavorites(ids: Set<string>) {
 
 function readUrlState() {
   if (typeof window === 'undefined') {
-    return { q: '', region: '', category: '', sort: 'smart' as SortMode, fav: false };
+    return {
+      q: '',
+      region: '',
+      category: '',
+      sort: 'smart' as SortMode,
+      fav: false,
+      currency: '',
+      payment: '',
+      openNow: false,
+      vesBcv: false,
+    };
   }
   const params = new URLSearchParams(window.location.search);
   const sortRaw = (params.get('sort') ?? 'smart').toLowerCase();
   const sort: SortMode =
     sortRaw === 'near' || sortRaw === 'rated' || sortRaw === 'smart' ? sortRaw : 'smart';
+  const currencyRaw = (params.get('currency') ?? '').trim().toUpperCase();
+  const currency = CURRENCY_FILTER_OPTIONS.includes(
+    currencyRaw as (typeof CURRENCY_FILTER_OPTIONS)[number],
+  )
+    ? currencyRaw
+    : '';
   return {
     q: (params.get('q') ?? '').slice(0, 80),
     region: (params.get('region') ?? '').slice(0, 60),
     category: (params.get('category') ?? '').slice(0, 40),
     sort,
     fav: params.get('fav') === '1',
+    currency,
+    payment: (params.get('payment') ?? '').slice(0, 40),
+    openNow: params.get('openNow') === '1',
+    vesBcv: params.get('vesBcv') === '1',
   };
 }
 
@@ -570,6 +621,10 @@ function syncUrlState(state: {
   category: string;
   sort: SortMode;
   fav: boolean;
+  currency: string;
+  payment: string;
+  openNow: boolean;
+  vesBcv: boolean;
 }) {
   if (typeof window === 'undefined') return;
   const params = new URLSearchParams();
@@ -578,6 +633,10 @@ function syncUrlState(state: {
   if (state.category.trim()) params.set('category', state.category.trim());
   if (state.sort !== 'smart') params.set('sort', state.sort);
   if (state.fav) params.set('fav', '1');
+  if (state.currency.trim()) params.set('currency', state.currency.trim().toUpperCase());
+  if (state.payment.trim()) params.set('payment', state.payment.trim());
+  if (state.openNow) params.set('openNow', '1');
+  if (state.vesBcv) params.set('vesBcv', '1');
   const next = params.toString();
   const path = `${window.location.pathname}${next ? `?${next}` : ''}`;
   window.history.replaceState(null, '', path);
@@ -799,13 +858,32 @@ function RestaurantCard({
             trackPromoClick();
             onSelect?.(business.id);
           }}
-          className={`font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
-            forceRow
-              ? 'line-clamp-1 text-[14px]'
-              : 'line-clamp-2 text-[14px] sm:text-[15px]'
+          className={`flex min-w-0 flex-1 items-start gap-2 font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
+            forceRow ? 'text-[14px]' : 'text-[14px] sm:text-[15px]'
           }`}
         >
-          {business.nombre}
+          <span
+            className={`relative mt-0.5 grid shrink-0 place-items-center overflow-hidden rounded-full bg-violet-50 text-[#6D28D9] ring-1 ring-violet-100 ${
+              forceRow ? 'h-7 w-7 text-[11px]' : 'h-8 w-8 text-xs'
+            }`}
+          >
+            {business.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={business.logoUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <span aria-hidden>
+                {(business.nombre.trim().charAt(0) || '?').toUpperCase()}
+              </span>
+            )}
+          </span>
+          <span className={forceRow ? 'line-clamp-1' : 'line-clamp-2'}>
+            {business.nombre}
+          </span>
         </Link>
         <button
           type="button"
@@ -1023,6 +1101,10 @@ export function ClientesDiscoveryPage() {
   const [category, setCategory] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('smart');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [currencyFilter, setCurrencyFilter] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('');
+  const [openNowOnly, setOpenNowOnly] = useState(false);
+  const [vesBcvOnly, setVesBcvOnly] = useState(false);
   const [urlReady, setUrlReady] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ready' | 'denied'>('idle');
@@ -1039,6 +1121,10 @@ export function ClientesDiscoveryPage() {
   const [draftCategory, setDraftCategory] = useState('');
   const [draftSort, setDraftSort] = useState<SortMode>('smart');
   const [draftRadiusKm, setDraftRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
+  const [draftCurrency, setDraftCurrency] = useState('');
+  const [draftPayment, setDraftPayment] = useState('');
+  const [draftOpenNow, setDraftOpenNow] = useState(false);
+  const [draftVesBcv, setDraftVesBcv] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
@@ -1067,6 +1153,7 @@ export function ClientesDiscoveryPage() {
   const hasLoadedOnceRef = useRef(false);
   const geoAskedRef = useRef(false);
   const geoInFlightRef = useRef(false);
+  const regionRef = useRef('');
   const geoFailsafeRef = useRef(0);
 
   const scrollPromoCarousel = useCallback((direction: -1 | 1) => {
@@ -1162,9 +1249,14 @@ export function ClientesDiscoveryPage() {
       setGeoHelpVisible(false);
       setGeoHint(null);
       // Default to a local radius so far-away restaurants don't flood the feed.
-      setRadiusKm((prev) => prev ?? DEFAULT_NEAR_RADIUS_KM);
+      // Skip when browsing a whole region — that means "show all there".
+      setRadiusKm((prev) => {
+        if (prev != null) return prev;
+        if (regionRef.current.trim()) return null;
+        return DEFAULT_NEAR_RADIUS_KM;
+      });
       // Only flip sort when explicitly requested — never override an active text search.
-      if (opts?.switchToNear) setSortMode('near');
+      if (opts?.switchToNear && !regionRef.current.trim()) setSortMode('near');
       void resolveZoneLabel(next.lat, next.lng).then((label) => {
         if (label) setZoneLabel(label);
       });
@@ -1245,17 +1337,26 @@ export function ClientesDiscoveryPage() {
   useEffect(() => {
     const fromUrl = readUrlState();
     setQuery(fromUrl.q);
+    regionRef.current = fromUrl.region;
     setRegion(fromUrl.region);
     setCategory(fromUrl.category);
     setSortMode(fromUrl.sort);
     setFavoritesOnly(fromUrl.fav);
+    setCurrencyFilter(fromUrl.currency);
+    setPaymentFilter(fromUrl.payment);
+    setOpenNowOnly(fromUrl.openNow);
+    setVesBcvOnly(fromUrl.vesBcv);
     setFavorites(readFavorites());
+    if (fromUrl.region.trim()) {
+      setRadiusKm(null);
+    }
     setUrlReady(true);
     if (!geoAskedRef.current) {
       geoAskedRef.current = true;
       // Ask for location on first visit; use near only when not already searching.
       requestLocation({
-        switchToNear: fromUrl.sort !== 'rated' && !fromUrl.q.trim(),
+        switchToNear:
+          fromUrl.sort !== 'rated' && !fromUrl.q.trim() && !fromUrl.region.trim(),
         forcePrompt: true,
       });
     }
@@ -1294,7 +1395,20 @@ export function ClientesDiscoveryPage() {
 
   useEffect(() => {
     setVisibleCount(pageSize);
-  }, [category, coords, favoritesOnly, pageSize, query, radiusKm, region, sortMode]);
+  }, [
+    category,
+    coords,
+    currencyFilter,
+    favoritesOnly,
+    openNowOnly,
+    pageSize,
+    paymentFilter,
+    query,
+    radiusKm,
+    region,
+    sortMode,
+    vesBcvOnly,
+  ]);
 
   const scrollToResults = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1304,9 +1418,11 @@ export function ClientesDiscoveryPage() {
 
   const selectRegion = useCallback(
     (nextRegion: string) => {
+      regionRef.current = nextRegion;
       setRegion(nextRegion);
       setWhereMenuOpen(false);
       if (nextRegion) {
+        // Region browse = all menus in that state, not "near me" radius.
         setRadiusKm(null);
         setSortMode('smart');
       }
@@ -1404,8 +1520,23 @@ export function ClientesDiscoveryPage() {
       category,
       sort: sortMode,
       fav: favoritesOnly,
+      currency: currencyFilter,
+      payment: paymentFilter,
+      openNow: openNowOnly,
+      vesBcv: vesBcvOnly,
     });
-  }, [category, debouncedQuery, favoritesOnly, region, sortMode, urlReady]);
+  }, [
+    category,
+    currencyFilter,
+    debouncedQuery,
+    favoritesOnly,
+    openNowOnly,
+    paymentFilter,
+    region,
+    sortMode,
+    urlReady,
+    vesBcvOnly,
+  ]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -1696,9 +1827,55 @@ export function ClientesDiscoveryPage() {
     if (favoritesOnly) {
       list = list.filter((item) => favorites.has(item.id));
     }
+    if (currencyFilter) {
+      list = list.filter((item) =>
+        (item.currencies ?? []).some(
+          (code) => code.toUpperCase() === currencyFilter.toUpperCase(),
+        ),
+      );
+    }
+    if (paymentFilter) {
+      const want = paymentFilter.trim().toLowerCase();
+      list = list.filter((item) =>
+        (item.paymentChannels ?? []).some(
+          (channel) => channel.trim().toLowerCase() === want,
+        ),
+      );
+    }
+    if (openNowOnly) {
+      list = list.filter((item) => item.isOpen === true);
+    }
+    if (vesBcvOnly) {
+      list = list.filter((item) => item.acceptsVesBcv === true);
+    }
     // While searching, keep server relevance order (smart) unless user forces near/rated.
     return sortBusinesses(list, sortMode);
-  }, [coords, favorites, favoritesOnly, radiusKm, results, sortMode]);
+  }, [
+    coords,
+    currencyFilter,
+    favorites,
+    favoritesOnly,
+    openNowOnly,
+    paymentFilter,
+    radiusKm,
+    results,
+    sortMode,
+    vesBcvOnly,
+  ]);
+
+  const availablePaymentChannels = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of results) {
+      for (const channel of item.paymentChannels ?? []) {
+        const label = channel.trim();
+        if (!label) continue;
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'es'))
+      .map(([name, count]) => ({ name, count }));
+  }, [results]);
 
   filteredResultsLengthRef.current = filteredResults.length;
 
@@ -1743,9 +1920,14 @@ export function ClientesDiscoveryPage() {
 
   const clearFilters = useCallback(() => {
     setQuery('');
+    regionRef.current = '';
     setRegion('');
     setCategory('');
     setFavoritesOnly(false);
+    setCurrencyFilter('');
+    setPaymentFilter('');
+    setOpenNowOnly(false);
+    setVesBcvOnly(false);
     setRadiusKm(coords ? DEFAULT_NEAR_RADIUS_KM : null);
     setSortMode(coords ? 'near' : 'smart');
   }, [coords]);
@@ -1756,18 +1938,49 @@ export function ClientesDiscoveryPage() {
     setDraftCategory(category);
     setDraftSort(sortMode);
     setDraftRadiusKm(radiusKm);
+    setDraftCurrency(currencyFilter);
+    setDraftPayment(paymentFilter);
+    setDraftOpenNow(openNowOnly);
+    setDraftVesBcv(vesBcvOnly);
     setSearchModalOpen(true);
-  }, [category, query, radiusKm, region, sortMode]);
+  }, [
+    category,
+    currencyFilter,
+    openNowOnly,
+    paymentFilter,
+    query,
+    radiusKm,
+    region,
+    sortMode,
+    vesBcvOnly,
+  ]);
 
   const applySearchModal = useCallback(() => {
     setQuery(draftQuery);
+    regionRef.current = draftRegion;
     setRegion(draftRegion);
     setCategory(draftCategory);
     setSortMode(draftSort);
-    setRadiusKm(draftRadiusKm);
+    // Choosing a region implies all results there; ignore near-radius clamp.
+    setRadiusKm(draftRegion.trim() ? null : draftRadiusKm);
+    setCurrencyFilter(draftCurrency);
+    setPaymentFilter(draftPayment);
+    setOpenNowOnly(draftOpenNow);
+    setVesBcvOnly(draftVesBcv);
     setSearchModalOpen(false);
     enterSearchMode({ focus: true });
-  }, [draftCategory, draftQuery, draftRadiusKm, draftRegion, draftSort, enterSearchMode]);
+  }, [
+    draftCategory,
+    draftCurrency,
+    draftOpenNow,
+    draftPayment,
+    draftQuery,
+    draftRadiusKm,
+    draftRegion,
+    draftSort,
+    draftVesBcv,
+    enterSearchMode,
+  ]);
 
   const visibleResults = useMemo(
     () => filteredResults.slice(0, visibleCount),
@@ -1777,8 +1990,16 @@ export function ClientesDiscoveryPage() {
 
   const hasCustomRadius =
     radiusKm != null && !(coords && radiusKm === DEFAULT_NEAR_RADIUS_KM);
+  const hasPaymentFilters = Boolean(
+    currencyFilter || paymentFilter || openNowOnly || vesBcvOnly,
+  );
   const hasActiveFilters = Boolean(
-    query.trim() || region.trim() || category.trim() || favoritesOnly || hasCustomRadius,
+    query.trim() ||
+      region.trim() ||
+      category.trim() ||
+      favoritesOnly ||
+      hasCustomRadius ||
+      hasPaymentFilters,
   );
 
   const statusLine = useMemo(() => {
@@ -1799,6 +2020,10 @@ export function ClientesDiscoveryPage() {
       const chip = categories.find((item) => item.id === category);
       if (chip) parts.push(chip.label.toLowerCase());
     }
+    if (currencyFilter) parts.push(`paga en ${currencyFilter}`);
+    if (paymentFilter) parts.push(paymentFilter);
+    if (openNowOnly) parts.push('abiertos ahora');
+    if (vesBcvOnly) parts.push('tasa BCV');
     if (radiusKm != null) parts.push(`a menos de ${radiusKm} km`);
     if (favoritesOnly) parts.push('solo favoritos');
     return parts.join(' · ');
@@ -1806,13 +2031,17 @@ export function ClientesDiscoveryPage() {
     categories,
     category,
     coords,
+    currencyFilter,
     debouncedQuery,
     favoritesOnly,
     filteredResults.length,
     loading,
+    openNowOnly,
+    paymentFilter,
     radiusKm,
     region,
     sortMode,
+    vesBcvOnly,
   ]);
 
   const activeCategoryLabel =
@@ -1844,15 +2073,18 @@ export function ClientesDiscoveryPage() {
 
   const locationLabel =
     region || zoneLabel || (geoStatus === 'ready' ? 'Cerca de ti' : 'Tu zona');
-  const directorySettled = hasLoadedOnce && !loading;
+  const directorySettled = hasLoadedOnce && !loading && !refreshing;
   const areaEmpty =
     Boolean(coords) &&
+    geoStatus === 'ready' &&
     radiusKm != null &&
     filteredResults.length === 0 &&
     directorySettled &&
     !query.trim() &&
+    !region.trim() &&
     !category.trim() &&
-    !favoritesOnly;
+    !favoritesOnly &&
+    !hasPaymentFilters;
   const searchStatusText =
     query.trim().length === 0
       ? null
@@ -2293,6 +2525,7 @@ export function ClientesDiscoveryPage() {
                             role="option"
                             aria-selected={false}
                             onClick={() => {
+                              regionRef.current = '';
                               setRegion('');
                               setWhereMenuOpen(false);
                               requestLocation({ switchToNear: true, forcePrompt: true });
@@ -2508,17 +2741,25 @@ export function ClientesDiscoveryPage() {
                         ? 'Sitio promocionado'
                         : 'Recomendado'}
                     </p>
-                    <p className="mt-0.5 line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:mt-1 sm:text-2xl">
-                      {(heroVisible ?? hero).nombre}
-                    </p>
-                    <p className="mt-0.5 truncate text-[11px] text-white/80 sm:mt-1 sm:text-sm">
-                      {(heroVisible ?? hero).ratingCount > 0
-                        ? `★ ${(heroVisible ?? hero).ratingAverage.toFixed(1)} · ${(heroVisible ?? hero).ratingCount} opiniones`
-                        : (heroVisible ?? hero).categoria || 'Menú digital'}
-                      {(heroVisible ?? hero).distanceKm != null
-                        ? ` · ${(heroVisible ?? hero).distanceKm} km`
-                        : ''}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2.5 sm:mt-1.5 sm:gap-3">
+                      <HeroBusinessLogo
+                        logoUrl={(heroVisible ?? hero).logoUrl}
+                        name={(heroVisible ?? hero).nombre}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:text-2xl">
+                          {(heroVisible ?? hero).nombre}
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-white/80 sm:text-sm">
+                          {(heroVisible ?? hero).ratingCount > 0
+                            ? `★ ${(heroVisible ?? hero).ratingAverage.toFixed(1)} · ${(heroVisible ?? hero).ratingCount} opiniones`
+                            : (heroVisible ?? hero).categoria || 'Menú digital'}
+                          {(heroVisible ?? hero).distanceKm != null
+                            ? ` · ${(heroVisible ?? hero).distanceKm} km`
+                            : ''}
+                        </p>
+                      </div>
+                    </div>
                     <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#6D28D9] sm:mt-3">
                       Ver menú <ArrowRight className="h-3.5 w-3.5" />
                     </span>
@@ -2526,12 +2767,7 @@ export function ClientesDiscoveryPage() {
                 </Link>
               ) : directorySettled ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
-                  <p
-                    className={`italic font-extrabold text-2xl text-white/90 sm:text-3xl`}
-                  >
-                    Apoyemos el talento local ♥
-                  </p>
-                  <p className="mt-3 max-w-xs text-sm text-white/70">
+                  <p className="max-w-xs text-sm text-white/70">
                     Explora regiones o amplía tu zona para descubrir menús cerca.
                   </p>
                 </div>
@@ -2540,13 +2776,6 @@ export function ClientesDiscoveryPage() {
                   <MediaShimmer tone="dark" />
                 </div>
               )}
-              {!areaEmpty && hero ? (
-              <p
-                className={`italic font-extrabold pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
-              >
-                Apoyemos el talento local ♥
-              </p>
-              ) : null}
               {!areaEmpty && heroSlides.length > 1 ? (
                 <>
                   <button
@@ -2660,7 +2889,7 @@ export function ClientesDiscoveryPage() {
               {region ? (
                 <button
                   type="button"
-                  onClick={() => setRegion('')}
+                  onClick={() => selectRegion('')}
                   className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
                 >
                   {region} <X className="h-3 w-3" />
@@ -2673,6 +2902,42 @@ export function ClientesDiscoveryPage() {
                   className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
                 >
                   {activeCategoryLabel} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {currencyFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrencyFilter('')}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  {currencyFilter} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {paymentFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setPaymentFilter('')}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  {paymentFilter} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {openNowOnly ? (
+                <button
+                  type="button"
+                  onClick={() => setOpenNowOnly(false)}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  Abierto ahora <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {vesBcvOnly ? (
+                <button
+                  type="button"
+                  onClick={() => setVesBcvOnly(false)}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  Tasa BCV <X className="h-3 w-3" />
                 </button>
               ) : null}
               {sortMode !== 'smart' ? (
@@ -2868,7 +3133,7 @@ export function ClientesDiscoveryPage() {
               } ${searchMode ? '' : 'lg:order-2'}`}
             >
               {error ? <p className="mb-3 text-sm text-rose-600">{error}</p> : null}
-              {loading && !hasLoadedOnce ? (
+              {(loading && !hasLoadedOnce) || (refreshing && filteredResults.length === 0) ? (
                 <ResultSkeleton />
               ) : filteredResults.length === 0 ? (
                 <div className="rounded-[22px] bg-white p-6 text-center ring-1 ring-slate-100 sm:p-8">
@@ -2921,7 +3186,9 @@ export function ClientesDiscoveryPage() {
                       <p className="mt-2 text-sm text-slate-500">
                         {searchMode && !query.trim()
                           ? 'Busca un platillo o restaurante para ver todos los resultados relacionados.'
-                          : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
+                          : hasPaymentFilters
+                            ? 'Prueba quitar filtros de moneda, pago, horario o tasa BCV.'
+                            : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
                       </p>
                       {!searchMode ? (
                         <button
@@ -3096,10 +3363,7 @@ export function ClientesDiscoveryPage() {
                       <button
                         key={item.name}
                         type="button"
-                        onClick={() => {
-                          setRegion(active ? '' : item.name);
-                          scrollToResults();
-                        }}
+                        onClick={() => selectRegion(active ? '' : item.name)}
                         className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-[13px] font-bold transition sm:px-4 sm:text-sm ${
                           active
                             ? 'border-[#6D28D9] bg-[#6D28D9] text-white'
@@ -3135,7 +3399,7 @@ export function ClientesDiscoveryPage() {
                   {' · '}
                   <button
                     type="button"
-                    onClick={() => setRegion('')}
+                    onClick={() => selectRegion('')}
                     className="font-bold text-slate-700 underline-offset-2 hover:underline"
                   >
                     Quitar filtro
@@ -3405,7 +3669,9 @@ export function ClientesDiscoveryPage() {
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div>
                 <p className="text-base font-extrabold text-slate-900">Buscar y filtrar</p>
-                <p className="text-xs text-slate-500">Ajusta antojo, zona y orden</p>
+                <p className="text-xs text-slate-500">
+                  Zona, pago, moneda, horario y orden
+                </p>
               </div>
               <button
                 type="button"
@@ -3572,6 +3838,101 @@ export function ClientesDiscoveryPage() {
                   </button>
                 ) : null}
               </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Moneda</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftCurrency('')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      !draftCurrency
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Todas
+                  </button>
+                  {CURRENCY_FILTER_OPTIONS.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setDraftCurrency(code)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                        draftCurrency === code
+                          ? 'bg-[#6D28D9] text-white'
+                          : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Método de pago
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftPayment('')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      !draftPayment
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  {availablePaymentChannels.map((item) => (
+                    <button
+                      key={item.name}
+                      type="button"
+                      onClick={() => setDraftPayment(item.name)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                        draftPayment === item.name
+                          ? 'bg-[#6D28D9] text-white'
+                          : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {item.name}
+                      <span className="ml-1.5 tabular-nums opacity-80">{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Disponibilidad
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftOpenNow((value) => !value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      draftOpenNow
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Abierto ahora
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraftVesBcv((value) => !value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      draftVesBcv
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Tasa BCV (VES)
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 border-t border-slate-100 px-4 py-3">
               <button
@@ -3582,6 +3943,10 @@ export function ClientesDiscoveryPage() {
                   setDraftCategory('');
                   setDraftSort(coords ? 'near' : 'smart');
                   setDraftRadiusKm(null);
+                  setDraftCurrency('');
+                  setDraftPayment('');
+                  setDraftOpenNow(false);
+                  setDraftVesBcv(false);
                 }}
                 className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700"
               >

@@ -133,6 +133,9 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       ? `${amountLabel} + DELIVERY`
       : amountLabel
     : '';
+  const productSurchargeValue =
+    details.recargo_delivery_productos_moneda_checkout ??
+    convert(details.recargo_delivery_productos);
   const subtotalValue =
     details.subtotal_moneda_checkout ??
     convert(details.subtotal) ??
@@ -140,11 +143,15 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       ? (() => {
           const deliveryGuess =
             details.costo_delivery_moneda_checkout ?? convert(details.costo_delivery) ?? 0;
+          const surchargeGuess = productSurchargeValue ?? 0;
           const deliveryNum = Number(deliveryGuess);
+          const surchargeNum = Number(surchargeGuess);
           const totalNum = Number(totalValue);
           if (!Number.isFinite(totalNum)) return null;
-          if (!Number.isFinite(deliveryNum) || deliveryNum < 0) return totalNum;
-          return Math.max(0, totalNum - deliveryNum);
+          const extras =
+            (Number.isFinite(deliveryNum) && deliveryNum > 0 ? deliveryNum : 0) +
+            (Number.isFinite(surchargeNum) && surchargeNum > 0 ? surchargeNum : 0);
+          return Math.max(0, totalNum - extras);
         })()
       : null);
   const deliveryCostValue =
@@ -234,6 +241,26 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   const subtotalLabel = subtotalValue == null ? '' : amount(subtotalValue, currency);
   if (subtotalLabel) lines.push(`🛒 Subtotal productos: ${subtotalLabel}`);
   if (delivery.mode === 'delivery') {
+    const surchargeNum = Number(productSurchargeValue);
+    if (Number.isFinite(surchargeNum) && surchargeNum > 0) {
+      const surchargeDetail = Array.isArray(details.recargo_delivery_productos_detalle)
+        ? details.recargo_delivery_productos_detalle
+        : [];
+      const labels = surchargeDetail
+        .map((entry) => {
+          const row = record(entry);
+          return text(row.label) || text(row.surchargeLabel);
+        })
+        .filter(Boolean);
+      const uniqueLabels = [...new Set(labels)];
+      const surchargeTitle =
+        uniqueLabels.length === 1
+          ? uniqueLabels[0]
+          : uniqueLabels.length > 1
+            ? 'Recargos de delivery'
+            : 'Empaque / delivery';
+      lines.push(`📦 ${surchargeTitle}: ${amount(surchargeNum, currency)}`);
+    }
     const deliveryLabel = feePending
       ? 'A Acordar'
       : deliveryCostValue == null

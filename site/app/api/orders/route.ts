@@ -36,7 +36,11 @@ import {
   type SnapshotCategoryRow,
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
-import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
+import {
+  isProductExcludedFromDelivery,
+  sanitizeCartLineSelection,
+  summarizeProductDeliverySurcharges,
+} from '../../_lib/menu-product-options';
 import { optionalMerchantComanda } from '../../_lib/whatsapp-order-format';
 import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { resolveCommerceManagementMode } from '../../_lib/order-management-mode';
@@ -534,6 +538,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
+    let snapshotProducts: SnapshotProductRow[] = [];
     const snapshotResult = await buildOrderItemSnapshots({
       items,
       selections: rawItemSelections,
@@ -545,7 +550,8 @@ async function postOrder(request: Request): Promise<NextResponse> {
           .eq('comercio_id', resolvedComercioId)
           .in('id', productIds);
         if (error) throw new Error(error.message);
-        return (data ?? []) as SnapshotProductRow[];
+        snapshotProducts = (data ?? []) as SnapshotProductRow[];
+        return snapshotProducts;
       },
       loadCategories: async (categoryIds) => {
         const { data, error } = await supabase
@@ -557,9 +563,51 @@ async function postOrder(request: Request): Promise<NextResponse> {
         return (data ?? []) as SnapshotCategoryRow[];
       },
     });
+    let productDeliverySurcharge = 0;
+    let productDeliverySurchargeLines: Array<{
+      productId: string;
+      productName: string;
+      label: string;
+      unitSurcharge: number;
+      quantity: number;
+      total: number;
+    }> = [];
     if (snapshotResult.ok === true) {
       subtotal = snapshotResult.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
-      total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
+      if (delivery.mode === 'delivery') {
+        const productById = new Map(snapshotProducts.map((row) => [row.id, row]));
+        for (const item of snapshotResult.items) {
+          const product = productById.get(item.product_id);
+          if (product && isProductExcludedFromDelivery(product)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: 'product_not_available_for_delivery',
+                message: `"${product.nombre ?? item.nombre}" no está disponible para delivery. Quítalo del carrito o elige retiro.`,
+              },
+              { status: 400 },
+            );
+          }
+        }
+        const surchargeSummary = summarizeProductDeliverySurcharges(
+          snapshotResult.items.map((item, index) => ({
+            product: productById.get(item.product_id) ?? {
+              id: item.product_id,
+              nombre: item.nombre,
+              opciones_menu: null,
+            },
+            quantity: item.cantidad,
+            selection: rawItemSelections[index] ?? null,
+          })),
+          true,
+        );
+        productDeliverySurcharge = surchargeSummary.total;
+        productDeliverySurchargeLines = surchargeSummary.lines;
+      }
+      total =
+        subtotal +
+        productDeliverySurcharge +
+        (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     }
 
     const originLat = Number(comercioRow?.latitud);
@@ -651,7 +699,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
     }
     if (deliveryQuote.applied) {
       costoDelivery = deliveryQuote.fee;
-      total = subtotal + costoDelivery;
+      total = subtotal + productDeliverySurcharge + costoDelivery;
       if (deliveryQuote.outOfZone) {
         delivery = { ...delivery, fee_pending: true };
       }
@@ -690,6 +738,8 @@ async function postOrder(request: Request): Promise<NextResponse> {
     if ((staffAssisted || assistedDineIn) && delivery.mode === 'delivery') {
       delivery = { mode: 'pickup' };
       costoDelivery = 0;
+      productDeliverySurcharge = 0;
+      productDeliverySurchargeLines = [];
       total = subtotal;
     }
 
@@ -719,8 +769,19 @@ async function postOrder(request: Request): Promise<NextResponse> {
       currency,
       exchangeRate,
     );
+    const productDeliverySurchargeCheckout = convertOrderAmount(
+      productDeliverySurcharge,
+      baseCurrency,
+      currency,
+      exchangeRate,
+    );
     const totalCheckout = convertOrderAmount(total, baseCurrency, currency, exchangeRate);
-    if (subtotalCheckout === null || costoDeliveryCheckout === null || totalCheckout === null) {
+    if (
+      subtotalCheckout === null ||
+      costoDeliveryCheckout === null ||
+      productDeliverySurchargeCheckout === null ||
+      totalCheckout === null
+    ) {
       throw new Error('Invalid exchange rate for the selected checkout currency.');
     }
 
@@ -770,6 +831,13 @@ async function postOrder(request: Request): Promise<NextResponse> {
       subtotal_moneda_checkout: subtotalCheckout,
       costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
       costo_delivery_moneda_checkout: costoDeliveryCheckout,
+      ...(productDeliverySurcharge > 0
+        ? {
+            recargo_delivery_productos: productDeliverySurcharge,
+            recargo_delivery_productos_moneda_checkout: productDeliverySurchargeCheckout,
+            recargo_delivery_productos_detalle: productDeliverySurchargeLines,
+          }
+        : {}),
       ...(delivery.mode === 'delivery'
         ? {
             delivery_estimate_minutes:
@@ -874,6 +942,19 @@ async function postOrder(request: Request): Promise<NextResponse> {
       const fulfillmentLabel =
         tipoMatch?.[1]?.replace(/aqui$/i, 'aquí') ||
         (delivery.mode === 'delivery' ? 'Delivery' : 'Retiro / para llevar');
+      const packagingEmailLabel = (() => {
+        if (productDeliverySurcharge <= 0) return null;
+        const labels = [
+          ...new Set(
+            productDeliverySurchargeLines
+              .map((line) => (line.label ?? '').toString().trim())
+              .filter(Boolean),
+          ),
+        ];
+        if (labels.length === 1) return labels[0];
+        if (labels.length > 1) return 'Recargos de delivery';
+        return 'Empaque / delivery';
+      })();
       void sendOrderEmail({
         clientEmail,
         clientName,
@@ -883,6 +964,9 @@ async function postOrder(request: Request): Promise<NextResponse> {
         comercioSlug: resolvedComercioSlug,
         currency,
         subtotal: subtotalCheckout,
+        packagingFee:
+          productDeliverySurcharge > 0 ? productDeliverySurchargeCheckout : null,
+        packagingLabel: packagingEmailLabel,
         deliveryFee: costoDeliveryCheckout,
         total: totalCheckout,
         fulfillmentLabel,

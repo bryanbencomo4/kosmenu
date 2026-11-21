@@ -26,6 +26,7 @@ import { loadPromoStatsWindow } from './directory-promo-events';
 import { rankPromotedDelivery } from './directory-promo-rank';
 import { pickRotatedShowcaseDishes } from './public-directory-showcase';
 import { normalizeDirectoryQuery } from './public-directory-text';
+import { deriveDirectoryPaymentFacets } from './public-directory-payment-facets';
 import { getServiceSupabaseClient } from './supabase-server';
 
 export type DirectoryRegionStat = {
@@ -70,6 +71,12 @@ export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
   productNames: string[];
   /** Food teasers for discovery cards (image + price). */
   showcaseDishes: DirectoryShowcaseDish[];
+  /** Checkout currencies (USD / VES / COP). */
+  currencies: string[];
+  /** Public payment channel chips (Efectivo, Zelle, …). */
+  paymentChannels: string[];
+  /** Accepts VES and uses BCV (not P2P) for VES. */
+  acceptsVesBcv: boolean;
   matchedDish?: string | null;
   matchScore?: number;
 };
@@ -95,10 +102,14 @@ type RawComercioRow = {
   branding_ia?: unknown;
   horarios?: unknown;
   mostrar_en_directorio_publico?: boolean | null;
+  metodos_pago?: unknown;
+  moneda?: string | null;
+  exchange_rate_source?: string | null;
+  exchange_rate_quote_currency?: string | null;
 };
 
 const DIRECTORY_SELECT =
-  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,estados_operacion,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico';
+  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,estados_operacion,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico,metodos_pago,moneda,exchange_rate_source,exchange_rate_quote_currency';
 
 /** Demo / QA restaurants — never list in public discovery. */
 const DIRECTORY_EXCLUDED_SLUGS = new Set([
@@ -372,6 +383,51 @@ async function loadProductNames(comercioIds: string[]) {
   return names;
 }
 
+async function loadPaymentMethodRows(comercioIds: string[]) {
+  const byComercio = new Map<
+    string,
+    Array<{ nombre?: string | null; tipo?: string | null }>
+  >();
+  if (comercioIds.length === 0) return byComercio;
+
+  const supabase = getServiceSupabaseClient();
+  const BATCH = 40;
+  for (let offset = 0; offset < comercioIds.length; offset += BATCH) {
+    const chunk = comercioIds.slice(offset, offset + BATCH);
+    const { data, error } = await supabase
+      .from('metodos_pago')
+      .select('comercio_id,nombre,tipo')
+      .in('comercio_id', chunk)
+      .limit(40 * chunk.length);
+    if (error || !data) continue;
+    for (const row of data as Array<{
+      comercio_id?: string | null;
+      nombre?: string | null;
+      tipo?: string | null;
+    }>) {
+      const id = (row.comercio_id ?? '').toString().trim();
+      if (!id) continue;
+      const list = byComercio.get(id) ?? [];
+      list.push({ nombre: row.nombre, tipo: row.tipo });
+      byComercio.set(id, list);
+    }
+  }
+  return byComercio;
+}
+
+function paymentFacetsForRow(
+  row: RawComercioRow,
+  paymentRows: Array<{ nombre?: string | null; tipo?: string | null }>,
+) {
+  return deriveDirectoryPaymentFacets({
+    brandingIa: row.branding_ia,
+    moneda: row.moneda,
+    metodosPagoColumn: row.metodos_pago,
+    metodosPagoRows: paymentRows,
+    exchangeRateSource: row.exchange_rate_source,
+  });
+}
+
 function scheduleFields(horarios: unknown): Pick<ClientDirectoryBusiness, 'isOpen' | 'openLabel'> {
   const status = resolveBusinessScheduleStatus(horarios);
   if (!status.configured) {
@@ -500,10 +556,11 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
   const allowedRows = rows.filter((row) => byId.has((row.id ?? '').toString().trim()));
   const ids = allowedRows.map((row) => (row.id ?? '').toString().trim()).filter(Boolean);
 
-  const [showcaseDishes, ratings, productNames] = await Promise.all([
+  const [showcaseDishes, ratings, productNames, paymentRowsById] = await Promise.all([
     loadShowcaseDishes(ids),
     loadRatingMap(ids),
     loadProductNames(ids),
+    loadPaymentMethodRows(ids),
   ]);
 
   const enriched: ClientDirectoryCached[] = allowedRows
@@ -512,6 +569,7 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
       if (!base) return null;
       const rating = ratings.get(base.id) ?? { average: 0, count: 0 };
       const dishes = showcaseDishes.get(base.id) ?? [];
+      const facets = paymentFacetsForRow(row, paymentRowsById.get(base.id) ?? []);
       const lat = toFiniteCoord(row.latitud);
       const lng = toFiniteCoord(row.longitud);
       const hasValidCoords =
@@ -530,6 +588,9 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
         horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
         showcaseDishes: dishes,
+        currencies: facets.currencies,
+        paymentChannels: facets.paymentChannels,
+        acceptsVesBcv: facets.acceptsVesBcv,
       };
     })
     .filter((entry): entry is ClientDirectoryCached => entry != null);
@@ -544,10 +605,11 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
   const byId = new Map(verifiedBasics.map((entry) => [entry.id, entry]));
   const allowedRows = rows.filter((row) => byId.has((row.id ?? '').toString().trim()));
   const ids = allowedRows.map((row) => (row.id ?? '').toString().trim()).filter(Boolean);
-  const [showcaseDishes, ratings, productNames] = await Promise.all([
+  const [showcaseDishes, ratings, productNames, paymentRowsById] = await Promise.all([
     loadShowcaseDishes(ids),
     loadRatingMap(ids),
     loadProductNames(ids),
+    loadPaymentMethodRows(ids),
   ]);
 
   return allowedRows
@@ -556,6 +618,7 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
       if (!base) return null;
       const rating = ratings.get(base.id) ?? { average: 0, count: 0 };
       const dishes = showcaseDishes.get(base.id) ?? [];
+      const facets = paymentFacetsForRow(row, paymentRowsById.get(base.id) ?? []);
       const lat = toFiniteCoord(row.latitud);
       const lng = toFiniteCoord(row.longitud);
       const hasValidCoords =
@@ -574,6 +637,9 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
         horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
         showcaseDishes: dishes,
+        currencies: facets.currencies,
+        paymentChannels: facets.paymentChannels,
+        acceptsVesBcv: facets.acceptsVesBcv,
       };
     })
     .filter((entry): entry is ClientDirectoryCached => entry != null);

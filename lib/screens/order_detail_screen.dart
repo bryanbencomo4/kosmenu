@@ -2091,6 +2091,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return pedido.deliveryForDisplay(currency ?? _orderCurrency(pedido));
   }
 
+  double _packagingCostOf(PedidoModel pedido, {String? currency}) {
+    return pedido.packagingForDisplay(currency ?? _orderCurrency(pedido));
+  }
+
   double _subtotalOf(PedidoModel pedido, double total, {String? currency}) {
     return pedido.subtotalForDisplay(currency ?? _orderCurrency(pedido), total);
   }
@@ -2872,6 +2876,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   pedido,
                   currency: currency,
                 );
+                final packagingCost = _packagingCostOf(
+                  pedido,
+                  currency: currency,
+                );
+                final packagingLabel = pedido.packagingLabelForDisplay();
                 final subtotal = _subtotalOf(pedido, total, currency: currency);
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
@@ -4835,6 +4844,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                   ],
                                 ),
+                                if (packagingCost > 0) ...[
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          packagingLabel.isEmpty
+                                              ? 'Empaque / delivery'
+                                              : packagingLabel,
+                                          style: GoogleFonts.manrope(
+                                            color: muted,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatAmount(packagingCost, currency),
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                                 if (isDeliveryOrder) ...[
                                   const SizedBox(height: 6),
                                   Row(

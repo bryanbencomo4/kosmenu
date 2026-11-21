@@ -19,7 +19,8 @@ const props: ComponentProps<typeof OrderReceipt> = {
     { key: 'en_camino', label: 'En camino' }, { key: 'entregado', label: 'Entregado' },
   ], currentStep: 0,
   items: [{ name: 'Pizza', quantity: 2, categoryName: 'Pizzas', amountLabel: '$ 18.000' }],
-  subtotalLabel: '$ 18.000', deliveryLabel: '$ 2.000', deliveryFeeNote: null,
+  subtotalLabel: '$ 18.000', packagingLabel: 'Empaque', packagingAmountLabel: '$ 1.000',
+  deliveryLabel: '$ 2.000', deliveryFeeNote: null,
   cashPaidLabel: null, cashChangeLabel: null, totalLabel: '$ 20.000', paymentLabel: 'Efectivo', paymentDetails: null,
   orderNotes: 'Cortar en ocho partes', cancelDetail: '',
   deliveryDelegateLabel: 'Repartidor reportó llegada', deliveryDelegateAcceptedAt: '',
@@ -47,6 +48,8 @@ describe('manual receipt is consultative', () => {
       expect(html).not.toContain(label);
     }
     expect(html).toContain('Pizza');
+    expect(html).toContain('Empaque');
+    expect(html).toContain('1.000');
     expect(html).toContain('20.000');
     expect(html).toContain('Volver al menú');
     expect(html).toContain('WhatsApp');

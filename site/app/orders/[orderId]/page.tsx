@@ -56,6 +56,13 @@ type PedidoRow = {
     subtotal_moneda_checkout?: number;
     costo_delivery?: number;
     costo_delivery_moneda_checkout?: number;
+    recargo_delivery_productos?: number;
+    recargo_delivery_productos_moneda_checkout?: number;
+    recargo_delivery_productos_detalle?: Array<{
+      label?: string;
+      surchargeLabel?: string;
+      total?: number;
+    }>;
     delivery_estimate_minutes?: number;
     delivery_config_snapshot?: {
       estimated_times?: {
@@ -794,12 +801,33 @@ function OrderTrackingPageInner() {
 
   const subtotal = toNumberOrNull(order?.detalles?.subtotal) ?? toNumberOrNull(order?.total) ?? 0;
   const costoDelivery = toNumberOrNull(order?.costo_delivery) ?? toNumberOrNull(order?.detalles?.costo_delivery) ?? 0;
-  const total = toNumberOrNull(order?.detalles?.total) ?? (subtotal + costoDelivery);
+  const packagingFee = toNumberOrNull(order?.detalles?.recargo_delivery_productos) ?? 0;
+  const total =
+    toNumberOrNull(order?.detalles?.total) ?? (subtotal + packagingFee + costoDelivery);
   const checkoutCurrency = normalizeCurrencyCode(order?.detalles?.moneda_checkout ?? 'COP');
   const exchangeRate = toNumberOrNull(order?.detalles?.tasa_cambio_snapshot) ?? 1;
   const subtotalCheckout =
     toNumberOrNull(order?.detalles?.subtotal_moneda_checkout) ??
     convertFromCop(subtotal, checkoutCurrency, exchangeRate);
+  const packagingCheckout =
+    toNumberOrNull(order?.detalles?.recargo_delivery_productos_moneda_checkout) ??
+    convertFromCop(packagingFee, checkoutCurrency, exchangeRate);
+  const packagingLineLabel = (() => {
+    if (packagingCheckout <= 0) return null;
+    const detail = Array.isArray(order?.detalles?.recargo_delivery_productos_detalle)
+      ? order?.detalles?.recargo_delivery_productos_detalle ?? []
+      : [];
+    const labels = [
+      ...new Set(
+        detail
+          .map((entry) => (entry?.label ?? entry?.surchargeLabel ?? '').toString().trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (labels.length === 1) return labels[0];
+    if (labels.length > 1) return 'Recargos de delivery';
+    return 'Empaque / delivery';
+  })();
   const deliveryCheckout =
     toNumberOrNull(order?.detalles?.costo_delivery_moneda_checkout) ??
     convertFromCop(costoDelivery, checkoutCurrency, exchangeRate);
@@ -1192,6 +1220,12 @@ function OrderTrackingPageInner() {
         amountLabel: formatAmountByCurrency(item.subtotal, checkoutCurrency),
       }))}
       subtotalLabel={formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}
+      packagingLabel={packagingLineLabel}
+      packagingAmountLabel={
+        packagingLineLabel
+          ? formatAmountByCurrency(packagingCheckout, checkoutCurrency)
+          : null
+      }
       deliveryLabel={
         isDelivery
           ? deliveryCheckout > 0

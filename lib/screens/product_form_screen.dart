@@ -71,6 +71,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final TextEditingController _weightMaximoController = TextEditingController(
     text: '25',
   );
+  bool _deliveryExclude = false;
+  bool _deliverySurchargeEnabled = false;
+  /// false = monto fijo; true = monto según opción del menú (como precios dependientes).
+  bool _deliverySurchargeByOption = false;
+  String? _deliverySurchargeGroupId;
+  final Map<String, TextEditingController> _deliveryOptionSurchargeControllers =
+      <String, TextEditingController>{};
+  final TextEditingController _deliverySurchargeController =
+      TextEditingController();
+  final TextEditingController _deliverySurchargeLabelController =
+      TextEditingController(text: 'Empaque');
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
@@ -127,6 +138,60 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _weightMaximoController.text = _formatWeightConfig(maximo);
       }
     }
+    final rawDelivery = product?.opcionesMenu?['delivery'];
+    if (rawDelivery is Map) {
+      _deliveryExclude =
+          rawDelivery['exclude'] == true ||
+          rawDelivery['excluido'] == true ||
+          rawDelivery['excluded'] == true;
+      final label =
+          (rawDelivery['surcharge_label'] ??
+                  rawDelivery['surchargeLabel'] ??
+                  rawDelivery['motivo'] ??
+                  rawDelivery['reason'] ??
+                  '')
+              .toString()
+              .trim();
+      if (label.isNotEmpty) {
+        _deliverySurchargeLabelController.text = label;
+      }
+      final rawMap =
+          rawDelivery['surcharge_por_opcion'] ??
+          rawDelivery['surchargePorOpcion'] ??
+          rawDelivery['recargo_por_opcion'];
+      if (rawMap is Map && rawMap.isNotEmpty) {
+        _deliverySurchargeEnabled = true;
+        _deliverySurchargeByOption = true;
+        final groupId =
+            (rawDelivery['surcharge_grupo'] ?? rawDelivery['surchargeGrupo'] ?? '')
+                .toString()
+                .trim();
+        _deliverySurchargeGroupId = groupId.isEmpty ? null : groupId;
+        for (final entry in rawMap.entries) {
+          final optionId = entry.key.toString().trim();
+          if (optionId.isEmpty) continue;
+          final amount = _readWeightNumber(entry.value);
+          if (amount == null || amount <= 0) continue;
+          _deliveryOptionSurchargeControllers[optionId] = TextEditingController(
+            text: amount == amount.roundToDouble()
+                ? amount.toStringAsFixed(0)
+                : amount.toStringAsFixed(2),
+          );
+        }
+      } else {
+        final surcharge = _readWeightNumber(
+          rawDelivery['surcharge'] ??
+              rawDelivery['recargo'] ??
+              rawDelivery['extra'],
+        );
+        _deliverySurchargeEnabled = surcharge != null && surcharge > 0;
+        if (_deliverySurchargeEnabled) {
+          _deliverySurchargeController.text = surcharge!.toStringAsFixed(
+            surcharge == surcharge.roundToDouble() ? 0 : 2,
+          );
+        }
+      }
+    }
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -178,7 +243,31 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _weightPasoController.dispose();
     _weightMinimoController.dispose();
     _weightMaximoController.dispose();
+    _deliverySurchargeController.dispose();
+    _deliverySurchargeLabelController.dispose();
+    for (final controller in _deliveryOptionSurchargeControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  List<ProductOptionGroup> _deliveryOptionGroups() {
+    final live = _optionsEditorKey.currentState?.groups;
+    if (live != null && live.isNotEmpty) return live;
+    final raw = widget.product?.opcionesMenu;
+    if (raw == null) return const <ProductOptionGroup>[];
+    return ProductOptionGroup.listFromMenuOptions(
+      Map<String, dynamic>.from(raw),
+    );
+  }
+
+  void _ensureDeliveryOptionControllers(ProductOptionGroup group) {
+    for (final option in group.opciones.where((item) => item.activo)) {
+      _deliveryOptionSurchargeControllers.putIfAbsent(
+        option.id,
+        TextEditingController.new,
+      );
+    }
   }
 
   bool get _hasRemoteImage =>
@@ -381,6 +470,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     rewrite(_priceController);
     rewrite(_compareAtPriceController);
+    if (_deliverySurchargeEnabled) {
+      if (_deliverySurchargeByOption) {
+        for (final controller in _deliveryOptionSurchargeControllers.values) {
+          rewrite(controller);
+        }
+      } else {
+        rewrite(_deliverySurchargeController);
+      }
+    }
     setState(() => _selectedPriceCurrency = value);
   }
 
@@ -1347,16 +1445,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           (current?.containsKey('grupos') ?? false) ||
           (current?.containsKey('activadas') ?? false);
       final hadWeight = current?.containsKey('venta_por_peso') ?? false;
+      final hadDelivery = current?.containsKey('delivery') ?? false;
       final optionsTouched =
           optionsEditor != null &&
           (optionsEditor.active ||
               hadGroups ||
               optionsEditor.personalizationChanged);
       final weightTouched = _ventaPorPeso || hadWeight;
+      final deliveryTouched =
+          _deliveryExclude || _deliverySurchargeEnabled || hadDelivery;
 
       // Leave opciones_menu alone for simple products that never used options
       // or weight sale — avoids rewriting JSON for every restaurant save.
-      if (optionsTouched || weightTouched) {
+      if (optionsTouched || weightTouched || deliveryTouched) {
         Map<String, dynamic>? menuOptions =
             current == null ? null : Map<String, dynamic>.from(current);
         if (optionsTouched) {
@@ -1407,6 +1508,107 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           };
         } else {
           menuOptions.remove('venta_por_peso');
+        }
+
+        if (_deliveryExclude || _deliverySurchargeEnabled) {
+          if (_deliveryExclude) {
+            menuOptions['delivery'] = <String, dynamic>{'exclude': true};
+          } else {
+            final label = _deliverySurchargeLabelController.text
+                .trim()
+                .replaceAll(RegExp(r'\s+'), ' ');
+            if (label.isEmpty) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Indica el motivo del recargo (ej. Empaque, Envase).',
+                  ),
+                ),
+              );
+              return;
+            }
+            final labelValue = label.length > 80 ? label.substring(0, 80) : label;
+            if (_deliverySurchargeByOption) {
+              final groups = _deliveryOptionGroups();
+              final groupId = _deliverySurchargeGroupId;
+              ProductOptionGroup? group;
+              for (final item in groups) {
+                if (item.id == groupId) {
+                  group = item;
+                  break;
+                }
+              }
+              if (group == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Elige el grupo de opciones que define el empaque (ej. tamaño/peso).',
+                    ),
+                  ),
+                );
+                return;
+              }
+              final map = <String, dynamic>{};
+              for (final option in group.opciones.where((item) => item.activo)) {
+                final controller =
+                    _deliveryOptionSurchargeControllers[option.id];
+                final parsed = double.tryParse(
+                  (controller?.text ?? '').trim().replaceAll(',', '.'),
+                );
+                if (parsed == null || parsed <= 0) continue;
+                map[option.id] = _convertToBaseCurrency(
+                  value: parsed,
+                  fromCurrency: _selectedPriceCurrency,
+                );
+              }
+              if (map.isEmpty) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Indica al menos un recargo por opción mayor a 0.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              menuOptions['delivery'] = <String, dynamic>{
+                'exclude': false,
+                'surcharge_label': labelValue,
+                'surcharge_grupo': group.id,
+                'surcharge_por_opcion': map,
+              };
+            } else {
+              final surchargeInput = double.tryParse(
+                _deliverySurchargeController.text.trim().replaceAll(',', '.'),
+              );
+              if (surchargeInput == null || surchargeInput <= 0) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Indica un recargo de delivery mayor a 0, o apaga la opción.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              // Same currency rules as product price: store in commerce base.
+              final surcharge = _convertToBaseCurrency(
+                value: surchargeInput,
+                fromCurrency: _selectedPriceCurrency,
+              );
+              menuOptions['delivery'] = <String, dynamic>{
+                'exclude': false,
+                'surcharge': surcharge,
+                'surcharge_label': labelValue,
+              };
+            }
+          }
+        } else {
+          menuOptions.remove('delivery');
         }
         payload['opciones_menu'] = menuOptions.isEmpty ? null : menuOptions;
       }
@@ -1617,6 +1819,85 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   weightPasoController: _weightPasoController,
                   weightMinimoController: _weightMinimoController,
                   weightMaximoController: _weightMaximoController,
+                  deliveryExclude: _deliveryExclude,
+                  onDeliveryExcludeChanged: (value) => setState(() {
+                    _deliveryExclude = value;
+                    if (value) _deliverySurchargeEnabled = false;
+                  }),
+                  deliverySurchargeEnabled: _deliverySurchargeEnabled,
+                  onDeliverySurchargeEnabledChanged: (value) => setState(() {
+                    _deliverySurchargeEnabled = value;
+                    if (value) _deliveryExclude = false;
+                  }),
+                  deliverySurchargeByOption: _deliverySurchargeByOption,
+                  onDeliverySurchargeByOptionChanged: (value) => setState(() {
+                    _deliverySurchargeByOption = value;
+                    if (value) {
+                      final groups = _deliveryOptionGroups();
+                      if (_deliverySurchargeGroupId == null &&
+                          groups.isNotEmpty) {
+                        _deliverySurchargeGroupId = groups.first.id;
+                      }
+                      final selected = groups
+                          .where((g) => g.id == _deliverySurchargeGroupId)
+                          .toList();
+                      if (selected.isNotEmpty) {
+                        _ensureDeliveryOptionControllers(selected.first);
+                      }
+                    }
+                  }),
+                  deliverySurchargeGroupId: _deliverySurchargeGroupId,
+                  onDeliverySurchargeGroupChanged: (value) => setState(() {
+                    _deliverySurchargeGroupId = value;
+                    final groups = _deliveryOptionGroups();
+                    final selected = groups.where((g) => g.id == value).toList();
+                    if (selected.isNotEmpty) {
+                      _ensureDeliveryOptionControllers(selected.first);
+                    }
+                  }),
+                  deliveryOptionGroups: () {
+                    final groups = _deliveryOptionGroups();
+                    if (_deliverySurchargeByOption) {
+                      final groupId = _deliverySurchargeGroupId ??
+                          (groups.isNotEmpty ? groups.first.id : null);
+                      for (final group in groups) {
+                        if (group.id == groupId) {
+                          _ensureDeliveryOptionControllers(group);
+                          break;
+                        }
+                      }
+                    }
+                    return groups;
+                  }(),
+                  deliveryOptionSurchargeControllers:
+                      _deliveryOptionSurchargeControllers,
+                  deliverySurchargeController: _deliverySurchargeController,
+                  deliverySurchargeLabelController:
+                      _deliverySurchargeLabelController,
+                  onDeliverySurchargeChanged: () => setState(() {}),
+                  deliverySurchargeHelperText: () {
+                    if (!_deliverySurchargeEnabled ||
+                        _deliveryExclude ||
+                        _deliverySurchargeByOption) {
+                      return null;
+                    }
+                    final parsed = double.tryParse(
+                      _deliverySurchargeController.text
+                          .trim()
+                          .replaceAll(',', '.'),
+                    );
+                    if (parsed == null || parsed <= 0) {
+                      return 'Usa la misma moneda del precio ($_selectedPriceCurrency).';
+                    }
+                    final inBase = _convertToBaseCurrency(
+                      value: parsed,
+                      fromCurrency: _selectedPriceCurrency,
+                    );
+                    if (_selectedPriceCurrency == _baseCurrency) {
+                      return 'Se guardará como ${inBase.toStringAsFixed(2)} $_baseCurrency.';
+                    }
+                    return 'Se guardará como ${inBase.toStringAsFixed(2)} $_baseCurrency (ingresado en $_selectedPriceCurrency).';
+                  }(),
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
@@ -2145,6 +2426,20 @@ class _FormPanel extends StatelessWidget {
     required this.weightPasoController,
     required this.weightMinimoController,
     required this.weightMaximoController,
+    required this.deliveryExclude,
+    required this.onDeliveryExcludeChanged,
+    required this.deliverySurchargeEnabled,
+    required this.onDeliverySurchargeEnabledChanged,
+    required this.deliverySurchargeByOption,
+    required this.onDeliverySurchargeByOptionChanged,
+    required this.deliverySurchargeGroupId,
+    required this.onDeliverySurchargeGroupChanged,
+    required this.deliveryOptionGroups,
+    required this.deliveryOptionSurchargeControllers,
+    required this.deliverySurchargeController,
+    required this.deliverySurchargeLabelController,
+    required this.onDeliverySurchargeChanged,
+    this.deliverySurchargeHelperText,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
@@ -2183,6 +2478,20 @@ class _FormPanel extends StatelessWidget {
   final TextEditingController weightPasoController;
   final TextEditingController weightMinimoController;
   final TextEditingController weightMaximoController;
+  final bool deliveryExclude;
+  final ValueChanged<bool> onDeliveryExcludeChanged;
+  final bool deliverySurchargeEnabled;
+  final ValueChanged<bool> onDeliverySurchargeEnabledChanged;
+  final bool deliverySurchargeByOption;
+  final ValueChanged<bool> onDeliverySurchargeByOptionChanged;
+  final String? deliverySurchargeGroupId;
+  final ValueChanged<String?> onDeliverySurchargeGroupChanged;
+  final List<ProductOptionGroup> deliveryOptionGroups;
+  final Map<String, TextEditingController> deliveryOptionSurchargeControllers;
+  final TextEditingController deliverySurchargeController;
+  final TextEditingController deliverySurchargeLabelController;
+  final VoidCallback onDeliverySurchargeChanged;
+  final String? deliverySurchargeHelperText;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
@@ -2461,6 +2770,226 @@ class _FormPanel extends StatelessWidget {
                   );
                 },
               ),
+              const SizedBox(height: 18),
+              fieldLabel('Delivery'),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: deliveryExclude,
+                onChanged: isSaving ? null : onDeliveryExcludeChanged,
+                title: Text(
+                  'No ofrecer en delivery',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'Sigue disponible para retiro o comer aquí, pero no se puede pedir a domicilio.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: deliverySurchargeEnabled,
+                onChanged: isSaving || deliveryExclude
+                    ? null
+                    : onDeliverySurchargeEnabledChanged,
+                title: Text(
+                  'Recargo si es delivery',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'Costo extra solo en pedidos a domicilio (ej. empaque). Indica el motivo.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (deliverySurchargeEnabled && !deliveryExclude) ...[
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: deliverySurchargeLabelController,
+                  enabled: !isSaving,
+                  maxLength: 80,
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Motivo (lo ve el cliente)',
+                    hintText: 'Empaque, Envase térmico…',
+                    counterText: '',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Tipo de recargo',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: false,
+                  groupValue: deliverySurchargeByOption,
+                  onChanged: isSaving
+                      ? null
+                      : (value) =>
+                          onDeliverySurchargeByOptionChanged(value ?? false),
+                  title: Text(
+                    'Monto fijo',
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: true,
+                  groupValue: deliverySurchargeByOption,
+                  onChanged: isSaving
+                      ? null
+                      : (value) =>
+                          onDeliverySurchargeByOptionChanged(value ?? false),
+                  title: Text(
+                    'Según opción (ej. 500gr / 1kg)',
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Igual que los precios dependientes: el empaque cambia con la opción elegida.',
+                    style: GoogleFonts.manrope(
+                      fontSize: 11.5,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (!deliverySurchargeByOption) ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: deliverySurchargeController,
+                    enabled: !isSaving,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    onChanged: (_) => onDeliverySurchargeChanged(),
+                    style: GoogleFonts.manrope(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Monto del recargo ($selectedPriceCurrency)',
+                      hintText: selectedPriceCurrency == 'COP'
+                          ? 'Ej. 2000'
+                          : selectedPriceCurrency == 'VES'
+                              ? 'Ej. 50'
+                              : 'Ej. 1.50',
+                      suffixText: selectedPriceCurrency,
+                      helperText: deliverySurchargeHelperText,
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  if (deliveryOptionGroups.isEmpty)
+                    Text(
+                      'Primero configura las opciones del producto más abajo (tamaños, pesos, etc.). Luego vuelve aquí y elige el grupo.',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else ...[
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('delivery-group-$deliverySurchargeGroupId'),
+                      initialValue:
+                          deliveryOptionGroups.any(
+                                (g) => g.id == deliverySurchargeGroupId,
+                              )
+                              ? deliverySurchargeGroupId
+                              : deliveryOptionGroups.first.id,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Grupo que define el empaque',
+                      ),
+                      items: [
+                        for (final group in deliveryOptionGroups)
+                          DropdownMenuItem<String>(
+                            value: group.id,
+                            child: Text(group.nombre),
+                          ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : onDeliverySurchargeGroupChanged,
+                    ),
+                    const SizedBox(height: 10),
+                    for (final option in () {
+                      final groupId =
+                          deliveryOptionGroups.any(
+                                (g) => g.id == deliverySurchargeGroupId,
+                              )
+                              ? deliverySurchargeGroupId
+                              : deliveryOptionGroups.first.id;
+                      for (final item in deliveryOptionGroups) {
+                        if (item.id == groupId) {
+                          return item.opciones
+                              .where((choice) => choice.activo)
+                              .toList();
+                        }
+                      }
+                      return const <ProductOptionChoice>[];
+                    }()) ...[
+                      if (deliveryOptionSurchargeControllers[option.id]
+                          case final controller?) ...[
+                        TextFormField(
+                          controller: controller,
+                          enabled: !isSaving,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: <TextInputFormatter>[
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9.,]'),
+                            ),
+                          ],
+                          onChanged: (_) => onDeliverySurchargeChanged(),
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          decoration: InputDecoration(
+                            labelText:
+                                'Empaque · ${option.nombre} ($selectedPriceCurrency)',
+                            hintText: selectedPriceCurrency == 'COP'
+                                ? 'Ej. 1000'
+                                : 'Ej. 1.50',
+                            suffixText: selectedPriceCurrency,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
+                  ],
+                ],
+              ],
               const SizedBox(height: 18),
               optionsSection,
               const SizedBox(height: 8),
