@@ -212,6 +212,79 @@ export async function POST(
     pendingConfiguration: null,
   };
 
+  // Merchant supervision — best-effort. Failures never block the consumer chat.
+  let supervisionConversationId: string | null = null;
+  let attentionVersionAtStart: number | null = null;
+  let skipGeminiForHuman = false;
+  try {
+    const { persistConsumerTurn, shouldSkipGemini } = await import(
+      '../_lib/supervision'
+    );
+    const persisted = await persistConsumerTurn({
+      comercioId: commerceId,
+      commerceName: String(comercio.nombre || ''),
+      sessionId,
+      text: last.text,
+    });
+    if (persisted.ok && persisted.conversationId) {
+      supervisionConversationId = persisted.conversationId;
+      attentionVersionAtStart = persisted.attentionVersion ?? null;
+    }
+    const humanGate = await shouldSkipGemini(commerceId, sessionId);
+    skipGeminiForHuman = humanGate.skip;
+    if (humanGate.conversation) {
+      supervisionConversationId = humanGate.conversation.id;
+      attentionVersionAtStart = humanGate.conversation.attention_version;
+    }
+  } catch {
+    /* supervision optional */
+  }
+
+  if (skipGeminiForHuman) {
+    return json({
+      ok: true,
+      reply:
+        'Un miembro del restaurante está atendiendo esta conversación. Te responderán por aquí en breve 😊',
+      sessionId,
+      model: 'human_handoff',
+      commerceId,
+      requestId,
+      skipped_llm: true,
+      supervision: {
+        mode: 'human_handling',
+        conversationId: supervisionConversationId,
+      },
+      usage: {
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls: 0,
+        geminiHttpCalls: 0,
+      },
+      cart_actions: [],
+      product_cards: [],
+      pending_configuration: null,
+      category_cards: [],
+      order_actions: [],
+    });
+  }
+
+  const persistAssistantReply = async (text: string, extra?: Record<string, unknown>) => {
+    if (!supervisionConversationId || !text.trim()) return;
+    try {
+      const { persistAssistantOrStaffMessage } = await import('../_lib/supervision');
+      await persistAssistantOrStaffMessage({
+        conversationId: supervisionConversationId,
+        comercioId: commerceId,
+        role: 'assistant',
+        text,
+        attentionVersionAtStart,
+        payload: extra,
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+
   // Local Gemini simulator — zero Google HTTP (Phase 3.1 visual/integration).
   if (isGeminiSimulationEnabled()) {
     const simulated = runSimulatedChat({
@@ -234,6 +307,10 @@ export async function POST(
             size_choices: [],
           }
         : null,
+    });
+    void persistAssistantReply(simulated.text, {
+      cart_actions: simulated.cartActions,
+      product_cards: simulated.productCards,
     });
     return json({
       ok: true,
@@ -396,6 +473,11 @@ export async function POST(
       model: result.model,
       tokensInput: result.tokensInput,
       tokensOutput: result.tokensOutput,
+    });
+
+    void persistAssistantReply(result.text, {
+      cart_actions: result.cartActions,
+      product_cards: result.productCards,
     });
 
     return json({

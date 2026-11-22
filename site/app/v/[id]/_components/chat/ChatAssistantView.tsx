@@ -468,6 +468,9 @@ export function ChatAssistantView({
     useState<PendingChatConfiguration | null>(null);
   const pendingConfigurationRef = useRef<PendingChatConfiguration | null>(null);
   pendingConfigurationRef.current = pendingConfiguration;
+  /** When merchant took over — consumer feed recovers staff messages. */
+  const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
+  const supervisionAfterSeqRef = useRef(0);
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -614,9 +617,61 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
+  // Staff messages while human is handling (recovery feed; DB is source of truth).
+  useEffect(() => {
+    if (!humanSupervisionActive || !live) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const sid = ensureChatSessionId(comercioId);
+        const res = await fetch(
+          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?sessionId=${encodeURIComponent(sid)}&afterSeq=${supervisionAfterSeqRef.current}`,
+          { cache: 'no-store' },
+        );
+        const data = (await res.json().catch(() => null)) as {
+          conversation?: { status?: string } | null;
+          messages?: Array<{
+            id: string;
+            seq: number;
+            role: string;
+            body: string;
+          }>;
+        } | null;
+        if (cancelled || !data) return;
+        if (data.conversation?.status === 'ai_handling') {
+          setHumanSupervisionActive(false);
+        }
+        const incoming = data.messages || [];
+        if (!incoming.length) return;
+        setMessages((prev) => {
+          const next = [...prev];
+          for (const m of incoming) {
+            if ((m.seq || 0) <= supervisionAfterSeqRef.current) continue;
+            next.push(createMessage('assistant', m.body));
+            supervisionAfterSeqRef.current = Math.max(
+              supervisionAfterSeqRef.current,
+              m.seq || 0,
+            );
+          }
+          return next;
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [humanSupervisionActive, live, comercioId]);
+
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
     ensureChatSessionId(comercioId);
+    setHumanSupervisionActive(false);
+    supervisionAfterSeqRef.current = 0;
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -1295,10 +1350,18 @@ export function ChatAssistantView({
           product_cards?: ChatProductCardData[];
           category_cards?: ChatCatalogCategory[];
           pending_configuration?: PendingChatConfiguration | null;
+          supervision?: { mode?: string; conversationId?: string | null };
+          model?: string;
         } | null;
 
         if (data?.sessionId) {
           saveChatSessionId(comercioId, data.sessionId);
+        }
+        if (
+          data?.supervision?.mode === 'human_handling' ||
+          data?.model === 'human_handoff'
+        ) {
+          setHumanSupervisionActive(true);
         }
 
         const replyText =
