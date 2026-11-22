@@ -110,7 +110,7 @@ export function ChatSuggestedReplies({
       style={{ backgroundColor: 'var(--chat-composer)' }}
       data-chat-suggested-replies="1"
     >
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-5xl">
         <ChatHorizontalScroller ariaLabel="Respuestas sugeridas" snap={false}>
           {chips.map((chip) => (
             <button

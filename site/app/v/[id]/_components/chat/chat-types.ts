@@ -123,6 +123,11 @@ export type ChatMessage = {
   /** Optional voice note attached to a user bubble. */
   voiceUrl?: string | null;
   voiceDurationMs?: number;
+  /**
+   * True while the voice note is uploading / being transcribed.
+   * UI shows a WhatsApp-like spinner instead of a "0:00" audio control.
+   */
+  voicePending?: boolean;
   attachments?: ChatAttachment[];
   /** Shared GPS for delivery (user-authorized). */
   location?: { lat: number; lng: number; label?: string } | null;

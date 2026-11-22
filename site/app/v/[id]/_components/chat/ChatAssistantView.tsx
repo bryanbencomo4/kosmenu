@@ -39,6 +39,12 @@ import {
 } from './ChatSuggestedReplies';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
+  humanLocalReplyMs,
+  humanReadBeatMs,
+  humanTypingMinMs,
+  sleep,
+} from './chat-timing';
+import {
   CHAT_CATALOG_PAGE_SIZE,
   matchCatalogIntent,
   productsInCategory,
@@ -136,6 +142,7 @@ function createMessage(
     deliveryStatus?: ChatDeliveryStatus;
     voiceUrl?: string | null;
     voiceDurationMs?: number;
+    voicePending?: boolean;
     attachments?: ChatAttachment[];
     location?: ChatMessage['location'];
     replyTo?: ChatReplyRef | null;
@@ -159,6 +166,7 @@ function createMessage(
       options?.deliveryStatus ?? (role === 'user' ? 'sent' : undefined),
     voiceUrl: options?.voiceUrl,
     voiceDurationMs: options?.voiceDurationMs,
+    voicePending: options?.voicePending,
     attachments: options?.attachments,
     location: options?.location,
     replyTo: options?.replyTo ?? undefined,
@@ -358,6 +366,8 @@ export function ChatAssistantView({
 
   // Mobile keyboard: size the chat frame to visualViewport so the header stays
   // visible and the composer sits above the keyboard (100dvh alone often fails).
+  // Full-bleed shell (left+right 0) so desktop isn't stuck left of a white void;
+  // the inner column is centered like the public menu (max-w-5xl).
   useEffect(() => {
     const sync = () => {
       const vv = window.visualViewport;
@@ -365,6 +375,7 @@ export function ChatAssistantView({
         setFrameStyle({
           position: 'fixed',
           inset: 0,
+          width: '100%',
           height: '100dvh',
           maxHeight: '100dvh',
         });
@@ -373,6 +384,7 @@ export function ChatAssistantView({
       setFrameStyle({
         position: 'fixed',
         left: 0,
+        right: 0,
         width: '100%',
         top: `${vv.offsetTop}px`,
         height: `${vv.height}px`,
@@ -522,19 +534,25 @@ export function ChatAssistantView({
   const onSelectCategory = useCallback(
     (categoryId: string) => {
       const msg = buildCategoryMessage(categoryId);
-      if (!msg) return;
-      setMessages((prev) => [...prev, msg]);
-      playAssistantReceivedOnce(msg);
+      if (!msg || isTyping) return;
+      setIsTyping(true);
+      void (async () => {
+        await sleep(humanLocalReplyMs());
+        setMessages((prev) => [...prev, msg]);
+        playAssistantReceivedOnce(msg);
+        setIsTyping(false);
+      })();
     },
-    [buildCategoryMessage, playAssistantReceivedOnce],
+    [buildCategoryMessage, playAssistantReceivedOnce, isTyping],
   );
 
   /**
-   * Deterministic answer for "ver menú / categorías / bebidas…" (no Gemini, no
-   * typing indicator). Returns true when the turn was fully handled locally.
+   * Deterministic answer for "ver menú / categorías / bebidas…" (no Gemini).
+   * Still shows a short "escribiendo…" beat so it doesn't feel instant/robotic.
+   * Returns true when the turn was fully handled locally.
    */
   const answerCatalogIntent = useCallback(
-    (text: string): boolean => {
+    async (text: string): Promise<boolean> => {
       const intent = matchCatalogIntent(text, catalog);
       if (!intent || !catalog) return false;
       const reply =
@@ -544,8 +562,11 @@ export function ChatAssistantView({
               catalogCategories: catalog.categories,
             });
       if (!reply) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      setIsTyping(false);
       return true;
     },
     [catalog, buildCategoryMessage, playAssistantReceivedOnce],
@@ -735,32 +756,34 @@ export function ChatAssistantView({
   const runAssistantTurn = useCallback(
     async (userText: string, history: ChatMessage[]) => {
       // Typing indicator only while a reply is being generated.
+      const turnStartedAt = Date.now();
       setIsTyping(true);
 
       if (!live) {
-        // Demo path: "delivered" = local demo engine accepted the turn (no fake delay).
+        // Demo path: "delivered" = local demo engine accepted the turn.
         setMessages((prev) => markLatestUserMessage(prev, 'delivered'));
-        window.setTimeout(() => {
-          try {
-            const reply = buildChatbotDemoReply(userText, businessName);
-            const demoMsg = createMessage('assistant', reply, { demo: true });
-            setMessages((prev) => [
-              ...markLatestUserMessage(prev, 'read'),
-              demoMsg,
-            ]);
-            playAssistantReceivedOnce(demoMsg);
-          } catch {
-            setErrorText(
-              'No pudimos mostrar la respuesta de demostración. Inténtalo de nuevo.',
-            );
-          } finally {
-            setIsTyping(false);
-          }
-        }, 650);
+        try {
+          const reply = buildChatbotDemoReply(userText, businessName);
+          await sleep(humanTypingMinMs(reply.length));
+          const demoMsg = createMessage('assistant', reply, { demo: true });
+          setMessages((prev) => [
+            ...markLatestUserMessage(prev, 'read'),
+            demoMsg,
+          ]);
+          playAssistantReceivedOnce(demoMsg);
+        } catch {
+          setErrorText(
+            'No pudimos mostrar la respuesta de demostración. Inténtalo de nuevo.',
+          );
+        } finally {
+          setIsTyping(false);
+        }
         return;
       }
 
       try {
+        // Brief "read" beat before the network call so replies never feel instant.
+        await sleep(humanReadBeatMs());
         const sessionId = ensureChatSessionId(comercioId);
         const apiHistory = history
           .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -828,6 +851,13 @@ export function ChatAssistantView({
 
         const replyText =
           (data?.reply || data?.message || '').trim() || FALLBACK;
+
+        // Hold "escribiendo…" until a human-feel minimum, even if Gemini was fast.
+        const holdMs = Math.max(
+          0,
+          humanTypingMinMs(replyText.length) - (Date.now() - turnStartedAt),
+        );
+        if (holdMs > 0) await sleep(holdMs);
 
         if (!res.ok || data?.ok === false) {
           if (
@@ -906,7 +936,7 @@ export function ChatAssistantView({
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
       // "ver menú / categorías / bebidas…" → carousel, never Gemini (live or demo).
-      if (answerCatalogIntent(text)) return;
+      if (await answerCatalogIntent(text)) return;
       await runAssistantTurn(text, nextMessages);
     },
     [isTyping, messages, replyTo, runAssistantTurn, answerCatalogIntent],
@@ -961,6 +991,8 @@ export function ChatAssistantView({
         deliveryStatus: 'sent',
         voiceUrl: payload.url,
         voiceDurationMs: payload.durationMs,
+        // Spinner in the bubble until STT finishes (avoids native audio "0").
+        voicePending: true,
         attachments: [
           {
             id: attachmentId,
@@ -1023,7 +1055,15 @@ export function ChatAssistantView({
       if (isUnusableTranscript(transcript)) {
         // Nothing to send to the model: never run a turn on the placeholder.
         const failMsg = createMessage('assistant', VOICE_NOT_UNDERSTOOD);
-        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), failMsg]);
+        setMessages((prev) => [
+          ...markLatestUserMessage(
+            prev.map((m) =>
+              m.id === userMsg.id ? { ...m, voicePending: false } : m,
+            ),
+            'read',
+          ),
+          failMsg,
+        ]);
         if (note) setErrorText(note);
         playAssistantReceivedOnce(failMsg);
         setIsTyping(false);
@@ -1034,6 +1074,7 @@ export function ChatAssistantView({
       const finalUserMsg: ChatMessage = {
         ...userMsg,
         text: transcript,
+        voicePending: false,
         attachments: userMsg.attachments?.map((a) =>
           a.id === attachmentId ? { ...a, analysis: transcript } : a,
         ),
@@ -1042,7 +1083,7 @@ export function ChatAssistantView({
         prev.map((m) => (m.id === userMsg.id ? finalUserMsg : m)),
       );
       const nextMessages = [...messages, finalUserMsg];
-      if (answerCatalogIntent(transcript)) {
+      if (await answerCatalogIntent(transcript)) {
         setIsTyping(false);
         return;
       }
@@ -1177,7 +1218,7 @@ export function ChatAssistantView({
   return (
     <section
       ref={frameRef}
-      className="z-[55] mx-auto flex w-full max-w-3xl flex-col overflow-hidden shadow-sm sm:max-w-3xl"
+      className="z-[55] flex w-full flex-col overflow-hidden"
       style={{
         ...frameStyle,
         ...themeStyle,
@@ -1197,6 +1238,11 @@ export function ChatAssistantView({
         prefetchChatSounds();
       }}
     >
+      {/* Centered column matches the public menu shell (max-w-5xl). */}
+      <div
+        className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden shadow-sm sm:border-x sm:border-[var(--chat-header-border)]"
+        data-chat-shell="1"
+      >
       <h2 id={regionId} className="sr-only">
         Asistente virtual de {businessName}
       </h2>
@@ -1285,6 +1331,7 @@ export function ChatAssistantView({
           void shareLocation(location);
         }}
       />
+      </div>
 
       {catalog ? (
         <ChatCatalogSheet

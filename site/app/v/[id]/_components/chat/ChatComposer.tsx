@@ -800,7 +800,7 @@ export function ChatComposer({
 
       {replyTo ? (
         <div
-          className="mx-auto mb-1.5 flex w-full max-w-3xl items-center gap-2 overflow-hidden rounded-xl border-l-[3px] border-[var(--chat-send)] bg-[var(--chat-input)] py-1 pl-2.5 pr-1 shadow-sm"
+          className="mx-auto mb-1.5 flex w-full max-w-5xl items-center gap-2 overflow-hidden rounded-xl border-l-[3px] border-[var(--chat-send)] bg-[var(--chat-input)] py-1 pl-2.5 pr-1 shadow-sm"
           data-chat-reply-bar="1"
           data-chat-reply-id={replyTo.messageId}
         >
@@ -834,7 +834,7 @@ export function ChatComposer({
 
       {voiceDraft ? (
         <div
-          className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3 py-2"
+          className="mx-auto mb-2 flex max-w-5xl items-center gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3 py-2"
           data-chat-voice-draft="1"
         >
           <audio
@@ -872,7 +872,7 @@ export function ChatComposer({
       {emojiOpen ? (
         <div
           id={emojiPanelId}
-          className="mx-auto mb-2 max-w-3xl overflow-hidden rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] p-2 shadow-lg"
+          className="mx-auto mb-2 max-w-5xl overflow-hidden rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] p-2 shadow-lg"
           data-chat-emoji-panel="1"
         >
           <div className="grid max-h-44 grid-cols-8 gap-1 overflow-y-auto overscroll-contain touch-manipulation sm:grid-cols-10">
@@ -892,7 +892,7 @@ export function ChatComposer({
 
       {attachOpen ? (
         <div
-          className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] p-2 shadow-lg"
+          className="mx-auto mb-2 flex max-w-5xl flex-wrap gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] p-2 shadow-lg"
           data-chat-attach-panel="1"
         >
           <button
@@ -928,7 +928,7 @@ export function ChatComposer({
         </div>
       ) : null}
 
-      <div className="relative mx-auto flex w-full max-w-3xl items-end gap-2">
+      <div className="relative mx-auto flex w-full max-w-5xl items-end gap-2">
         {lockedRecording ? (
           // Locked (hands-free): Cancel → discard, Stop → voiceDraft preview, Send → send now.
           <>

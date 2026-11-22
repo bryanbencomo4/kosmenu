@@ -381,15 +381,40 @@ export function ChatMessageBubble({
           ) : null}
           {hasVoice ? (
             <div className="mb-1 min-w-[12rem]" data-chat-voice="1">
-              <audio
-                controls
-                preload="metadata"
-                src={message.voiceUrl || undefined}
-                className="h-9 w-full max-w-[16rem]"
-              />
-              <p className="mt-0.5 text-[11px] text-[var(--chat-text-muted)]">
-                Nota de voz · {formatDuration(message.voiceDurationMs)}
-              </p>
+              {message.voicePending ? (
+                <div
+                  className="flex min-h-9 w-full max-w-[16rem] items-center gap-2.5 rounded-lg bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] px-2.5 py-1.5"
+                  data-chat-voice-pending="1"
+                  role="status"
+                  aria-live="polite"
+                  aria-label="Procesando nota de voz"
+                >
+                  <span
+                    className="inline-block h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[var(--chat-text-muted)] border-t-[var(--chat-send)]"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium leading-tight text-[var(--chat-text)]">
+                      Nota de voz
+                    </p>
+                    <p className="truncate text-[11px] leading-tight text-[var(--chat-text-muted)]">
+                      Procesando…
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={message.voiceUrl || undefined}
+                    className="h-9 w-full max-w-[16rem]"
+                  />
+                  <p className="mt-0.5 text-[11px] text-[var(--chat-text-muted)]">
+                    Nota de voz · {formatDuration(message.voiceDurationMs)}
+                  </p>
+                </>
+              )}
             </div>
           ) : null}
           {mediaAttachments.map((att) =>
@@ -464,7 +489,7 @@ export function ChatMessageBubble({
 
       {catalogCategories.length > 0 ? (
         <div
-          className="-mx-3 mt-1.5 w-[calc(100%+1.5rem)] max-w-3xl"
+          className="-mx-3 mt-1.5 w-[calc(100%+1.5rem)] max-w-5xl"
           data-chat-catalog-categories="1"
         >
           <ChatCategoryCarousel
@@ -476,7 +501,7 @@ export function ChatMessageBubble({
 
       {catalogProducts.length > 0 || standaloneCards.length > 0 ? (
         <div
-          className="-mx-3 mt-1.5 w-[calc(100%+1.5rem)] max-w-3xl"
+          className="-mx-3 mt-1.5 w-[calc(100%+1.5rem)] max-w-5xl"
           data-chat-catalog-products="1"
         >
           {catalogProducts.length > 0 ? (

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   DragEvent as ReactDragEvent,
   KeyboardEvent,
@@ -32,16 +33,9 @@ type DragState = {
 
 /**
  * Horizontal rail for chat carousels.
- * - `touch-pan-x touch-pan-y`: horizontal drags scroll the rail, vertical drags
- *   still pan the chat list (we never lock to pan-x only).
- * - `overscroll-x-contain`: no browser back-swipe / parent horizontal chaining.
- * - Touch moves that are clearly horizontal don't bubble to React ancestors
- *   (future swipe-to-reply gestures); vertical moves bubble untouched.
- * - Mouse / pen: press-and-drag scrolls the rail (touch keeps native scrolling).
- *   A plain click on a button / link still works; only a press that moves past
- *   a small slop becomes a drag, which suppresses the click that follows.
- *   Form fields (`input,textarea,select`) never start a drag.
- * - Trailing spacer + child widths < container leave a peek of the next card.
+ * - Touch: native momentum scrolling.
+ * - Mouse / pen: press-and-drag scrolls the rail.
+ * - Desktop: chevron buttons when content overflows (clear PC affordance).
  */
 export function ChatHorizontalScroller({
   children,
@@ -54,6 +48,34 @@ export function ChatHorizontalScroller({
   const start = useRef<{ x: number; y: number } | null>(null);
   const drag = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
+  const [canPrev, setCanPrev] = useState(false);
+  const [canNext, setCanNext] = useState(false);
+
+  const syncOverflow = useCallback(() => {
+    const el = ref.current;
+    if (!el) {
+      setCanPrev(false);
+      setCanNext(false);
+      return;
+    }
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 4) {
+      setCanPrev(false);
+      setCanNext(false);
+      return;
+    }
+    setCanPrev(el.scrollLeft > 4);
+    setCanNext(el.scrollLeft < max - 4);
+  }, []);
+
+  const scrollByPage = useCallback((dir: -1 | 1) => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollBy({
+      left: dir * Math.max(140, el.clientWidth * 0.75),
+      behavior: 'smooth',
+    });
+  }, []);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -98,25 +120,20 @@ export function ChatHorizontalScroller({
       el.style.userSelect = '';
     }
     if (d.dragging) {
-      // Swallow the click that the browser fires right after a drag release.
       suppressClick.current = true;
       window.setTimeout(() => {
         suppressClick.current = false;
       }, 0);
     }
     drag.current = null;
-  }, []);
+    syncOverflow();
+  }, [syncOverflow]);
 
   const onPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    // Touch keeps native momentum scrolling; only mouse / pen get JS drag.
     if (e.pointerType === 'touch') return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = ref.current;
     if (!el || el.scrollWidth <= el.clientWidth) return;
-    // Form fields keep their own pointer behavior. Buttons / links ARE allowed to
-    // start a press (category cards are whole-card buttons): a plain click still
-    // activates them; only movement past DRAG_SLOP_PX becomes a drag (and then
-    // the trailing click is swallowed in `onClickCapture`).
     if ((e.target as Element | null)?.closest('input,textarea,select,[data-chat-no-drag]')) {
       return;
     }
@@ -141,7 +158,6 @@ export function ChatHorizontalScroller({
       } catch {
         /* ignore */
       }
-      // Snap + smooth scrolling fight 1:1 dragging; restore on release.
       el.style.scrollSnapType = 'none';
       el.style.scrollBehavior = 'auto';
       el.style.userSelect = 'none';
@@ -150,7 +166,6 @@ export function ChatHorizontalScroller({
     e.preventDefault();
   }, []);
 
-  // Capture phase: cancel the click that follows a real drag.
   const onClickCapture = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (suppressClick.current) {
       e.preventDefault();
@@ -159,45 +174,87 @@ export function ChatHorizontalScroller({
     }
   }, []);
 
-  // Don't let the browser start native image / link drags while we drag the rail.
   const onDragStart = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
   }, []);
 
   useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    syncOverflow();
+    const onScroll = () => syncOverflow();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => syncOverflow())
+        : null;
+    ro?.observe(el);
+    window.addEventListener('resize', syncOverflow);
     return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro?.disconnect();
+      window.removeEventListener('resize', syncOverflow);
       drag.current = null;
     };
-  }, []);
+  }, [syncOverflow, children]);
+
+  const showArrows = canPrev || canNext;
 
   return (
-    <div
-      ref={ref}
-      data-chat-h-scroll="1"
-      role="group"
-      aria-label={ariaLabel}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onTouchCancel={onTouchEnd}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onClickCapture={onClickCapture}
-      onDragStart={onDragStart}
-      // Scrollbar stays hidden; desktop users scroll by dragging (grab cursor).
-      className={`touch-pan-x touch-pan-y cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
-        snap ? 'snap-x snap-proximity scroll-pl-3' : ''
-      } ${className}`}
-    >
+    <div className="relative" data-chat-h-scroll-wrap="1">
       <div
-        className={`flex w-max gap-2.5 px-3 pb-1 after:block after:w-6 after:shrink-0 after:content-[''] ${trackClassName}`}
+        ref={ref}
+        data-chat-h-scroll="1"
+        role="group"
+        aria-label={ariaLabel}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onClickCapture={onClickCapture}
+        onDragStart={onDragStart}
+        className={`touch-pan-x touch-pan-y cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
+          snap ? 'snap-x snap-proximity scroll-pl-3' : ''
+        } ${className}`}
       >
-        {children}
+        <div
+          className={`flex w-max gap-2.5 px-3 pb-1 after:block after:w-6 after:shrink-0 after:content-[''] ${trackClassName}`}
+        >
+          {children}
+        </div>
       </div>
+      {showArrows ? (
+        <>
+          <button
+            type="button"
+            data-chat-h-scroll-prev="1"
+            data-chat-no-drag="1"
+            aria-label="Anterior"
+            disabled={!canPrev}
+            onClick={() => scrollByPage(-1)}
+            className="absolute left-1 top-1/2 z-[2] hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-[var(--chat-text)] shadow-md disabled:opacity-30 sm:inline-flex"
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            data-chat-h-scroll-next="1"
+            data-chat-no-drag="1"
+            aria-label="Siguiente"
+            disabled={!canNext}
+            onClick={() => scrollByPage(1)}
+            className="absolute right-1 top-1/2 z-[2] hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-[var(--chat-text)] shadow-md disabled:opacity-30 sm:inline-flex"
+          >
+            <ChevronRight className="h-4 w-4" strokeWidth={2.2} aria-hidden />
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }

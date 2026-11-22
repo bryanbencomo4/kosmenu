@@ -322,7 +322,7 @@ export function ChatMessageList({
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
-        <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col pb-1">
+        <div ref={contentRef} className="mx-auto flex w-full max-w-5xl flex-col pb-1">
           {visible.map((message, index) => {
             const globalIndex = offset + index;
             const prev = messages[globalIndex - 1];

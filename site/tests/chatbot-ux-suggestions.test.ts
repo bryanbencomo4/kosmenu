@@ -86,6 +86,8 @@ describe('chat UX wiring (source assertions)', () => {
     expect(s).toMatch(/cursor-grab/);
     expect(s).toMatch(/active:cursor-grabbing/);
     expect(s).toMatch(/pointerType === 'touch'/);
+    expect(s).toMatch(/data-chat-h-scroll-next/);
+    expect(s).toMatch(/data-chat-h-scroll-prev/);
   });
 
   it('cart button + add buttons are wired to fly-to-cart', () => {
