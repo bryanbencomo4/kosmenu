@@ -62,10 +62,11 @@ function ChatCatalogSheetBody({
   const [visible, setVisible] = useState(CHAT_CATALOG_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
 
-  // Restore focus to the opener on close; focus search on open.
+  // Restore focus to the opener on close. Focus the dialog shell (not the
+  // search input) so mobile keyboards stay closed and products stay visible.
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
-    searchRef.current?.focus({ preventScroll: true });
+    dialogRef.current?.focus({ preventScroll: true });
     return () => {
       if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
         opener.focus({ preventScroll: true });
@@ -155,7 +156,8 @@ function ChatCatalogSheetBody({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative flex h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-[var(--chat-card-border)] bg-[var(--chat-bg)] text-[var(--chat-text)] shadow-2xl sm:h-[min(42rem,85dvh)] sm:rounded-2xl"
+        tabIndex={-1}
+        className="relative flex h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-[var(--chat-card-border)] bg-[var(--chat-bg)] text-[var(--chat-text)] shadow-2xl outline-none sm:h-[min(42rem,85dvh)] sm:rounded-2xl"
       >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--chat-header-border)] bg-[var(--chat-header)] px-4 py-3">
           <h2 id={titleId} className="text-[16px] font-semibold">
