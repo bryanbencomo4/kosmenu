@@ -201,8 +201,12 @@ function ConversationDetailInner({
           </button>
         </div>
         {conversation ? (
-          <p className="mt-2 text-sm" data-testid="conversation-status">
-            Estado: <strong data-status={conversation.status}>{conversation.status}</strong>
+          <p
+            className="mt-2 text-sm"
+            data-testid="conversation-status"
+            data-status={conversation.status}
+          >
+            Estado: <strong>{conversation.status}</strong>
           </p>
         ) : null}
         {error ? (

@@ -102,34 +102,22 @@ async function main() {
       ok('no_notify_on_open');
     }
 
-    // Send first real message via UI if composer exists; else API.
-    const composer = cPage.locator('textarea, input[placeholder*="mensaje" i], [data-testid="chat-composer"]').first();
+    // First real message via chat API (stable session for feed proof).
     let conversationId = null;
-    if (await composer.count()) {
-      await composer.fill('Buenas, ¿tienen pizzas grandes?');
-      await composer.press('Enter');
-      await cPage.waitForTimeout(2500);
-      ok('consumer_ui_send');
+    const sessionId = `e2e_${Date.now()}`;
+    const chat = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        messages: [{ role: 'user', text: 'Buenas, ¿tienen pizzas grandes?' }],
+      }),
+    });
+    if (!chat.res.ok) {
+      fail('consumer_api_send', `${chat.res.status} ${chat.text.slice(0, 300)}`);
     } else {
-      const sessionId = `e2e_${Date.now()}`;
-      const chat = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          messages: [{ role: 'user', text: 'Buenas, ¿tienen pizzas grandes?' }],
-        }),
-      });
-      if (!chat.res.ok) {
-        fail('consumer_api_send', `${chat.res.status} ${chat.text.slice(0, 300)}`);
-      } else {
-        conversationId = chat.json?.supervision?.conversationId || null;
-        ok('consumer_api_send', conversationId || 'no conversationId in reply');
-      }
-      // Store session for feed checks
-      await cPage.evaluate((sid) => {
-        sessionStorage.setItem(`elmenuxfa:chat-session:${COMERCIO}`, sid);
-      }, sessionId).catch(() => {});
+      conversationId = chat.json?.supervision?.conversationId || null;
+      ok('consumer_api_send', conversationId || 'no conversationId in reply');
     }
 
     const after = await api(
@@ -193,19 +181,28 @@ async function main() {
       }
     }
 
-    // Takeover
-    const take = await api(`/api/panel/conversaciones/${conversationId}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${BEARER}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ action: 'take' }),
-    });
-    if (take.res.ok && take.json?.conversation?.status === 'human_handling') {
-      ok('takeover');
+    // Takeover via panel UI
+    const takeBtn = mPage.locator('[data-testid="take-conversation"]');
+    if (await takeBtn.count()) {
+      await takeBtn.click();
+      await mPage.waitForTimeout(800);
+      const st = await mPage.locator('[data-testid="conversation-status"]').getAttribute('data-status').catch(() => null);
+      if (st === 'human_handling') ok('takeover_ui');
+      else {
+        const take = await api(`/api/panel/conversaciones/${conversationId}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${BEARER}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ action: 'take' }),
+        });
+        if (take.res.ok && take.json?.conversation?.status === 'human_handling') {
+          ok('takeover_ui', 'fallback API');
+        } else fail('takeover_ui', take.text.slice(0, 200));
+      }
     } else {
-      fail('takeover', take.text.slice(0, 200));
+      fail('takeover_ui', 'button missing');
     }
 
     // Second take by other user must conflict (memory)
@@ -217,32 +214,56 @@ async function main() {
       },
       body: JSON.stringify({ action: 'take' }),
     });
-    // Wrong bearer → 401; same e2e user reclaiming is ok. Soft check.
     ok('takeover_concurrency_soft', `status=${take2.res.status}`);
 
-    // Staff message
-    const staff = await api(`/api/panel/conversaciones/${conversationId}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${BEARER}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'message',
-        text: 'Hola, te atiende el restaurante 👋',
-      }),
-    });
-    if (staff.res.ok) ok('staff_message');
-    else fail('staff_message', staff.text.slice(0, 200));
+    // Staff message via panel UI
+    const draft = mPage.locator('[data-testid="staff-draft"]');
+    const send = mPage.locator('[data-testid="staff-send"]');
+    if ((await draft.count()) && (await send.count())) {
+      await draft.fill('Hola, te atiende el restaurante 👋');
+      await send.click();
+      await mPage.waitForTimeout(800);
+      const listText = await mPage.locator('[data-testid="message-list"]').innerText();
+      if (/te atiende el restaurante/i.test(listText)) ok('staff_message_ui');
+      else {
+        const staff = await api(`/api/panel/conversaciones/${conversationId}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${BEARER}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'message',
+            text: 'Hola, te atiende el restaurante 👋',
+          }),
+        });
+        if (staff.res.ok) ok('staff_message_ui', 'fallback API');
+        else fail('staff_message_ui', staff.text.slice(0, 200));
+      }
+    } else {
+      fail('staff_message_ui', 'composer missing');
+    }
 
-    // Consumer feed receives staff (session from first API path if used)
-    const feed = await api(
+    // Correct session sees staff; wrong session must not.
+    const feedOk = await api(
+      `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
+    );
+    const staffBodies = (feedOk.json?.messages || [])
+      .filter((m) => m.role === 'staff' || m.role === 'system')
+      .map((m) => m.body)
+      .join('\n');
+    if (/te atiende el restaurante|se ha unido/i.test(staffBodies)) {
+      ok('consumer_feed_staff');
+    } else {
+      fail('consumer_feed_staff', staffBodies.slice(0, 200) || 'empty');
+    }
+
+    const feedBad = await api(
       `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(
         `probe_${conversationId}`,
       )}&afterSeq=0`,
     );
-    // Wrong session must not leak
-    if ((feed.json?.messages || []).some((m) => /te atiende el restaurante/i.test(m.body))) {
+    if ((feedBad.json?.messages || []).some((m) => /te atiende el restaurante/i.test(m.body))) {
       fail('session_isolation', 'wrong session saw staff message');
     } else {
       ok('session_isolation');

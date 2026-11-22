@@ -495,6 +495,14 @@ export async function POST(
       model: result.model,
       commerceId,
       requestId,
+      ...(supervisionConversationId
+        ? {
+            supervision: {
+              mode: 'ai_handling',
+              conversationId: supervisionConversationId,
+            },
+          }
+        : {}),
       usage: {
         tokensInput: result.tokensInput,
         tokensOutput: result.tokensOutput,

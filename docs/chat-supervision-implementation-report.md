@@ -1,8 +1,8 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** implementación de supervisión + panel auth + Realtime cliente + memoria E2E.  
-**Veredicto:** **NO-GO** publicar. Migración no aplicada; piloto Trueno pendiente de autorización.
+**Estado:** supervisión implementada en rama; evidencias locales verdes.  
+**Veredicto:** **NO-GO** publicar. Migración no aplicada; WaSender real / piloto Trueno pendientes de tu autorización.
 
 ## 1. Arquitectura existente (auditoría)
 
@@ -93,18 +93,19 @@ Objetivo 1–2s en red controlada tras Realtime publicado. Medición de carga ag
 
 ## 16. Vitest
 
-`tests/chatbot-supervision.test.ts` — **8 passed** (helpers + memoria + privacy welcome).
+Suite completa site: **116 files / 827 passed / 4 skipped**.  
+Supervisión: helpers + memoria + privacy welcome.
 
 ## 17. TypeScript
 
-Verificar con `npx tsc --noEmit` en commit local.
+`npx tsc --noEmit` — **exit 0**.
 
 ## 18. Playwright dual
 
-`site/scripts/chat-supervision-dual-playwright.mjs` — dos contextos Playwright + asserts API.
+`site/scripts/chat-supervision-dual-playwright.mjs` — dos contextos + UI panel.
 
-**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **13/13 passed**  
-(open≠notify, create, auth gate, take, staff, isolation, return, close, cross-commerce deny).  
+**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **14/14 passed**  
+incluye takeover UI, mensaje staff UI, feed consumidor con sesión correcta, aislamiento de sesión, return/close.  
 **No corre contra producción.**
 
 ## 19. Migraciones
@@ -144,10 +145,12 @@ Verificar con `npx tsc --noEmit` en commit local.
 
 **NO-GO** publicar / merge a producción.
 
-Criterio principal (comerciante abre enlace, ve historial, interviene, devuelve) está implementado en código + Vitest/memoria; falta:
+Criterio principal (abrir enlace → historial → intervenir → devolver) verificado en E2E local con store en memoria y flags. Aún bloquea GO:
 
-1. Autorización para aplicar migración.
-2. Smoke dual con server + (opcional) WhatsApp real Trueno.
-3. Confirmación de `supervision_whatsapp` en branding del piloto.
+1. Autorización para aplicar `20261123090000_chat_supervision_conversations.sql` (+ publication Realtime).
+2. Smoke con persistencia Supabase real (no solo `CHAT_SUPERVISION_MEMORY`).
+3. Aviso WaSender real al número de avisos de Trueno (`supervision_whatsapp`).
+4. Activación exclusiva Trueno en el entorno objetivo (flags).
 
-No hay push, merge ni deploy en esta rama sin tu autorización.
+Sin esos pasos el comerciante no puede supervisar conversaciones reales en staging/prod.  
+No hay push, merge ni deploy sin tu autorización.

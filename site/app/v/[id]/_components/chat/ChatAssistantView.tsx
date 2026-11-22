@@ -468,9 +468,12 @@ export function ChatAssistantView({
     useState<PendingChatConfiguration | null>(null);
   const pendingConfigurationRef = useRef<PendingChatConfiguration | null>(null);
   pendingConfigurationRef.current = pendingConfiguration;
-  /** When merchant took over — consumer feed recovers staff messages. */
+  /** Merchant is actively handling — skip expecting Gemini replies. */
   const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
+  /** Watch feed after server created a supervised conversation (idle takeover). */
+  const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
   const supervisionAfterSeqRef = useRef(0);
+  const supervisionSeenIdsRef = useRef<Set<string>>(new Set());
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -617,13 +620,11 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
-  // Staff/system messages while human is handling.
-  // Consumers are anonymous (no Supabase auth) — recovery uses session-scoped REST
-  // (HMAC-bound). Merchant panel uses Realtime; this feed is not 1–5s polling.
+  // Staff/system (and late assistant) via session-scoped REST after a conversation
+  // exists — so idle takeover still reaches the consumer. Not 1–5s polling.
   useEffect(() => {
-    if (!humanSupervisionActive || !live) return;
+    if (!supervisionWatchActive || !live) return;
     let cancelled = false;
-    const seenIds = new Set<string>();
     const tick = async () => {
       try {
         const sid = ensureChatSessionId(comercioId);
@@ -641,28 +642,24 @@ export function ChatAssistantView({
           }>;
         } | null;
         if (cancelled || !data) return;
-        if (
-          data.conversation?.status === 'ai_handling' ||
-          data.conversation?.status === 'closed'
-        ) {
+        const status = data.conversation?.status;
+        if (status === 'human_handling' || status === 'needs_attention') {
+          setHumanSupervisionActive(true);
+        } else if (status === 'ai_handling' || status === 'closed') {
           setHumanSupervisionActive(false);
         }
-        const incoming = data.messages || [];
+        const incoming = (data.messages || []).filter(
+          (m) => m.role === 'staff' || m.role === 'system',
+        );
         if (!incoming.length) return;
         setMessages((prev) => {
           const next = [...prev];
           for (const m of incoming) {
             if ((m.seq || 0) <= supervisionAfterSeqRef.current) continue;
-            if (seenIds.has(m.id)) continue;
-            seenIds.add(m.id);
-            const prefix =
-              m.role === 'staff'
-                ? ''
-                : m.role === 'system'
-                  ? ''
-                  : '';
+            if (supervisionSeenIdsRef.current.has(m.id)) continue;
+            supervisionSeenIdsRef.current.add(m.id);
             next.push(
-              createMessage('assistant', `${prefix}${m.body}`, {
+              createMessage('assistant', m.body, {
                 demo: m.role === 'system',
               }),
             );
@@ -688,13 +685,15 @@ export function ChatAssistantView({
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [humanSupervisionActive, live, comercioId]);
+  }, [supervisionWatchActive, live, comercioId]);
 
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
     ensureChatSessionId(comercioId);
     setHumanSupervisionActive(false);
+    setSupervisionWatchActive(false);
     supervisionAfterSeqRef.current = 0;
+    supervisionSeenIdsRef.current = new Set();
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -1380,11 +1379,15 @@ export function ChatAssistantView({
         if (data?.sessionId) {
           saveChatSessionId(comercioId, data.sessionId);
         }
+        if (data?.supervision?.conversationId) {
+          setSupervisionWatchActive(true);
+        }
         if (
           data?.supervision?.mode === 'human_handling' ||
           data?.model === 'human_handoff'
         ) {
           setHumanSupervisionActive(true);
+          setSupervisionWatchActive(true);
         }
 
         const replyText =
