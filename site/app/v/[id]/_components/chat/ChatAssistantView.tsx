@@ -22,6 +22,7 @@ import {
   clearChatHistory,
   ensureChatSessionId,
   loadChatHistory,
+  clearSupervisionFeedToken,
   loadSupervisionAfterSeq,
   loadSupervisionFeedToken,
   saveChatHistory,
@@ -735,6 +736,33 @@ export function ChatAssistantView({
               : undefined,
           },
         );
+        if (res.status === 401) {
+          // Expired/invalid HMAC — remint without putting sessionId on GET.
+          supervisionFeedTokenRef.current = null;
+          clearSupervisionFeedToken(comercioId);
+          try {
+            const remint = await fetch(
+              `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: sid }),
+                cache: 'no-store',
+              },
+            );
+            const reminted = (await remint.json().catch(() => null)) as {
+              feedToken?: string | null;
+            } | null;
+            if (reminted?.feedToken) {
+              supervisionFeedTokenRef.current = reminted.feedToken;
+              saveSupervisionFeedToken(comercioId, reminted.feedToken);
+            }
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        if (!res.ok) return;
         const data = (await res.json().catch(() => null)) as {
           conversation?: { status?: string } | null;
           messages?: Array<{

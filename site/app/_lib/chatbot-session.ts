@@ -77,6 +77,15 @@ export function saveSupervisionFeedToken(comercioId: string, token: string) {
   }
 }
 
+export function clearSupervisionFeedToken(comercioId: string) {
+  if (!canUseStorage() || !comercioId.trim()) return;
+  try {
+    sessionStorage.removeItem(feedTokenKey(comercioId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadSupervisionAfterSeq(comercioId: string): number {
   if (!canUseStorage() || !comercioId.trim()) return 0;
   try {

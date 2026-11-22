@@ -409,8 +409,39 @@ export async function POST(
     });
   }
 
+  const humanHandoffJson = (extra?: Record<string, unknown>) =>
+    json({
+      ok: true,
+      reply:
+        'Un miembro del restaurante está atendiendo esta conversación. Te responderán por aquí en breve 😊',
+      sessionId,
+      model: 'human_handoff',
+      commerceId,
+      requestId,
+      skipped_llm: true,
+      supervision: supervisionPayload('human_handling'),
+      usage: {
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls: 0,
+        geminiHttpCalls: 0,
+      },
+      cart_actions: [],
+      product_cards: [],
+      pending_configuration: null,
+      category_cards: [],
+      order_actions: [],
+      ...extra,
+    });
+
   // Deterministic paths — zero Gemini HTTP (cost control).
   if (body.deterministic_action === 'complete_pending_config') {
+    const discardedDet = await discardInFlightAssistantReply({
+      commerceId,
+      sessionId,
+      attentionVersionAtStart,
+    });
+    if (discardedDet) return humanHandoffJson();
     const pending = body.pending_configuration;
     if (!pending) {
       return publicError(400, 'missing_pending_configuration');
@@ -477,6 +508,12 @@ export async function POST(
     });
   }
   if (body.deterministic_action === 'summarize_cart') {
+    const discardedDet = await discardInFlightAssistantReply({
+      commerceId,
+      sessionId,
+      attentionVersionAtStart,
+    });
+    if (discardedDet) return humanHandoffJson();
     const result = runDeterministicCartSummary({ toolCtx, requestId });
     await persistAssistantReply(result.text, {
       cart_actions: result.cartActions,
@@ -507,6 +544,12 @@ export async function POST(
     });
   }
   if (body.deterministic_action === 'delivery_info') {
+    const discardedDet = await discardInFlightAssistantReply({
+      commerceId,
+      sessionId,
+      attentionVersionAtStart,
+    });
+    if (discardedDet) return humanHandoffJson();
     const result = runDeterministicDeliveryInfo({ toolCtx, requestId });
     await persistAssistantReply(result.text);
     return json({

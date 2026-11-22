@@ -34,6 +34,7 @@ import {
   memoryGetBySession,
   memoryGetConversation,
   memoryInsertEvent,
+  memoryListEvents,
   memoryListMessages,
   memoryUpdateConversation,
   memoryUpdateEvent,
@@ -71,6 +72,23 @@ function scheduleAfterResponse(task: () => Promise<unknown>) {
     void Promise.resolve()
       .then(task)
       .catch(() => {});
+  }
+}
+
+async function hasSupervisionEvent(dedupeKey: string): Promise<boolean> {
+  if (isSupervisionMemoryEnabled()) {
+    return memoryListEvents().some((e) => e.dedupe_key === dedupeKey);
+  }
+  try {
+    const sb = getServiceSupabaseClient();
+    const { data } = await sb
+      .from('chat_supervision_events')
+      .select('id')
+      .eq('dedupe_key', dedupeKey)
+      .maybeSingle();
+    return Boolean(data?.id);
+  } catch {
+    return false;
   }
 }
 
@@ -349,7 +367,13 @@ export async function persistConsumerTurn(
           return { ok: false, error: insert.error?.message || 'insert_failed' };
         }
         conversation = again.data as Record<string, unknown>;
-        isNewConversation = false;
+        // Winner may have created the row then died before WaSender — recover.
+        const version = Number(conversation.attention_version || 1);
+        const dedupe = newConversationNotifyDedupeKey(
+          String(conversation.id),
+          version,
+        );
+        isNewConversation = !(await hasSupervisionEvent(dedupe));
       } else {
         conversation = insert.data as Record<string, unknown>;
       }
@@ -381,6 +405,10 @@ export async function persistConsumerTurn(
       )
       .select('id')
       .maybeSingle();
+
+    if (msg.error) {
+      return { ok: false, error: msg.error.message || 'message_insert_failed' };
+    }
 
     const messageInserted = Boolean(msg.data?.id);
     if (messageInserted) {
@@ -458,27 +486,6 @@ export async function persistConsumerTurn(
         String(conversation!.status),
         input.text,
       );
-      if (cfg.wasenderNotify) {
-        if (escalated) {
-          scheduleAfterResponse(() =>
-            enqueueNeedsAttentionNotify({
-              conversationId,
-              comercioId: input.comercioId,
-              commerceName: input.commerceName,
-            }),
-          );
-        } else if (isNewConversation) {
-          scheduleAfterResponse(() =>
-            enqueueNewConversationNotify({
-              conversationId,
-              comercioId: input.comercioId,
-              commerceName: input.commerceName,
-              attentionVersion: Number(conversation!.attention_version || 1),
-            }),
-          );
-        }
-      }
-
       scheduleAfterResponse(() =>
         publishConversationEvent(input.comercioId, conversationId, {
           type: 'message_created',
@@ -494,6 +501,42 @@ export async function persistConsumerTurn(
           publicWhatsapp: input.publicWhatsapp,
           attentionVersion: Number(conversation!.attention_version || 1),
         }).catch(() => {});
+      }
+    }
+
+    // Notify outside messageInserted so concurrent first-turn losers can still
+    // enqueue when the winner created the row but died before WaSender.
+    if (cfg.wasenderNotify) {
+      const attentionVersion = Number(conversation!.attention_version || 1);
+      const escalated = didEscalateToNeedsAttention(
+        previousStatus,
+        String(conversation!.status),
+        input.text,
+      );
+      if (escalated) {
+        scheduleAfterResponse(() =>
+          enqueueNeedsAttentionNotify({
+            conversationId,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+          }),
+        );
+      } else {
+        const dedupe = newConversationNotifyDedupeKey(
+          conversationId,
+          attentionVersion,
+        );
+        const missingEvent = !(await hasSupervisionEvent(dedupe));
+        if (isNewConversation || missingEvent) {
+          scheduleAfterResponse(() =>
+            enqueueNewConversationNotify({
+              conversationId,
+              comercioId: input.comercioId,
+              commerceName: input.commerceName,
+              attentionVersion,
+            }),
+          );
+        }
       }
     }
 

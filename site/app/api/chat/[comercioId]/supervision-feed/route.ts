@@ -5,6 +5,7 @@ import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
 import {
   hashConsumerSession,
+  mintSupervisionFeedToken,
   verifySupervisionFeedToken,
 } from '../../_lib/supervision';
 import { isSupervisionEnabledForCommerce } from '../../_lib/supervision-config';
@@ -15,6 +16,74 @@ import {
 } from '../../_lib/supervision-memory';
 
 export const runtime = 'nodejs';
+
+/**
+ * Mint a fresh HMAC feed token for an existing consumer session.
+ * Body: { sessionId } — sessionId stays off the query string.
+ */
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ comercioId: string }> },
+) {
+  const ip = getClientIp(request);
+  const rl = consumeRateLimit(`chat:sup-feed-token:${ip}`, 20, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  const { comercioId: raw } = await context.params;
+  const pathId = decodeURIComponent(raw || '').trim();
+  const menu = await loadPublicMenuByIdentifier(pathId);
+  if (!menu) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  const commerceId = menu.resolvedComercioId;
+  if (!isSupervisionEnabledForCommerce(commerceId)) {
+    return NextResponse.json({ ok: true, enabled: false, feedToken: null });
+  }
+
+  let sessionId = '';
+  try {
+    const body = (await request.json()) as { sessionId?: string };
+    sessionId = String(body?.sessionId || '').trim();
+  } catch {
+    return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
+  }
+  if (!sessionId || sessionId.length > 80) {
+    return NextResponse.json({ error: 'missing_session' }, { status: 400 });
+  }
+
+  if (isSupervisionMemoryEnabled()) {
+    const conversation = memoryGetBySession(commerceId, sessionId);
+    if (!conversation) {
+      return NextResponse.json({ ok: true, enabled: true, feedToken: null });
+    }
+    return NextResponse.json({
+      ok: true,
+      enabled: true,
+      feedToken: mintSupervisionFeedToken(commerceId, sessionId),
+      conversationId: conversation.id,
+    });
+  }
+
+  const sb = getServiceSupabaseClient();
+  const hash = hashConsumerSession(commerceId, sessionId);
+  const { data: conversation } = await sb
+    .from('chat_conversations')
+    .select('id')
+    .eq('comercio_id', commerceId)
+    .eq('consumer_session_hash', hash)
+    .maybeSingle();
+  if (!conversation) {
+    return NextResponse.json({ ok: true, enabled: true, feedToken: null });
+  }
+  return NextResponse.json({
+    ok: true,
+    enabled: true,
+    feedToken: mintSupervisionFeedToken(commerceId, sessionId),
+    conversationId: conversation.id,
+  });
+}
 
 /**
  * Consumer-scoped feed of new messages for an active supervised conversation.
