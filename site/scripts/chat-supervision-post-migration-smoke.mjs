@@ -157,6 +157,33 @@ if (
 }
 ok('gemini_paused_while_human');
 
+const whileHumanEscalation = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    sessionId,
+    messages: [
+      {
+        role: 'user',
+        text: 'Tengo un reclamo, quiero hablar con el encargado',
+      },
+    ],
+  }),
+});
+if (
+  !whileHumanEscalation.res.ok ||
+  whileHumanEscalation.json?.supervision?.mode !== 'human_handling' ||
+  whileHumanEscalation.json?.skipped_llm !== true
+) {
+  fail(
+    'human_handling_holds_on_escalation',
+    whileHumanEscalation.text.slice(0, 240) ||
+      'expected human_handling + skipped_llm after reclamo',
+  );
+  process.exit(1);
+}
+ok('human_handling_holds_on_escalation');
+
 const staff = await api(`/api/panel/conversaciones/${conversationId}`, {
   method: 'POST',
   headers: {

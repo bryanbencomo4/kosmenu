@@ -15,9 +15,9 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 5 | Auth comerciante (sin segundo sistema) | DONE | Bearer Supabase + membership; `/panel/login`; `/api/panel/conversaciones/me` |
 | 6 | Bandeja en panel existente | DONE | Next `/panel/conversaciones` + Flutter Configuración → Conversaciones (API + Realtime; prioridad `needs_attention`; propuestas de producto en payload) |
 | 7 | Persistencia servidor (no solo browser) | PARTIAL | Código + migración lista; **tablas null en prod/preview** (read-only) |
-| 8 | Realtime (no polling 1–5s) | PARTIAL | Cliente `postgres_changes` + broadcast best-effort; publication pendiente de apply |
-| 9 | Takeover IA→humano atómico | PARTIAL | RPC `chat_take_conversation` + `chat_user_can_supervise` (fix service-role); E2E memoria OK; **no probado en Postgres remoto** |
-| 10 | Respuesta humana → consumidor | PARTIAL | Panel UI + feed session-scoped; E2E 19/19 memoria (UI staff); falta DB remota |
+| 8 | Realtime (no polling 1–5s) | PARTIAL | `postgres_changes` + inbox recovery 20s; publication pendiente de apply |
+| 9 | Takeover IA→humano atómico | PARTIAL | RPC + optimistic lock anti-clobber; dual/Vitest MEMORY OK; **no Postgres remoto** |
+| 10 | Respuesta humana → consumidor | PARTIAL | Feed HMAC + resume post-reload; dual **21/21** MEMORY; falta DB remota |
 | 11 | Devolver a Gemini | PARTIAL | Igual que 9–10 |
 | 12 | Escalamiento “necesita humano” | DONE | `detectNeedsHuman` + `needs_attention` + notify hourly + contacto WhatsApp local sin prometer respuesta inmediata |
 | 13 | Privacidad discreta | DONE | Welcome v6 + Vitest |
@@ -25,8 +25,8 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 15 | Piloto solo Trueno | PARTIAL | Allowlist dedicada en código/docs; **flags no activados en prod** |
 | 16 | Outbox / no bloquear chat si WaSender cae | DONE | cola wasender + retry backoff 1m/5m/15m; chat try/catch |
 | 17 | Vitest | DONE | supervisión (flags, notify phone, backoff, memoria, privacy) |
-| 18 | Playwright dual | PARTIAL | MEMORY local **19/19** (gemini_resumed, staff UI, reopen, takeover 409); **no** contra tablas reales |
-| 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | static validate 15/15; apply gated; prod readiness **SCHEMA_NOT_READY** |
+| 18 | Playwright dual | PARTIAL | MEMORY local **21/21** (escalation hold, feed token, latency≤2s); **no** contra tablas reales |
+| 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | static validate 17/17; apply gated; prod readiness **SCHEMA_NOT_READY** |
 | 20 | Sin merge/deploy prod sin auth | DONE | solo rama feature + draft PR; sin merge/deploy prod |
 | 21 | Criterio principal comerciante | BLOCKED | migración + deploy + flags; readiness: chat_* null, take_rpc false |
 

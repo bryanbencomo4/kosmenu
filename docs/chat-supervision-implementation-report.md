@@ -1,7 +1,8 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama `feature/chat-supervision-human`; evidencias locales verdes (dual **19/19**, Vitest **19**, tsc 0). Hardening: allowlist dedicada, feed HMAC (token obligatorio fuera de MEMORY), no democión de `human_handling`, notify de atención en MEMORY, alt-contact versionado, purge solo cerradas.  
+**Estado:** supervisión implementada en rama `feature/chat-supervision-human` @ `8d28658`; evidencias locales verdes (dual **21/21**, Vitest **19+**, tsc 0, Site CI **SUCCESS**).  
+Hardening: allowlist dedicada, feed HMAC, takeover lock anti-carrera, await persist, resume feed post-reload, inbox poll 20s, escalation hold.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
@@ -99,22 +100,23 @@ Primer `take` gana; segundo usuario → conflicto 409 (DB) / null (memoria). Ass
 
 ## 15. Rendimiento
 
-Objetivo 1–2s en red controlada tras Realtime publicado. Medición de carga agresiva: **no ejecutada** (no prod). Script dual documentado para staging.
+Objetivo 1–2s en red controlada. Bench MEMORY local (`chat-supervision-memory-bench.mjs`, N=8): delivery **p50≈93ms / p95≈112ms**. Carga agresiva contra prod: **no ejecutada**.
 
 ## 16. Vitest
 
-Supervisión: **16 passed** (helpers, memoria, privacy, backoff notify, flags, reopen).
+Supervisión: **19 passed** (helpers, memoria, privacy, backoff, flags, feed token, escalation hold).
 
 ## 17. TypeScript
 
-`npx tsc --noEmit` — **exit 0**. Site CI typecheck/test **SUCCESS** on `f1e315e`.
+`npx tsc --noEmit` — **exit 0**. Site CI typecheck/test **SUCCESS** on `8d28658`.
 
 ## 18. Playwright dual
 
 `site/scripts/chat-supervision-dual-playwright.mjs` — dos contextos + UI panel.
 
-**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **19/19 passed**  
-incluye takeover UI, mensaje staff UI, feed consumidor, aislamiento de sesión, return/close, reopen, conflicto 409 dos empleados.  
+**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **21/21 passed**  
+incluye takeover UI, staff→feed HMAC, escalation hold, latency ≤2s, return/close/reopen, conflicto 409.  
+Bench MEMORY: `site/scripts/chat-supervision-memory-bench.mjs`.  
 **No corre contra producción.**
 
 ## 19. Migraciones

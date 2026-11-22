@@ -371,6 +371,19 @@ describe('chat supervision memory store', () => {
     const same = memoryTakeConversation(conv.id, 'user-a');
     expect(same?.assigned_user_id).toBe('user-a');
 
+    // Consumer escalates while staff owns the thread — status must hold.
+    const afterEscalation = memoryUpdateConversation(conv.id, {
+      status: nextConversationStatusAfterConsumerMessage({
+        previousStatus: 'human_handling',
+        consumerText: 'Tengo un reclamo, quiero hablar con el encargado',
+        wasClosed: false,
+      }),
+      last_message_preview: 'Tengo un reclamo…',
+      unread_merchant_count: (taken?.unread_merchant_count || 0) + 1,
+    });
+    expect(afterEscalation?.status).toBe('human_handling');
+    expect(afterEscalation?.assigned_user_id).toBe('user-a');
+
     memoryAddMessage({
       conversation_id: conv.id,
       comercio_id: COMERCIO,
