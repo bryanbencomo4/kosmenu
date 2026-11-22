@@ -42,14 +42,62 @@ describe('chat payment methods', () => {
           tipo: 'efectivo',
           moneda_codigo: 'USD',
         },
+        {
+          id: 'pm3',
+          nombre: 'Nequi',
+          tipo: 'nequi',
+          telefono: '+573001112233',
+        },
       ],
       'USD',
     );
-    expect(methods).toHaveLength(2);
-    expect(methods[0].label.toLowerCase()).toContain('pago');
+    expect(methods).toHaveLength(3);
     expect(methods[0].kind).toBe('pago_movil');
+    expect(methods[0].currency).toBe('VES');
     expect(methods[0].summary).toMatch(/Banesco|0412/);
     expect(methods[1].kind).toBe('cash');
+    expect(methods[1].currency).toBe('USD');
+    // No menu-base fallback: undeclared currency stays null (not USD).
+    expect(methods[2].currency).toBeNull();
+  });
+
+  it('dedupes identical Efectivo rows and never stamps USD on everything', () => {
+    const methods = toChatPaymentMethods(
+      [
+        {
+          id: 'a',
+          nombre: 'Efectivo',
+          tipo: 'efectivo',
+          nota: 'Por favor, usa billetes en buen estado.',
+        },
+        {
+          id: 'b',
+          nombre: 'Efectivo',
+          tipo: 'efectivo',
+          nota: 'Por favor, usa billetes en buen estado.',
+        },
+        {
+          id: 'c',
+          nombre: 'Efectivo',
+          tipo: 'efectivo',
+          nota: 'Por favor, usa billetes en buen estado.',
+        },
+        {
+          id: 'd',
+          nombre: 'Pago Movil',
+          tipo: 'pago_movil',
+          banco: 'Banco de Venezuela',
+          telefono: '+584247177958',
+        },
+      ],
+      'USD',
+    );
+    expect(methods.filter((m) => m.kind === 'cash')).toHaveLength(1);
+    expect(methods).toHaveLength(2);
+    expect(methods.every((m) => m.currency !== 'USD' || m.kind === 'cash')).toBe(
+      true,
+    );
+    expect(methods.find((m) => m.kind === 'pago_movil')?.currency).toBeNull();
   });
 
   it('wires carousel icons, primary Agregar, and payment card', () => {

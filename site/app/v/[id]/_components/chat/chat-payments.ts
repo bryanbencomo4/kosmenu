@@ -9,6 +9,7 @@ export type ChatPaymentMethod = {
   id: string;
   label: string;
   kind: PaymentMethodIconKind;
+  /** Explicit currency only — never a menu-wide fallback (avoids labeling everything USD). */
   currency: string | null;
   /** Short line under the label (banco · teléfono…), already clamped. */
   summary: string | null;
@@ -36,13 +37,19 @@ type PaymentRowLike = {
 export const PAYMENT_INTENT_RE =
   /como (pago|pagar)|metodos?( de pago)?|formas?( de pago)?|medios?( de pago)?|pago movil|transferencia|con que pago|aceptan (pago|transfer|efectivo|tarjeta)/i;
 
-export function matchPaymentIntent(text: string | null | undefined): boolean {
-  const raw = (text ?? '').trim();
-  if (!raw) return false;
-  const norm = raw
+function fold(value: string): string {
+  return value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function matchPaymentIntent(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  const norm = fold(raw)
     .replace(/[¿?¡!.,;:]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -51,48 +58,97 @@ export function matchPaymentIntent(text: string | null | undefined): boolean {
   return PAYMENT_INTENT_RE.test(norm);
 }
 
-function currencyOf(row: PaymentRowLike, fallback: string): string | null {
-  const c = (
-    row.moneda_codigo ||
-    row.currency ||
-    row.moneda ||
-    fallback ||
-    ''
-  )
+/** Only return a currency when the method itself declares one (no USD fallback). */
+export function currencyOfPaymentRow(row: PaymentRowLike): string | null {
+  const explicit = (row.moneda_codigo || row.currency || row.moneda || '')
     .toString()
-    .trim()
-    .toUpperCase();
-  return c || null;
+    .trim();
+  if (explicit) return explicit.toUpperCase();
+
+  const tipo = (row.tipo ?? '').toString().trim().toLowerCase();
+  // tipo sometimes encodes currency (e.g. "transfer_ves", "usd_cash").
+  const tipoMatch = tipo.match(/\b(usd|ves|cop|eur|pen|mxn|ars|brl|clp)\b/i);
+  if (tipoMatch?.[1]) return tipoMatch[1].toUpperCase();
+
+  const detalles = (row.detalles ?? '').toString().trim();
+  if (detalles.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(detalles) as Record<string, unknown>;
+      const detailCurrency = (
+        parsed.currency ??
+        parsed.moneda ??
+        parsed.currency_code ??
+        parsed.moneda_codigo ??
+        ''
+      )
+        .toString()
+        .trim();
+      if (detailCurrency) return detailCurrency.toUpperCase();
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
 function summaryOf(row: PaymentRowLike): string | null {
-  const { fields } = parsePaymentMethodFields(row);
-  if (fields.length === 0) {
-    const bits = [row.banco, row.telefono || row.numero, row.titular]
-      .map((v) => (v ?? '').toString().trim())
-      .filter(Boolean);
-    return bits.length ? bits.slice(0, 2).join(' · ') : null;
+  const { fields, note } = parsePaymentMethodFields(row);
+  if (fields.length > 0) {
+    return fields
+      .slice(0, 2)
+      .map((f) => f.value)
+      .join(' · ');
   }
-  return fields
-    .slice(0, 2)
-    .map((f) => f.value)
-    .join(' · ');
+  // Cash tips live in `nota` / `descripcion` — keep them so duplicates still match.
+  if (note) return note;
+  const bits = [row.banco, row.telefono || row.numero, row.titular]
+    .map((v) => (v ?? '').toString().trim())
+    .filter(Boolean);
+  return bits.length ? bits.slice(0, 2).join(' · ') : null;
 }
 
-/** Slim payment methods for chat UI (no secrets beyond what checkout already shows). */
+/**
+ * Collapse identical payment rows (e.g. 3× "Efectivo" with the same tip).
+ * Fingerprint: kind + label + summary + currency (when known).
+ */
+export function dedupeChatPaymentMethods(
+  methods: ChatPaymentMethod[],
+): ChatPaymentMethod[] {
+  const seen = new Set<string>();
+  const out: ChatPaymentMethod[] = [];
+  for (const m of methods) {
+    const key = [
+      m.kind,
+      fold(m.label),
+      fold(m.summary || ''),
+      (m.currency || '').toUpperCase(),
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out;
+}
+
+/**
+ * Slim payment methods for chat UI.
+ * Currency badges only appear when the method declares a currency — never
+ * inherit the menu base currency (that made everything look like USD).
+ */
 export function toChatPaymentMethods(
   rows: PaymentRowLike[] | null | undefined,
-  fallbackCurrency = 'USD',
+  _fallbackCurrency = 'USD',
 ): ChatPaymentMethod[] {
   if (!rows?.length) return [];
-  return rows.map((row) => {
+  const mapped = rows.map((row) => {
     const label = paymentMethodLabelFromRow(row);
     return {
       id: row.id,
       label,
       kind: paymentMethodIconKindFromText(row.nombre, row.tipo, row.banco, label),
-      currency: currencyOf(row, fallbackCurrency),
+      currency: currencyOfPaymentRow(row),
       summary: summaryOf(row),
     };
   });
+  return dedupeChatPaymentMethods(mapped);
 }
