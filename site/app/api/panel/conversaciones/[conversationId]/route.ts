@@ -3,7 +3,10 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
 import { requireMerchantConversationAccess } from '../_lib/auth';
-import { isSupervisionEnabledForCommerce } from '../../../chat/_lib/supervision-config';
+import {
+  getChatSupervisionConfig,
+  isSupervisionEnabledForCommerce,
+} from '../../../chat/_lib/supervision-config';
 import {
   persistAssistantOrStaffMessage,
   publishConversationEvent,
@@ -140,6 +143,13 @@ export async function POST(
   }
 
   const action = String(body.action || '').trim();
+  const humanActions = new Set(['take', 'return', 'message']);
+  if (humanActions.has(action) && !getChatSupervisionConfig().humanTakeover) {
+    return NextResponse.json(
+      { error: 'human_takeover_disabled' },
+      { status: 403 },
+    );
+  }
   const sb = isSupervisionMemoryEnabled() ? null : getServiceSupabaseClient();
 
   if (action === 'take') {
