@@ -101,6 +101,12 @@ if (!detail.res.ok || !(detail.json?.messages || []).length) {
   process.exit(1);
 }
 ok('merchant_history', `${detail.json.messages.length} msgs`);
+if (detail.json?.flags && typeof detail.json.flags.human_takeover === 'boolean') {
+  ok('flags_payload', `human_takeover=${detail.json.flags.human_takeover}`);
+} else {
+  fail('flags_payload', 'missing flags.human_takeover on conversation GET');
+  process.exit(1);
+}
 
 const take = await api(`/api/panel/conversaciones/${conversationId}`, {
   method: 'POST',
@@ -209,6 +215,27 @@ if (!close.res.ok || close.json?.conversation?.status !== 'closed') {
   process.exit(1);
 }
 ok('close_conversation');
+
+const reopen = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    sessionId,
+    messages: [{ role: 'user', text: 'Hola de nuevo, ¿siguen abiertos?' }],
+  }),
+});
+if (
+  !reopen.res.ok ||
+  reopen.json?.model === 'human_handoff' ||
+  !reopen.json?.supervision?.conversationId
+) {
+  fail(
+    'reopen_after_close',
+    reopen.text.slice(0, 240) || 'expected assistant after archive',
+  );
+  process.exit(1);
+}
+ok('reopen_after_close', reopen.json?.model || 'ok');
 
 const failed = steps.filter((s) => !s.ok);
 console.log(`\npassed=${steps.length - failed.length} failed=${failed.length}`);

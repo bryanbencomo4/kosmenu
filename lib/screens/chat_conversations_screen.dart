@@ -324,6 +324,7 @@ class _ChatConversationDetailScreenState
           _detail = ChatConversationDetail(
             conversation: detail.conversation,
             messages: merged,
+            flags: detail.flags,
           );
         } else {
           _detail = detail;
@@ -418,7 +419,8 @@ class _ChatConversationDetailScreenState
   @override
   Widget build(BuildContext context) {
     final status = _detail?.conversation.status ?? '…';
-    final human = status == 'human_handling';
+    final humanTakeover = _detail?.flags.humanTakeover ?? true;
+    final human = humanTakeover && status == 'human_handling';
     final assignee = _chatAssigneeLabel(_detail?.conversation.assignedUserId);
     return Scaffold(
       appBar: AppBar(
@@ -443,14 +445,16 @@ class _ChatConversationDetailScreenState
                         : 'Estado: $status · $assignee',
                   ),
                 ),
-                TextButton(
-                  onPressed: _busy ? null : () => unawaited(_act('take')),
-                  child: const Text('Tomar'),
-                ),
-                TextButton(
-                  onPressed: _busy ? null : () => unawaited(_act('return')),
-                  child: const Text('Devolver'),
-                ),
+                if (humanTakeover) ...[
+                  TextButton(
+                    onPressed: _busy ? null : () => unawaited(_act('take')),
+                    child: const Text('Tomar'),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : () => unawaited(_act('return')),
+                    child: const Text('Devolver'),
+                  ),
+                ],
                 TextButton(
                   onPressed: _busy ? null : () => unawaited(_act('close')),
                   child: const Text('Cerrar'),
@@ -458,6 +462,15 @@ class _ChatConversationDetailScreenState
               ],
             ),
           ),
+          if (!humanTakeover)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Intervención humana desactivada (feature flag). '
+                'Puedes supervisar el historial; el asistente sigue atendiendo.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -526,35 +539,36 @@ class _ChatConversationDetailScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _draft,
-                          enabled: human && !_busy,
-                          decoration: InputDecoration(
-                            hintText: human
-                                ? 'Escribe al cliente…'
-                                : 'Toma la conversación para escribir',
-                            border: const OutlineInputBorder(),
-                            isDense: true,
+                  if (humanTakeover)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _draft,
+                            enabled: human && !_busy,
+                            decoration: InputDecoration(
+                              hintText: human
+                                  ? 'Escribe al cliente…'
+                                  : 'Toma la conversación para escribir',
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: !human ||
-                                _busy ||
-                                _draft.text.trim().isEmpty
-                            ? null
-                            : () => unawaited(
-                                  _act('message', text: _draft.text.trim()),
-                                ),
-                        child: const Text('Enviar'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: !human ||
+                                  _busy ||
+                                  _draft.text.trim().isEmpty
+                              ? null
+                              : () => unawaited(
+                                    _act('message', text: _draft.text.trim()),
+                                  ),
+                          child: const Text('Enviar'),
+                        ),
+                      ],
+                    ),
+                  if (humanTakeover) const SizedBox(height: 6),
                   Text(
                     'Solo texto por ahora: notas de voz y adjuntos aún no '
                     'están disponibles desde el panel.',

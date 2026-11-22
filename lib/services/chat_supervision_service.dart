@@ -85,14 +85,37 @@ class ChatMessageRow {
   }
 }
 
+class ChatSupervisionFlags {
+  const ChatSupervisionFlags({
+    this.enabled = true,
+    this.humanTakeover = true,
+    this.wasenderNotify = false,
+  });
+
+  final bool enabled;
+  final bool humanTakeover;
+  final bool wasenderNotify;
+
+  factory ChatSupervisionFlags.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const ChatSupervisionFlags();
+    return ChatSupervisionFlags(
+      enabled: json['enabled'] != false,
+      humanTakeover: json['human_takeover'] != false,
+      wasenderNotify: json['wasender_notify'] == true,
+    );
+  }
+}
+
 class ChatConversationDetail {
   const ChatConversationDetail({
     required this.conversation,
     required this.messages,
+    this.flags = const ChatSupervisionFlags(),
   });
 
   final ChatConversationSummary conversation;
   final List<ChatMessageRow> messages;
+  final ChatSupervisionFlags flags;
 }
 
 /// Talks to Next.js `/api/panel/conversaciones` with the merchant Supabase JWT.
@@ -168,7 +191,14 @@ class ChatSupervisionService {
         .whereType<Map>()
         .map((row) => ChatMessageRow.fromJson(Map<String, dynamic>.from(row)))
         .toList(growable: false);
-    return ChatConversationDetail(conversation: conversation, messages: messages);
+    final flagsRaw = map['flags'];
+    return ChatConversationDetail(
+      conversation: conversation,
+      messages: messages,
+      flags: ChatSupervisionFlags.fromJson(
+        flagsRaw is Map ? Map<String, dynamic>.from(flagsRaw) : null,
+      ),
+    );
   }
 
   static Future<ChatConversationSummary> act({
