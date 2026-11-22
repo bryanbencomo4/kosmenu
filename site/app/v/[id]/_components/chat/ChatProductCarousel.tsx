@@ -1,5 +1,6 @@
 'use client';
 
+import { LayoutGrid, Plus, Settings2 } from 'lucide-react';
 import type { MouseEvent } from 'react';
 
 import { ChatHorizontalScroller } from './ChatHorizontalScroller';
@@ -13,6 +14,9 @@ type ChatProductCarouselProps = {
   onSeeAll?: () => void;
   seeAllLabel?: string;
 };
+
+const btnPrimary =
+  'inline-flex w-full items-center justify-center gap-1 rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)] active:opacity-90';
 
 export function ChatProductCarouselCard({
   card,
@@ -32,7 +36,6 @@ export function ChatProductCarouselCard({
     (card.price_unit != null ? `${card.price_unit} ${card.currency}` : 'Ver precio');
 
   const handleAdd = (e: MouseEvent<HTMLButtonElement>) => {
-    // Visual only: grab the image rect first, then add via the normal path.
     void flyToCart({
       source: findProductImageEl(e.currentTarget),
       imageUrl: card.image_url,
@@ -87,18 +90,20 @@ export function ChatProductCarouselCard({
               type="button"
               data-chat-configure={card.product_id}
               onClick={() => onConfigure?.(card.product_id)}
-              className="w-full rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)] active:opacity-90"
+              className={btnPrimary}
             >
-              Elegir opciones
+              <Settings2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} aria-hidden />
+              <span>Opciones</span>
             </button>
           ) : canAdd ? (
             <button
               type="button"
               data-chat-add-simple={card.product_id}
               onClick={handleAdd}
-              className="w-full rounded-lg border border-[var(--chat-card-border)] bg-[var(--chat-input)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-text)] active:opacity-90"
+              className={btnPrimary}
             >
-              Agregar
+              <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.4} aria-hidden />
+              <span>Agregar</span>
             </button>
           ) : (
             <div className="h-[30px]" aria-hidden />
@@ -130,30 +135,33 @@ export function ChatProductCarousel({
           />
         ))}
         {canSeeAll ? (
-          // Card-sized tail chip: visible while swiping, no need to reach the bottom button.
           <button
             type="button"
             data-chat-see-all-inline="1"
             onClick={onSeeAll}
-            className="flex w-[104px] shrink-0 snap-start flex-col items-center justify-center gap-1 self-stretch rounded-xl border border-dashed border-[var(--chat-card-border)] bg-[var(--chat-card)] px-2 text-center text-[12px] font-semibold text-[var(--chat-text)] shadow-sm active:opacity-90"
+            className="flex w-[112px] shrink-0 snap-start flex-col items-center justify-center gap-2 self-stretch rounded-xl border border-[var(--chat-card-border)] bg-[color-mix(in_srgb,var(--chat-send)_12%,var(--chat-card))] px-2 text-center shadow-sm transition active:scale-[0.98] active:opacity-90"
           >
-            <span className="text-[18px] leading-none" aria-hidden>
-              →
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--chat-send)] text-[var(--chat-send-fg)] shadow-sm"
+              aria-hidden
+            >
+              <LayoutGrid className="h-5 w-5" strokeWidth={2.1} />
             </span>
-            <span>Ver todos</span>
+            <span className="text-[12px] font-semibold leading-tight text-[var(--chat-text)]">
+              Ver todos
+            </span>
           </button>
         ) : null}
       </ChatHorizontalScroller>
       {canSeeAll ? (
-        // In-flow (not sticky): sticky bottom stuck to the message scroller and
-        // disappeared under the composer on phones. Always visible under the rail.
         <div className="px-3 pb-1 pt-1.5">
           <button
             type="button"
             data-chat-see-all="1"
             onClick={onSeeAll}
-            className="flex w-full min-h-[40px] items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-4 py-2 text-[12.5px] font-semibold text-[var(--chat-text)] shadow-sm active:opacity-90"
+            className="inline-flex w-full min-h-[42px] items-center justify-center gap-2 rounded-full bg-[var(--chat-send)] px-4 py-2 text-[13px] font-semibold text-[var(--chat-send-fg)] shadow-sm active:opacity-90"
           >
+            <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={2.1} aria-hidden />
             {seeAllLabel}
           </button>
         </div>

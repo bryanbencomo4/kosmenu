@@ -75,7 +75,8 @@ describe('chat UX wiring (source assertions)', () => {
     expect(bubble).toMatch(/onSeeAllCatalog\(message\.catalogCategoryId \?\? null\)/);
     expect(bubble).toMatch(/onSeeAllCatalog \? \(\) => onSeeAllCatalog\(null\)/);
     expect(chat('ChatProductCarousel.tsx')).toMatch(/data-chat-see-all="1"/);
-    expect(chat('ChatProductCarousel.tsx')).toMatch(/w-full min-h-\[40px\]/);
+    expect(chat('ChatProductCarousel.tsx')).toMatch(/min-h-\[42px\]/);
+    expect(chat('ChatProductCarousel.tsx')).toMatch(/<LayoutGrid /);
     expect(chat('ChatProductCarousel.tsx')).not.toMatch(/sticky bottom-0/);
   });
 

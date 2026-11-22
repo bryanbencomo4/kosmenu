@@ -39,6 +39,10 @@ import {
 } from './ChatSuggestedReplies';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
+  matchPaymentIntent,
+  type ChatPaymentMethod,
+} from './chat-payments';
+import {
   humanLocalReplyMs,
   humanReadBeatMs,
   humanTypingMinMs,
@@ -100,6 +104,8 @@ type ChatAssistantViewProps = {
   initialLetter: string;
   /** Slim catalog snapshot powering category/product carousels and the sheet. */
   catalog?: ChatCatalogSnapshot | null;
+  /** Slim payment methods for "cómo pago" answers. */
+  paymentMethods?: ChatPaymentMethod[];
   cartCount: number;
   cartTotalLabel: string;
   /** Authoritative shared cart (same as PublicMenuPage). */
@@ -149,6 +155,7 @@ function createMessage(
     catalogCategories?: ChatCatalogCategory[];
     catalogProducts?: ChatProductCardData[];
     catalogCategoryId?: string | null;
+    paymentMethods?: ChatPaymentMethod[];
     sticker?: ChatMessage['sticker'];
   },
 ): ChatMessage {
@@ -173,6 +180,7 @@ function createMessage(
     catalogCategories: options?.catalogCategories,
     catalogProducts: options?.catalogProducts,
     catalogCategoryId: options?.catalogCategoryId,
+    paymentMethods: options?.paymentMethods,
     sticker: options?.sticker ?? undefined,
   };
 }
@@ -272,6 +280,7 @@ export function ChatAssistantView({
   logoUrl,
   initialLetter,
   catalog = null,
+  paymentMethods = [],
   cartCount,
   cartTotalLabel,
   cartSnapshot = [],
@@ -570,6 +579,67 @@ export function ChatAssistantView({
       return true;
     },
     [catalog, buildCategoryMessage, playAssistantReceivedOnce],
+  );
+
+  /** Deterministic "cómo pago / métodos de pago" → payment methods card. */
+  const answerPaymentIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchPaymentIntent(text)) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      if (paymentMethods.length === 0) {
+        const empty = createMessage(
+          'assistant',
+          'Por ahora no tengo métodos de pago publicados. Puedes continuar en el checkout o preguntar al restaurante.',
+          cartCount > 0 && onOpenCheckout
+            ? {
+                cartActions: [
+                  {
+                    type: 'open_checkout',
+                    requires_confirmation: true,
+                    proposal_id: `checkout_pay_${Date.now().toString(36)}`,
+                    catalog_fingerprint: null,
+                    label: 'Ir a pagar',
+                  },
+                ],
+              }
+            : undefined,
+        );
+        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
+        playAssistantReceivedOnce(empty);
+        setIsTyping(false);
+        return true;
+      }
+      const reply = createMessage(
+        'assistant',
+        'Estos son los métodos de pago disponibles:',
+        {
+          paymentMethods,
+          cartActions:
+            cartCount > 0
+              ? [
+                  {
+                    type: 'open_checkout',
+                    requires_confirmation: true,
+                    proposal_id: `checkout_pay_${Date.now().toString(36)}`,
+                    catalog_fingerprint: null,
+                    label: 'Ir a pagar',
+                  },
+                ]
+              : undefined,
+        },
+      );
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [
+      paymentMethods,
+      cartCount,
+      onOpenCheckout,
+      playAssistantReceivedOnce,
+    ],
   );
 
   useEffect(() => {
@@ -935,11 +1005,19 @@ export function ChatAssistantView({
       });
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
-      // "ver menú / categorías / bebidas…" → carousel, never Gemini (live or demo).
+      // Local UX answers first (carousels / payment card), then Gemini.
       if (await answerCatalogIntent(text)) return;
+      if (await answerPaymentIntent(text)) return;
       await runAssistantTurn(text, nextMessages);
     },
-    [isTyping, messages, replyTo, runAssistantTurn, answerCatalogIntent],
+    [
+      isTyping,
+      messages,
+      replyTo,
+      runAssistantTurn,
+      answerCatalogIntent,
+      answerPaymentIntent,
+    ],
   );
 
   const sendMessage = useCallback(async () => {
@@ -962,6 +1040,9 @@ export function ChatAssistantView({
           break;
         case 'cart':
           onOpenCart();
+          break;
+        case 'payments':
+          void sendText('Cómo pago');
           break;
         case 'text':
           void sendText(action.text);
@@ -1087,6 +1168,10 @@ export function ChatAssistantView({
         setIsTyping(false);
         return;
       }
+      if (await answerPaymentIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
       // runAssistantTurn owns the typing indicator from here on.
       await runAssistantTurn(transcript, nextMessages);
     },
@@ -1097,6 +1182,7 @@ export function ChatAssistantView({
       runAssistantTurn,
       comercioId,
       answerCatalogIntent,
+      answerPaymentIntent,
       playAssistantReceivedOnce,
     ],
   );
@@ -1169,8 +1255,9 @@ export function ChatAssistantView({
         catalog,
         cartCount,
         activeCategoryId: messages[messages.length - 1]?.catalogCategoryId ?? null,
+        hasPaymentMethods: paymentMethods.length > 0,
       }),
-    [catalog, cartCount, messages],
+    [catalog, cartCount, messages, paymentMethods.length],
   );
 
   const shareLocation = useCallback(
@@ -1302,6 +1389,7 @@ export function ChatAssistantView({
         onReply={(m) => setReplyTo(buildChatReplyRef(m))}
         onSelectCategory={catalog ? onSelectCategory : undefined}
         onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
+        onOpenCheckout={onOpenCheckout}
         onRefresh={refreshConversation}
       />
 

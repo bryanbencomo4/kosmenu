@@ -12,6 +12,7 @@ import {
 
 import { ChatCartActionCard } from './ChatCartActionCard';
 import { ChatCategoryCarousel } from './ChatCategoryCarousel';
+import { ChatPaymentMethodsCard } from './ChatPaymentMethodsCard';
 import { ChatProductCard } from './ChatProductCard';
 import { ChatProductCarousel } from './ChatProductCarousel';
 import { ChatReceiptTicks } from './ChatReceiptTicks';
@@ -199,6 +200,8 @@ type ChatMessageBubbleProps = {
   onSelectCategory?: (categoryId: string) => void;
   /** "Ver todos" on a product carousel; null = whole catalog. */
   onSeeAllCatalog?: (categoryId: string | null) => void;
+  /** CTA under payment-methods card. */
+  onOpenCheckout?: () => void;
 };
 
 function formatChatTime(ts: number) {
@@ -234,11 +237,13 @@ export function ChatMessageBubble({
   onReply,
   onSelectCategory,
   onSeeAllCatalog,
+  onOpenCheckout,
 }: ChatMessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const timeLabel = formatChatTime(message.createdAt);
   const replyEnabled = Boolean(onReply) && !isSystem;
+  const paymentMethods = message.paymentMethods || [];
   // Hooks must run before the system-message early return below.
   const replyGesture = useReplyGesture(replyEnabled, () => onReply?.(message));
 
@@ -525,6 +530,18 @@ export function ChatMessageBubble({
               }
             />
           )}
+        </div>
+      ) : null}
+
+      {paymentMethods.length > 0 ? (
+        <div
+          className={`mt-1.5 flex w-full max-w-[min(92%,22.5rem)] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+          data-chat-payment-block="1"
+        >
+          <ChatPaymentMethodsCard
+            methods={paymentMethods}
+            onOpenCheckout={onOpenCheckout}
+          />
         </div>
       ) : null}
 

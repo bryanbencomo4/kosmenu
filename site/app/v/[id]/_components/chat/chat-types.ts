@@ -139,6 +139,8 @@ export type ChatMessage = {
   catalogProducts?: ChatProductCardData[];
   /** Category the catalogProducts belong to (null = all / mixed). */
   catalogCategoryId?: string | null;
+  /** Payment methods card (cómo pago / métodos de pago). */
+  paymentMethods?: import('./chat-payments').ChatPaymentMethod[];
   /** Sticker sent as a message (id + accessible label). */
   sticker?: { id: string; label: string } | null;
 };

@@ -74,6 +74,7 @@ import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { ChatAssistantView } from './_components/chat/ChatAssistantView';
 import type { ChatCatalogSnapshot } from './_components/chat/chat-catalog';
+import { toChatPaymentMethods } from './_components/chat/chat-payments';
 import { ChatModeSwitcher } from './_components/chat/ChatModeSwitcher';
 import type {
   ChatAppliedAddNotice,
@@ -4109,6 +4110,10 @@ export default function PublicMenuPage() {
     }
     return { currency, categories, products };
   }, [categoriasConProductos, businessBaseCurrency, comercioLogoUrl]);
+  const chatPaymentMethods = useMemo(
+    () => toChatPaymentMethods(menuData?.metodosPago, businessBaseCurrency),
+    [menuData?.metodosPago, businessBaseCurrency],
+  );
   const kioskProductsByCategory = useMemo(() => {
     const map: Record<string, Array<{
       id: string;
@@ -7182,6 +7187,7 @@ export default function PublicMenuPage() {
             logoUrl={comercioLogoUrl || null}
             initialLetter={comercioInitialLetter}
             catalog={chatCatalog}
+            paymentMethods={chatPaymentMethods}
             cartCount={cartCount}
             cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
             cartSnapshot={cartItems.map((item) => ({

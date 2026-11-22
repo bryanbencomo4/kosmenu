@@ -1,5 +1,7 @@
 'use client';
 
+import { Plus, Settings2 } from 'lucide-react';
+
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import type { ChatProductCardData } from './chat-types';
 
@@ -101,16 +103,17 @@ export function ChatProductCard({
             <button
               type="button"
               data-chat-configure={card.product_id}
-              className="flex-1 rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)]"
+              className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)]"
               onClick={() => onConfigure?.(card.product_id)}
             >
-              Elegir opciones
+              <Settings2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} aria-hidden />
+              Opciones
             </button>
           ) : null}
           {showAdd ? (
             <button
               type="button"
-              className="flex-1 rounded-lg border border-[var(--chat-card-border)] bg-[var(--chat-input)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-text)]"
+              className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)]"
               data-chat-add-simple={card.product_id}
               onClick={(e) => {
                 void flyToCart({
@@ -120,6 +123,7 @@ export function ChatProductCard({
                 onAddSimple?.(card.product_id);
               }}
             >
+              <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2.4} aria-hidden />
               Agregar
             </button>
           ) : null}

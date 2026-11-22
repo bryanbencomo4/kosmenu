@@ -46,6 +46,8 @@ type ChatMessageListProps = {
   onSelectCategory?: (categoryId: string) => void;
   /** "Ver todos" under a product carousel (null = whole catalog). */
   onSeeAllCatalog?: (categoryId: string | null) => void;
+  /** CTA under payment-methods card. */
+  onOpenCheckout?: () => void;
   /** Pull-to-refresh at the very top (touch). Parent may no-op. */
   onRefresh?: () => void;
 };
@@ -64,6 +66,7 @@ export function ChatMessageList({
   onReply,
   onSelectCategory,
   onSeeAllCatalog,
+  onOpenCheckout,
   onRefresh,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -352,6 +355,7 @@ export function ChatMessageList({
                 onReply={onReply}
                 onSelectCategory={onSelectCategory}
                 onSeeAllCatalog={onSeeAllCatalog}
+                onOpenCheckout={onOpenCheckout}
               />
             );
           })}
