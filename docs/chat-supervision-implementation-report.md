@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
-**Rama:** `feature/chat-supervision-human` (`952bb6f`+)  
-**Estado:** supervisión implementada en rama; evidencias locales verdes (dual 14/14, Vitest 13, tsc 0).  
+**Rama:** `feature/chat-supervision-human` (`bcdd46f`)  
+**Estado:** supervisión implementada en rama; evidencias locales verdes (dual 14/14, Vitest 13, tsc 0); CI Site + Vercel preview **verde**.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE` para one-shot).  
 **Luego:** deploy/merge + flags Trueno + smoke real. Matriz: `docs/chat-supervision-requirements-audit.md`.
