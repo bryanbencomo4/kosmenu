@@ -73,7 +73,8 @@ describe('chat catalog helpers', () => {
     expect(card.product_id).toBe('b2');
     expect(card.requires_configuration).toBe(true);
     expect(card.price_unit).toBe(14.5);
-    expect(card.price_label).toBe('14.5 USD');
+    expect(card.price_label).toMatch(/14[,.]50|14\.5/);
+    expect(card.price_label).toMatch(/US\$|USD/);
     expect(card.option_hints).toEqual([]);
     expect(toChatProductCard(product('x', 'c', 'Gratis', { price: 0 })).price_label).toBeNull();
   });

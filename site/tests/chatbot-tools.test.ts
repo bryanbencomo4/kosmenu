@@ -177,6 +177,7 @@ describe('chatbot read-only tools', () => {
     // Bound tools to commerce A menu — other product never appears
     const hit = searchProductsForTests(ctx, { query: 'Secreto Otro Rest' }) as any;
     expect(hit.count).toBe(0);
+    expect(hit.results?.some((r: any) => r.id === 'other-only')).toBeFalsy();
     expect(other.resolvedComercioId).not.toBe(ctx.commerceId);
   });
 

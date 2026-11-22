@@ -3,9 +3,12 @@ import {
   chatWhatsappHref,
 } from '../../../../_lib/public-site-config';
 
-/** "whatsapp", "hablar con alguien", "atención humana", "número del local"… */
+/**
+ * Restaurant customer-care intents (NOT platform / Kit Menú support).
+ * Includes claims, complaints, human handoff, and published local WhatsApp.
+ */
 export const CONTACT_INTENT_RE =
-  /\b(whats?app|wa\.?me|hablar con (un |una )?(humano|persona|alguien|asesor|mesero|cajero|el local|el restaurante|ustedes)|atencion (humana|personal)|pasar(me)? (con |a )?(un )?humano|numero (de )?(whats?app|telefono|contacto)|telefono (del |de )?(negocio|local|restaurante)|contacto (del |de )?(negocio|local|restaurante)|escribir(le)? (al|a) (local|restaurante))\b/i;
+  /\b(whats?app|wa\.?me|hablar con (un |una )?(humano|persona|alguien|asesor|mesero|cajero|el local|el restaurante|ustedes)|atencion (humana|personal|al cliente)|pasar(me)? (con |a )?(un )?humano|numero (de )?(whats?app|telefono|contacto)|telefono (del |de )?(negocio|local|restaurante)|contacto (del |de )?(negocio|local|restaurante)|escribir(le)? (al|a) (local|restaurante)|reclam(ar|o|acion|ación)|queja|quejar(me)?|devoluci[oó]n|pedido (incompleto|equivocado|malo|errado|danado|dañado)|me (falt[oó]|lleg[oó] mal|cobraron)|problema con (el |mi )?pedido|soporte (del |de (mi )?pedido)|atenci[oó]n (del |de (mi )?pedido))\b/i;
 
 /** "elmenuxfa", "cómo creo un menú", "este chat para mi negocio"… */
 export const PLATFORM_INTENT_RE =

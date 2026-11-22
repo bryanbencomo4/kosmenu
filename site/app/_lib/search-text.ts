@@ -63,6 +63,8 @@ export function fuzzyIncludes(haystack: string, needle: string) {
 
   const words = tokenizeSearchText(haystack);
   for (const word of words) {
+    // Never fuzzy-expand a longer needle onto a very short word (rest → res).
+    if (needle.length > word.length && word.length <= 3) continue;
     if (Math.abs(word.length - needle.length) > maxDist) {
       // Prefix typos: "hamburgesa" vs "hamburguesa clasica" token hamburguesa
       if (word.length > needle.length) {

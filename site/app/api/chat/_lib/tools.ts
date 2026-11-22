@@ -10,7 +10,6 @@ import {
   parseProductMenuOptions,
   productRequiresConfiguration,
 } from '../../../_lib/menu-product-options';
-import { fuzzyIncludes } from '../../../_lib/search-text';
 import {
   buildProductCard,
   prepareCartLineProposal,
@@ -21,6 +20,14 @@ import {
   type ChatCartSnapshotLine,
   type ChatProductCard,
 } from './cart-proposals';
+import {
+  resolveCatalogProduct,
+  searchCatalog,
+} from './catalog-search';
+import {
+  findCheaperAlternatives,
+  recommendFromCatalog,
+} from './commercial-strategy';
 import {
   listBusinessScheduleDayRows,
   resolveBusinessScheduleStatus,
@@ -74,11 +81,15 @@ export const CHAT_TOOL_DECLARATIONS = [
   {
     name: 'search_products',
     description:
-      'Busca productos del menú por texto, categoría o presupuesto máximo. Solo productos de este restaurante.',
+      'Busca en el catálogo REAL de este restaurante (nombre, descripción, categoría, sabores/opciones/tamaños). Devuelve ranking con matched_field / matched_option. Un resultado vacío no prueba ausencia absoluta: reformula o pregunta; no inventes productos.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        query: { type: 'STRING', description: 'Texto de búsqueda (nombre o descripción)' },
+        query: {
+          type: 'STRING',
+          description:
+            'Texto del cliente (ej. “pizza campesina”, “coca cola 2 litros”). Puede incluir sabor/tamaño.',
+        },
         category: { type: 'STRING', description: 'Nombre de categoría opcional' },
         max_price: {
           type: 'NUMBER',
@@ -94,7 +105,8 @@ export const CHAT_TOOL_DECLARATIONS = [
   },
   {
     name: 'get_product_details',
-    description: 'Detalle de un producto por id o nombre exacto/aproximado.',
+    description:
+      'Detalle de un producto por id o nombre/sabor aproximado (también resuelve opciones como “Coca-Cola” → refresco padre). Incluye grupos de opciones.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -137,6 +149,57 @@ export const CHAT_TOOL_DECLARATIONS = [
           type: 'NUMBER',
           description: 'Máximo de productos a devolver en el empate/top (1-15, default 8)',
         },
+      },
+    },
+  },
+  {
+    name: 'recommend_products',
+    description:
+      'Recomendaciones DETERMINISTAS (2–4) según preferencias/presupuesto/consulta. Usa en discovery, “qué me recomiendas”, presupuesto u objeción de precio. No inventes atributos; lee reason de cada ítem.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: {
+          type: 'STRING',
+          description: 'Texto libre (ej. “con maíz y champiñones”)',
+        },
+        category: { type: 'STRING' },
+        want_ingredients: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+          description: 'Ingredientes deseados',
+        },
+        avoid_ingredients: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+          description: 'Ingredientes a evitar',
+        },
+        max_price: {
+          type: 'NUMBER',
+          description: 'Presupuesto máximo (price_min)',
+        },
+        party_size: { type: 'NUMBER' },
+        exclude_product_ids: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+        },
+        complement_to_cart: {
+          type: 'BOOLEAN',
+          description: 'Prioriza bebidas/acompañantes si ya hay comida en carrito',
+        },
+        limit: { type: 'NUMBER', description: '2–4 (default 3)' },
+      },
+    },
+  },
+  {
+    name: 'suggest_cheaper_alternatives',
+    description:
+      'Ante “está caro”: alternativas más baratas de la misma categoría que un producto de referencia (id).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        product_id: { type: 'STRING' },
+        limit: { type: 'NUMBER' },
       },
     },
   },
@@ -373,46 +436,61 @@ export function executeChatTool(
         Math.max(1, Math.floor(Number(args.limit) || 8)),
       );
 
-      let list = asProducts(menu);
-      if (availableOnly) list = list.filter((p) => p.disponible !== false);
+      const browseOnly = !query.trim();
+      const found = searchCatalog(menu, {
+        query,
+        category: category || undefined,
+        available_only: availableOnly,
+        max_price:
+          Number.isFinite(maxPrice) && maxPrice > 0 ? maxPrice : undefined,
+        // Browse-by-category: fetch a wider pool then sort by price_min.
+        limit: browseOnly ? Math.max(limit, 24) : limit,
+        getPriceMin: (p) => getProductMinimumPrice(p),
+      });
 
-      if (category) {
-        list = filterByCategory(menu, list, category);
+      let hits = found.hits;
+      let sortedBy: 'relevance_desc' | 'price_min_asc' = 'relevance_desc';
+      if (browseOnly) {
+        hits = [...hits].sort(
+          (a, b) =>
+            getProductMinimumPrice(a.product) -
+              getProductMinimumPrice(b.product) ||
+            norm(a.product.nombre || '').localeCompare(
+              norm(b.product.nombre || ''),
+            ),
+        );
+        sortedBy = 'price_min_asc';
       }
+      hits = hits.slice(0, limit);
 
-      if (query) {
-        const q = norm(query);
-        list = list.filter((p) => {
-          const hay = norm(`${p.nombre || ''} ${p.descripcion || ''}`);
-          // fuzzyIncludes covers plurals (hawaianas→Hawaiana) and light typos.
-          return (
-            hay.includes(q) ||
-            fuzzyIncludes(hay, q) ||
-            q.split(/\s+/).every((tok) => hay.includes(tok) || fuzzyIncludes(hay, tok))
-          );
-        });
-      }
+      const results = hits.map((hit) => ({
+        ...productSummary(menu, hit.product),
+        match_score: hit.score,
+        matched_field: hit.matched_field,
+        matched_option: hit.matched_option,
+        matched_group: hit.matched_group,
+        suggested_option_labels: hit.suggested_option_labels,
+        prepare_hint:
+          hit.suggested_option_labels.length > 0
+            ? {
+                product_id: hit.product.id,
+                product_name: hit.product.nombre ?? '',
+                option_labels: hit.suggested_option_labels,
+              }
+            : {
+                product_id: hit.product.id,
+                product_name: hit.product.nombre ?? '',
+              },
+      }));
 
-      if (Number.isFinite(maxPrice) && maxPrice > 0) {
-        list = list.filter((p) => getProductMinimumPrice(p) <= maxPrice);
-      }
-
-      // Stable price order so the model cannot “pick” a non-cheapest row from an arbitrary slice.
-      list = [...list].sort(
-        (a, b) =>
-          getProductMinimumPrice(a) - getProductMinimumPrice(b) ||
-          norm(a.nombre || '').localeCompare(norm(b.nombre || '')),
-      );
-
-      const results = list.slice(0, limit).map((p) => productSummary(menu, p));
       return {
         count: results.length,
         results,
-        sorted_by: 'price_min_asc',
-        note:
-          results.length === 0
-            ? 'No hay coincidencias en el catálogo de este restaurante.'
-            : undefined,
+        sorted_by: sortedBy,
+        query_normalized: found.query_normalized,
+        searched_options: found.searched_options,
+        ambiguous: browseOnly ? false : found.ambiguous,
+        note: found.note,
       };
     }
 
@@ -424,29 +502,95 @@ export function executeChatTool(
       });
     }
 
+    case 'recommend_products': {
+      const want = Array.isArray(args.want_ingredients)
+        ? args.want_ingredients.map((x) => String(x))
+        : [];
+      const avoid = Array.isArray(args.avoid_ingredients)
+        ? args.avoid_ingredients.map((x) => String(x))
+        : [];
+      const exclude = Array.isArray(args.exclude_product_ids)
+        ? args.exclude_product_ids.map((x) => String(x))
+        : (ctx.cartSnapshot || []).map((l) => l.productId);
+      const rec = recommendFromCatalog(menu, {
+        query: String(args.query ?? '').trim() || undefined,
+        category: String(args.category ?? '').trim() || undefined,
+        want_ingredients: want,
+        avoid_ingredients: avoid,
+        max_price:
+          typeof args.max_price === 'number' ? args.max_price : Number(args.max_price) || undefined,
+        party_size:
+          typeof args.party_size === 'number' ? args.party_size : Number(args.party_size) || undefined,
+        exclude_product_ids: exclude,
+        complement_to_cart: args.complement_to_cart === true,
+        limit: Number(args.limit) || 3,
+      });
+      const currency = resolveMenuCurrency(menu);
+      for (const row of rec.results) {
+        const product = asProducts(menu).find((p) => p.id === row.id);
+        if (!product) continue;
+        ctx.pendingCards = ctx.pendingCards || [];
+        ctx.pendingCards.push(buildProductCard(menu, product));
+      }
+      return {
+        ...rec,
+        currency,
+        results: rec.results.map((r) => ({
+          ...r,
+          price_min_label: formatChatMoney(r.price_min, currency),
+          prepare_hint: {
+            product_id: r.id,
+            product_name: r.name,
+            option_labels: r.suggested_option_labels,
+          },
+        })),
+      };
+    }
+
+    case 'suggest_cheaper_alternatives': {
+      const productId = String(args.product_id ?? '').trim() || null;
+      const alt = findCheaperAlternatives(
+        menu,
+        productId,
+        Math.min(5, Math.max(1, Number(args.limit) || 3)),
+      );
+      const currency = resolveMenuCurrency(menu);
+      return {
+        ...alt,
+        currency,
+        alternatives: alt.alternatives.map((a) => ({
+          ...a,
+          price_min_label: formatChatMoney(a.price_min, currency),
+        })),
+        note:
+          alt.alternatives.length === 0
+            ? 'No hay alternativas más baratas en la misma categoría.'
+            : 'Ofrece 1–2 opciones con empatía; no discutas el precio.',
+      };
+    }
+
     case 'get_product_details': {
       const productId = String(args.product_id ?? '').trim();
       const productName = String(args.product_name ?? '').trim();
-      let product: ProductRow | undefined;
-      if (productId) {
-        product = asProducts(menu).find((p) => p.id === productId);
+      const resolved = resolveCatalogProduct(menu, productId, productName);
+      if (!resolved) {
+        return {
+          found: false,
+          message:
+            'No hay coincidencia en este menú para ese id/nombre. No inventes el producto; ofrece el menú o reformula la búsqueda.',
+        };
       }
-      if (!product && productName) {
-        const n = norm(productName);
-        product =
-          asProducts(menu).find((p) => norm(p.nombre || '') === n) ||
-          asProducts(menu).find((p) => norm(p.nombre || '').includes(n));
-      }
-      if (!product) {
-        return { found: false, message: 'Producto no encontrado en este menú.' };
-      }
-      // Validate id belongs to this commerce snapshot
-      if (!asProducts(menu).some((p) => p.id === product!.id)) {
+      const product = resolved.product;
+      if (!asProducts(menu).some((p) => p.id === product.id)) {
         return { found: false, message: 'Producto no autorizado.' };
       }
       const options = parseProductMenuOptions(product.opciones_menu);
       return {
         found: true,
+        matched_field: resolved.matched_field,
+        matched_option: resolved.matched_option,
+        matched_group: resolved.matched_group,
+        suggested_option_labels: resolved.suggested_option_labels,
         product: {
           ...productSummary(menu, product),
           description: product.descripcion ?? '',
@@ -554,16 +698,17 @@ export function executeChatTool(
         hours_week: hoursDays,
         whatsapp: whatsappRaw,
         whatsapp_url: whatsappUrl,
+        contact_scope: 'restaurant_only',
         note: [
           hasCoords
             ? 'La UI puede mostrar el pin GPS. Responde breve y comparte maps_url; NUNCA digas que no puedes enviar ubicación.'
             : 'No hay coordenadas GPS publicadas; da la dirección textual si existe.',
           scheduleStatus.configured
             ? `Horario: usa hours_status.caption y hours_week (no inventes). Hoy: ${scheduleStatus.caption}.`
-            : 'Horario no configurado; dilo y ofrece WhatsApp.',
+            : 'Horario no configurado; dilo y ofrece WhatsApp del local si existe.',
           whatsappUrl
-            ? `Si piden humano/WhatsApp, comparte whatsapp_url: ${whatsappUrl}`
-            : 'No hay WhatsApp publicado; ofrece el menú tradicional.',
+            ? `Reclamos / humano / WhatsApp del local: comparte SOLO whatsapp_url de este restaurante: ${whatsappUrl}. NUNCA un número de elmenuxfa ni de otro comercio.`
+            : 'No hay WhatsApp del restaurante publicado; dilo sin inventar ni usar el de la plataforma.',
         ].join(' '),
       };
     }
@@ -600,10 +745,7 @@ export function executeChatTool(
           product = asProducts(menu).find((p) => p.id === productId);
         }
         if (!product && productName) {
-          const n = norm(productName);
-          product =
-            asProducts(menu).find((p) => norm(p.nombre || '') === n) ||
-            asProducts(menu).find((p) => norm(p.nombre || '').includes(n));
+          product = resolveCatalogProduct(menu, null, productName)?.product;
         }
         if (!product) {
           return {

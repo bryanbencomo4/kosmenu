@@ -7,6 +7,8 @@ export type ChatSuggestedAction =
   | { type: 'category'; categoryId: string }
   | { type: 'catalog'; categoryId: string | null }
   | { type: 'cart' }
+  | { type: 'checkout' }
+  | { type: 'configure_product'; productId: string }
   | { type: 'payments' }
   | { type: 'location' }
   | { type: 'hours' }

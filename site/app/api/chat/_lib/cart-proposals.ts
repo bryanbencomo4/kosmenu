@@ -10,8 +10,9 @@ import {
   validateOptionGroupSelection,
   type CartLineSelection,
 } from '../../../_lib/menu-product-options';
-import { fuzzyIncludes } from '../../../_lib/search-text';
+import { foldSearchText, fuzzyIncludes } from '../../../_lib/search-text';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
+import { resolveCatalogProduct } from './catalog-search';
 import { formatChatMoney, resolveMenuCurrency } from './chat-currency';
 
 export type ChatCartSnapshotLine = {
@@ -160,28 +161,35 @@ function findProduct(
   productId?: string | null,
   productName?: string | null,
 ): ProductRow | null {
-  const products = asProducts(menu);
-  const id = (productId || '').trim();
-  if (id) {
-    const byId = products.find((p) => p.id === id);
-    if (byId) return byId;
-  }
-  const name = (productName || '').trim();
-  if (!name) return null;
-  const n = norm(name);
-  return (
-    products.find((p) => norm(p.nombre || '') === n) ||
-    products.find((p) => norm(p.nombre || '').includes(n)) ||
-    // Plural / near-match: "hawaianas" → "Hawaiana"
-    products.find((p) => fuzzyIncludes(norm(p.nombre || ''), n)) ||
-    products.find((p) => fuzzyIncludes(n, norm(p.nombre || ''))) ||
-    null
-  );
+  return resolveCatalogProduct(menu, productId, productName)?.product ?? null;
+}
+
+/** Ranked resolve — includes suggested option labels from option-value matches. */
+function resolveProductWithHints(
+  menu: LoadedPublicMenu,
+  productId?: string | null,
+  productName?: string | null,
+) {
+  return resolveCatalogProduct(menu, productId, productName);
 }
 
 function categoryFor(menu: LoadedPublicMenu, product: ProductRow) {
   const cats = (menu.categorias as CategoryRow[]) || [];
   return cats.find((c) => c.id === product.categoria_id) || null;
+}
+
+function optionLabelMatches(optionName: string, want: string): boolean {
+  const have = norm(optionName);
+  if (!want || !have) return false;
+  if (have === want || have.includes(want) || want.includes(have)) return true;
+  // cocacola ↔ coca-cola / CocaCola
+  const compactHave = have.replace(/\s+/g, '');
+  const compactWant = want.replace(/\s+/g, '');
+  if (compactHave === compactWant) return true;
+  if (fuzzyIncludes(have, want) || fuzzyIncludes(want, have)) return true;
+  // "coca" vs "coca-cola"
+  if (want.length >= 4 && (have.startsWith(want) || have.includes(want))) return true;
+  return false;
 }
 
 function findOptionIdByLabel(
@@ -196,7 +204,7 @@ function findOptionIdByLabel(
   for (const g of options.grupos) {
     if (groupHint && !norm(g.nombre || '').includes(groupHint)) continue;
     for (const o of g.opciones || []) {
-      if (norm(o.nombre || '') === want || norm(o.nombre || '').includes(want)) {
+      if (optionLabelMatches(o.nombre || '', want)) {
         return {
           groupId: g.id,
           optionId: o.id,
@@ -206,7 +214,6 @@ function findOptionIdByLabel(
       }
     }
   }
-  // Second pass without group hint
   if (groupHint) {
     return findOptionIdByLabel(product, null, optionLabel);
   }
@@ -330,7 +337,12 @@ export function prepareCartLineProposal(
     };
   }
 
-  const product = findProduct(menu, input.product_id, input.product_name);
+  const resolved = resolveProductWithHints(
+    menu,
+    input.product_id,
+    input.product_name,
+  );
+  const product = resolved?.product ?? null;
   if (!product) {
     return { status: 'not_found', message: 'Producto no encontrado en este menú.' };
   }
@@ -350,10 +362,24 @@ export function prepareCartLineProposal(
     Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.min(99, Math.floor(qtyRaw)) : 1;
 
   const selection: CartLineSelection = { grupos: {}, exclusionesIds: [] };
+  // option_choices first; then explicit labels; then labels inferred when the
+  // product was resolved via an option value (e.g. “Coca-Cola” → refresco).
   const choices: Array<{ group?: string; option: string }> = [
     ...(input.option_choices || []),
-    ...(input.option_labels || []).map((option) => ({ option })),
   ];
+  for (const option of [
+    ...(input.option_labels || []),
+    ...(resolved?.suggested_option_labels || []),
+  ]) {
+    if (
+      choices.some((c) =>
+        optionLabelMatches(c.option, foldSearchText(option)),
+      )
+    ) {
+      continue;
+    }
+    choices.push({ option });
+  }
 
   for (const choice of choices) {
     const hit = findOptionIdByLabel(product, choice.group || null, choice.option);

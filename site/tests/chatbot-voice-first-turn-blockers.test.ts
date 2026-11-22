@@ -105,8 +105,10 @@ describe('voice first-turn blockers (no Gemini spend)', () => {
       currency: 'USD',
     });
     expect(prompt).toMatch(/PRIORIZA las líneas que SÍ existen/i);
-    expect(prompt).toMatch(/Coca-Cola/i);
     expect(prompt).toMatch(/NUNCA bloquees ni omitas/i);
+    expect(prompt).toMatch(/matched_option|suggested_option_labels/i);
+    // Do not prime a fixed "Coca-Cola missing" example — options live on parent SKUs.
+    expect(prompt).not.toMatch(/Coca-Cola no (está|existe|disponible)/i);
   });
 
   it('prepare_cart_line_proposal tool describes compound partial fulfill', () => {

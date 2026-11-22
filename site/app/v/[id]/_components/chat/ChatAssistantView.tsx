@@ -46,9 +46,13 @@ import {
 } from './ChatPhoneActionSheet';
 import {
   ChatSuggestedReplies,
-  buildSuggestedReplies,
   type ChatSuggestedChip,
 } from './ChatSuggestedReplies';
+import {
+  buildContextualQuickReplies,
+  isQuickReplyActionable,
+  type ChatContextualChip,
+} from './chat-quick-replies';
 import type { DeliveryQuote } from '../../../../_lib/delivery-config';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
@@ -455,6 +459,8 @@ export function ChatAssistantView({
   const playedReceiveIdsRef = useRef<Set<string>>(new Set());
   /** One receive cue per completed assistant turn (tools may take many rounds). */
   const receiveTurnLockRef = useRef(false);
+  /** Active quick-reply context id — stale chips are ignored on pick. */
+  const quickReplyContextIdRef = useRef<string | null>(null);
   const regionId = useId();
   const frameRef = useRef<HTMLElement | null>(null);
   const [frameStyle, setFrameStyle] = useState<CSSProperties>({});
@@ -1377,6 +1383,17 @@ export function ChatAssistantView({
 
   const onPickSuggestion = useCallback(
     (chip: ChatSuggestedChip) => {
+      const contextual = chip as ChatContextualChip;
+      if (
+        !isQuickReplyActionable(
+          contextual,
+          quickReplyContextIdRef.current,
+        )
+      ) {
+        return;
+      }
+      // One-shot: clear context so a double-tap cannot re-fire stale chips.
+      quickReplyContextIdRef.current = null;
       const action = chip.action;
       switch (action.type) {
         case 'category':
@@ -1388,6 +1405,12 @@ export function ChatAssistantView({
           break;
         case 'cart':
           onOpenCart();
+          break;
+        case 'checkout':
+          onOpenCheckout?.();
+          break;
+        case 'configure_product':
+          onConfigureProduct?.(action.productId);
           break;
         case 'payments':
           void sendText('Cómo pago');
@@ -1406,7 +1429,16 @@ export function ChatAssistantView({
           break;
       }
     },
-    [catalog, onSelectCategory, openCatalogSheet, onOpenMenu, onOpenCart, sendText],
+    [
+      catalog,
+      onSelectCategory,
+      openCatalogSheet,
+      onOpenMenu,
+      onOpenCart,
+      onOpenCheckout,
+      onConfigureProduct,
+      sendText,
+    ],
   );
 
   const sendVoice = useCallback(
@@ -1702,27 +1734,31 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
-  const suggestedChips = useMemo(
-    () =>
-      buildSuggestedReplies({
-        catalog,
-        cartCount,
-        activeCategoryId: messages[messages.length - 1]?.catalogCategoryId ?? null,
-        hasPaymentMethods: paymentMethods.length > 0,
-        hasBusinessLocation: Boolean(businessLocation),
-        hasBusinessHours: Boolean(businessHours),
-        hasWhatsApp: Boolean(whatsappUrl),
-      }),
-    [
+  const suggestedChips = useMemo(() => {
+    const built = buildContextualQuickReplies({
       catalog,
       cartCount,
       messages,
-      paymentMethods.length,
-      businessLocation,
-      businessHours,
-      whatsappUrl,
-    ],
-  );
+      activeCategoryId:
+        messages[messages.length - 1]?.catalogCategoryId ?? null,
+      hasPaymentMethods: paymentMethods.length > 0,
+      hasBusinessLocation: Boolean(businessLocation),
+      hasBusinessHours: Boolean(businessHours),
+      hasWhatsApp: Boolean(whatsappUrl),
+      suppressComplements: declinedComplements,
+    });
+    quickReplyContextIdRef.current = built.context?.id ?? null;
+    return built.chips;
+  }, [
+    catalog,
+    cartCount,
+    messages,
+    paymentMethods.length,
+    businessLocation,
+    businessHours,
+    whatsappUrl,
+    declinedComplements,
+  ]);
 
   const shareLocation = useCallback(
     async (location: ChatSharedLocation) => {

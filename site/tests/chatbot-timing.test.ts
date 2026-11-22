@@ -29,12 +29,17 @@ describe('chat human timing', () => {
       path.join(root, 'app/v/[id]/_components/chat/ChatMessageBubble.tsx'),
       'utf8',
     );
+    const voice = readFileSync(
+      path.join(root, 'app/v/[id]/_components/chat/ChatVoiceNote.tsx'),
+      'utf8',
+    );
     expect(view).toMatch(/humanTypingMinMs/);
     expect(view).toMatch(/humanReadBeatMs/);
     expect(view).toMatch(/voicePending:\s*true/);
     expect(view).toMatch(/data-chat-shell/);
     expect(view).toMatch(/max-w-5xl/);
-    expect(bubble).toMatch(/data-chat-voice-pending/);
-    expect(bubble).toMatch(/animate-spin/);
+    expect(bubble).toMatch(/pending=\{message\.voicePending\}/);
+    expect(voice).toMatch(/data-chat-voice-pending/);
+    expect(voice).toMatch(/animate-spin/);
   });
 });

@@ -68,6 +68,7 @@ describe('chat UX wiring (source assertions)', () => {
     const view = chat('ChatAssistantView.tsx');
     expect(view.indexOf('<ChatSuggestedReplies')).toBeLessThan(view.indexOf('<ChatComposer'));
     expect(view).toMatch(/hidden=\{isTyping \|\| recording\}/);
+    expect(view).toMatch(/buildContextualQuickReplies/);
   });
 
   it('both carousels receive onSeeAll whenever onSeeAllCatalog exists', () => {
