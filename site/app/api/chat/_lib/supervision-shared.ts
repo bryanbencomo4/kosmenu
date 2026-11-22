@@ -36,6 +36,18 @@ export function detectNeedsHuman(text: string) {
   return ESCALATION_RE.test(text);
 }
 
+/** True when this turn newly marks the conversation as needing a human. */
+export function didEscalateToNeedsAttention(
+  previousStatus: string | null | undefined,
+  nextStatus: string,
+  consumerText: string,
+): boolean {
+  if (!detectNeedsHuman(consumerText)) return false;
+  if (nextStatus !== 'needs_attention') return false;
+  const prev = String(previousStatus || '');
+  return prev !== 'needs_attention' && prev !== 'human_handling';
+}
+
 /** Max WaSender delivery attempts for a supervision notify event. */
 export const SUPERVISION_NOTIFY_MAX_ATTEMPTS = 3;
 

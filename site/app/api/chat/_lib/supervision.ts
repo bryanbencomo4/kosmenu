@@ -15,6 +15,7 @@ import {
 } from './supervision-config';
 import {
   detectNeedsHuman,
+  didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
@@ -33,6 +34,7 @@ import {
 
 export {
   detectNeedsHuman,
+  didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
@@ -163,6 +165,7 @@ export async function persistConsumerTurn(
       const existing = memoryGetBySession(input.comercioId, input.sessionId);
       let isNewConversation = !existing;
       let conversation = existing;
+      const previousStatus = existing?.status || null;
       if (!conversation) {
         conversation = memoryUpsertConversation({
           comercio_id: input.comercioId,
@@ -232,6 +235,19 @@ export async function persistConsumerTurn(
           commerceName: input.commerceName,
         }).catch(() => {});
       }
+      if (
+        didEscalateToNeedsAttention(
+          previousStatus,
+          conversation.status,
+          input.text,
+        )
+      ) {
+        void offerAlternateContactIfNeeded({
+          conversationId: conversation.id,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+        }).catch(() => {});
+      }
       return {
         ok: true,
         conversationId: conversation.id,
@@ -253,6 +269,9 @@ export async function persistConsumerTurn(
 
     let conversation = existing.data as Record<string, unknown> | null;
     let isNewConversation = false;
+    const previousStatus = conversation
+      ? String(conversation.status || '')
+      : null;
 
     if (!conversation) {
       isNewConversation = true;
@@ -360,6 +379,20 @@ export async function persistConsumerTurn(
       type: 'message_created',
       role: 'consumer',
     }).catch(() => {});
+
+    if (
+      didEscalateToNeedsAttention(
+        previousStatus,
+        String(conversation!.status),
+        input.text,
+      )
+    ) {
+      void offerAlternateContactIfNeeded({
+        conversationId,
+        comercioId: input.comercioId,
+        commerceName: input.commerceName,
+      }).catch(() => {});
+    }
 
     // Opportunistic retry of failed WaSender notifies (never blocks chat).
     void retryFailedSupervisionNotifies(input.comercioId).catch(() => {});
@@ -483,6 +516,32 @@ export async function persistAssistantOrStaffMessage(input: {
   } catch {
     return { ok: false };
   }
+}
+
+/**
+ * Discreet alternate-contact note when a consumer asks for a human.
+ * Does not promise an immediate reply if no staff is online.
+ */
+async function offerAlternateContactIfNeeded(input: {
+  conversationId: string;
+  comercioId: string;
+  commerceName: string;
+}) {
+  const dest = isSupervisionMemoryEnabled()
+    ? null
+    : await resolveSupervisionWhatsapp(input.comercioId);
+  const name = dest?.nombre || input.commerceName || 'el restaurante';
+  const body = dest?.phone
+    ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${dest.phone}. No prometemos una respuesta humana inmediata.`
+    : `El personal de ${name} puede unirse a este chat cuando esté disponible. No prometemos una respuesta humana inmediata; si el local publica WhatsApp en el menú, úsalo para contacto directo.`;
+
+  await persistAssistantOrStaffMessage({
+    conversationId: input.conversationId,
+    comercioId: input.comercioId,
+    role: 'system',
+    text: body,
+    clientMessageId: `sys_alt_contact_${input.conversationId}`,
+  });
 }
 
 async function resolveSupervisionWhatsapp(

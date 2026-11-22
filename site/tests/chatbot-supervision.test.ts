@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   detectNeedsHuman,
+  didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
@@ -33,6 +34,15 @@ describe('chat supervision helpers', () => {
     expect(detectNeedsHuman('Quiero hablar con un humano')).toBe(true);
     expect(detectNeedsHuman('Tengo un reclamo')).toBe(true);
     expect(detectNeedsHuman('¿Tienen pizza grande?')).toBe(false);
+    expect(
+      didEscalateToNeedsAttention('ai_handling', 'needs_attention', 'Tengo un reclamo'),
+    ).toBe(true);
+    expect(
+      didEscalateToNeedsAttention('needs_attention', 'needs_attention', 'reclamo otra vez'),
+    ).toBe(false);
+    expect(
+      didEscalateToNeedsAttention('human_handling', 'needs_attention', 'hablar con encargado'),
+    ).toBe(false);
   });
 
   it('hashes consumer sessions stably per commerce', () => {
@@ -80,15 +90,17 @@ describe('chat supervision helpers', () => {
   it('keeps human takeover as an independent kill switch', () => {
     expect(
       getChatSupervisionConfig({
+        NODE_ENV: 'test',
         CHAT_SUPERVISION_ENABLED: '1',
         CHAT_SUPERVISION_HUMAN_TAKEOVER: '',
-      }).humanTakeover,
+      } as NodeJS.ProcessEnv).humanTakeover,
     ).toBe(false);
     expect(
       getChatSupervisionConfig({
+        NODE_ENV: 'test',
         CHAT_SUPERVISION_ENABLED: '1',
         CHAT_SUPERVISION_HUMAN_TAKEOVER: '1',
-      }).humanTakeover,
+      } as NodeJS.ProcessEnv).humanTakeover,
     ).toBe(true);
   });
 
