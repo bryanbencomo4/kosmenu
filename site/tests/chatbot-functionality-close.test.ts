@@ -57,6 +57,14 @@ describe('functionality close — voice / media gates', () => {
         NODE_ENV: 'production',
       } as NodeJS.ProcessEnv),
     ).toBe('disabled');
+    expect(
+      resolveChatMediaMode({
+        NODE_ENV: 'production',
+        CHATBOT_SIMULATE_GEMINI: '0',
+        CHATBOT_MEDIA_LIVE: '1',
+        CHATBOT_VOICE_STT: '1',
+      } as NodeJS.ProcessEnv),
+    ).toBe('live');
     const blocked = chatMediaLiveAllowed({
       NODE_ENV: 'development',
       CHATBOT_SIMULATE_GEMINI: '0',
@@ -69,8 +77,9 @@ describe('functionality close — voice / media gates', () => {
     expect(CHAT_MEDIA_MAX_AUDIO_BYTES).toBeGreaterThan(0);
   });
 
-  it('media route gates production and live budget', () => {
+  it('media route gates production runtime and live budget', () => {
     const route = read('app/api/chat/[comercioId]/media/route.ts');
+    expect(route).toMatch(/isChatbotRuntimeAllowed/);
     expect(route).toMatch(/production_blocked/);
     expect(route).toMatch(/runMediaGemini/);
     expect(route).toMatch(/hardGuarantee: false/);

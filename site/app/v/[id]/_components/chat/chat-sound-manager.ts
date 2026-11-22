@@ -10,9 +10,14 @@ export type ChatSoundEvent =
   | 'recordingStart'
   | 'recordingStop'
   | 'voiceSent'
-  | 'recordingCancel';
+  | 'recordingCancel'
+  /** Synth-only blip when a product flies to the cart (no MP3 asset). */
+  | 'cartAdd';
 
-const SOUND_URLS: Record<ChatSoundEvent, string> = {
+/** Events backed by an optional licensed MP3 (everything except synth-only cues). */
+type ChatSoundSampleEvent = Exclude<ChatSoundEvent, 'cartAdd'>;
+
+const SOUND_URLS: Record<ChatSoundSampleEvent, string> = {
   messageSent: '/sounds/chat/message-sent.mp3',
   messageReceived: '/sounds/chat/message-received.mp3',
   recordingStart: '/sounds/chat/recording-start.mp3',
@@ -32,6 +37,7 @@ const SYNTH_CUES: Record<
   recordingStop: { freqs: [420], durationsMs: [55], type: 'square' },
   voiceSent: { freqs: [740, 990, 1180], durationsMs: [40, 45, 60], type: 'sine' },
   recordingCancel: { freqs: [300, 220], durationsMs: [70, 90], type: 'triangle' },
+  cartAdd: { freqs: [988, 1318], durationsMs: [35, 60], type: 'sine' },
 };
 
 const STORAGE_KEY = 'elmenuxfa:chat-sounds-v1';
@@ -50,8 +56,8 @@ function getAudioContextCtor(): AudioContextCtor | null {
 }
 
 let sharedCtx: AudioContext | null = null;
-const buffers = new Map<ChatSoundEvent, AudioBuffer>();
-const inflight = new Map<ChatSoundEvent, Promise<AudioBuffer | null>>();
+const buffers = new Map<ChatSoundSampleEvent, AudioBuffer>();
+const inflight = new Map<ChatSoundSampleEvent, Promise<AudioBuffer | null>>();
 let unlockBound = false;
 let enabledCache: boolean | null = null;
 
@@ -140,6 +146,8 @@ function playSynthCue(
 
 async function loadBuffer(event: ChatSoundEvent): Promise<AudioBuffer | null> {
   if (!areChatSoundsLicensed()) return null;
+  // Synth-only cues (e.g. cartAdd) have no sample.
+  if (event === 'cartAdd') return null;
   const cached = buffers.get(event);
   if (cached) return cached;
   const pending = inflight.get(event);
@@ -183,7 +191,7 @@ function startBuffer(ctx: AudioContext, buf: AudioBuffer): void {
 export function prefetchChatSounds(events?: ChatSoundEvent[]): void {
   if (typeof window === 'undefined' || !isChatSoundsEnabled()) return;
   if (!areChatSoundsLicensed()) return;
-  const list = events || (Object.keys(SOUND_URLS) as ChatSoundEvent[]);
+  const list = events || (Object.keys(SOUND_URLS) as ChatSoundSampleEvent[]);
   for (const ev of list) {
     void loadBuffer(ev);
   }

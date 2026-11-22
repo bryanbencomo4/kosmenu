@@ -9,8 +9,10 @@ import { NextResponse } from 'next/server';
 import {
   allowsLocalOfflineChatbotCommerce,
   LOCAL_OFFLINE_CHATBOT_COMMERCE_ID,
+  LOCAL_OFFLINE_CHATBOT_SLUG,
+  parseAllowedCommerceIds,
 } from '../../_lib/commerce-auth';
-import { getChatbotConfig } from '../../_lib/config';
+import { getChatbotConfig, isChatbotRuntimeAllowed } from '../../_lib/config';
 import { getLiveBudgetSnapshot } from '../../_lib/live-budget';
 import { storeEphemeralMedia, purgeExpiredMedia } from '../../_lib/media-ephemeral';
 import { runMediaGemini } from '../../_lib/media-gemini';
@@ -29,11 +31,20 @@ export const dynamic = 'force-dynamic';
 
 const MAX_AUDIO_DURATION_SEC = 60;
 
+/**
+ * Media is only for the chatbot allowlist (same UUID set as chat) plus the
+ * local Trueno offline smoke slug/id. Never opens arbitrary commerces.
+ */
 function commerceAllowed(comercioId: string): boolean {
   const id = comercioId.trim().toLowerCase();
+  if (!id) return false;
   if (id === LOCAL_OFFLINE_CHATBOT_COMMERCE_ID) return true;
-  if (id === 'pizzas-el-trueno') return true;
-  return allowsLocalOfflineChatbotCommerce({ commerceId: id });
+  if (id === LOCAL_OFFLINE_CHATBOT_SLUG) return true;
+  if (allowsLocalOfflineChatbotCommerce({ commerceId: id })) return true;
+  const allowed = parseAllowedCommerceIds(
+    process.env.CHATBOT_ALLOWED_COMMERCE_IDS,
+  );
+  return allowed.has(id);
 }
 
 export async function POST(
@@ -45,11 +56,17 @@ export async function POST(
     return NextResponse.json({ ok: false, error: 'missing_commerce' }, { status: 400 });
   }
 
-  if ((process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
-    return NextResponse.json(
-      { ok: false, error: 'production_blocked' },
-      { status: 403 },
-    );
+  // Production: same chatbot runtime gates as text chat (allowlist / postgres /
+  // ALLOW_PRODUCTION). Media still needs CHATBOT_MEDIA_LIVE via chatMediaLiveAllowed.
+  const nodeEnv = (process.env.NODE_ENV || '').trim().toLowerCase();
+  if (nodeEnv === 'production') {
+    const runtime = isChatbotRuntimeAllowed(getChatbotConfig());
+    if (!runtime.ok) {
+      return NextResponse.json(
+        { ok: false, error: runtime.reason || 'production_blocked' },
+        { status: 403 },
+      );
+    }
   }
 
   if (!commerceAllowed(comercioId)) {

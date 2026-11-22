@@ -15,6 +15,7 @@ import { ChatCategoryCarousel } from './ChatCategoryCarousel';
 import { ChatProductCard } from './ChatProductCard';
 import { ChatProductCarousel } from './ChatProductCarousel';
 import { ChatReceiptTicks } from './ChatReceiptTicks';
+import { formatChatText } from './chat-format';
 import {
   REPLY_LONG_PRESS_MS,
   REPLY_SWIPE_SLOP_PX,
@@ -442,7 +443,9 @@ export function ChatMessageBubble({
             </div>
           ) : null}
           {hasText ? (
-            <p className="whitespace-pre-wrap break-words">{message.text}</p>
+            <div className="break-words" data-chat-text="1">
+              {formatChatText(message.text)}
+            </div>
           ) : null}
           <div className="mt-1 flex justify-end">{meta}</div>
         </div>
@@ -492,6 +495,9 @@ export function ChatMessageBubble({
               products={standaloneCards}
               onConfigure={onConfigureProduct}
               onAddSimple={onAddSimpleProduct}
+              onSeeAll={
+                onSeeAllCatalog ? () => onSeeAllCatalog(null) : undefined
+              }
             />
           )}
         </div>

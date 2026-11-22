@@ -110,6 +110,52 @@ export function filterCatalogProducts(
 }
 
 /* ------------------------------------------------------------------ */
+/* Deterministic catalog intents (no Gemini)                           */
+/* ------------------------------------------------------------------ */
+
+export type CatalogIntent =
+  | { kind: 'categories' }
+  | { kind: 'category'; categoryId: string };
+
+/** "categorías", "ver menú", "qué hay/tienen", "mostrar menú" (checked on accent-stripped text). */
+export const CATEGORIES_INTENT_RE =
+  /categorias|ver (el )?menu|que (hay|tienen)|mostrar (el )?menu|lista(do)? (del )?menu|opciones del menu/i;
+/** Common category keywords worth resolving straight to a category carousel. */
+const CATEGORY_KEYWORD_RE = /bebidas|pizzas|postres|hamburguesas/g;
+/** Long free-form messages go to the model even if they mention "menú". */
+const CATEGORIES_INTENT_MAX_WORDS = 8;
+
+/**
+ * Cheap, deterministic routing for "show me the menu / a category" messages so
+ * the UI can answer with a carousel without spending a Gemini call.
+ * Returns `null` when the text should go to the assistant as usual.
+ */
+export function matchCatalogIntent(
+  text: string | null | undefined,
+  catalog: ChatCatalogSnapshot | null | undefined,
+): CatalogIntent | null {
+  if (!catalog || catalog.categories.length === 0) return null;
+  const norm = normalizeCatalogText(text).replace(/[¿?¡!.,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!norm) return null;
+  const words = norm.split(' ').length;
+  if (words > CATEGORIES_INTENT_MAX_WORDS) return null;
+
+  const keywords = norm.match(CATEGORY_KEYWORD_RE);
+  if (keywords) {
+    for (const kw of keywords) {
+      const stem = kw.replace(/s$/, '');
+      const hit = catalog.categories.find((c) =>
+        normalizeCatalogText(c.name).includes(stem),
+      );
+      if (hit) return { kind: 'category', categoryId: hit.id };
+    }
+  }
+
+  if (CATEGORIES_INTENT_RE.test(norm)) return { kind: 'categories' };
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Complement suggestions                                              */
 /* ------------------------------------------------------------------ */
 

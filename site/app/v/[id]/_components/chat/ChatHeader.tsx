@@ -135,6 +135,7 @@ export function ChatHeader({
       <button
         type="button"
         data-open-cart="1"
+        data-chat-cart-button="1"
         onClick={onOpenCart}
         className={`${iconBtn} relative`}
         aria-label={

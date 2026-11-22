@@ -236,6 +236,7 @@ export async function POST(
       },
       cart_actions: simulated.cartActions,
       product_cards: simulated.productCards,
+      category_cards: [],
       order_actions: [],
     });
   }
@@ -260,6 +261,7 @@ export async function POST(
       attribution: result.attribution,
       cart_actions: result.cartActions,
       product_cards: result.productCards,
+      category_cards: result.categoryCards,
       order_actions: [],
     });
   }
@@ -282,6 +284,7 @@ export async function POST(
       attribution: result.attribution,
       cart_actions: [],
       product_cards: [],
+      category_cards: [],
       order_actions: [],
     });
   }
@@ -337,6 +340,7 @@ export async function POST(
       live_budget: liveBudgetPublicSnapshot(),
       cart_actions: result.cartActions,
       product_cards: result.productCards,
+      category_cards: result.categoryCards,
       // Never create orders from chat in Phase 3.
       order_actions: [],
     });
@@ -363,6 +367,7 @@ export async function POST(
         live_budget: liveBudgetPublicSnapshot(),
         cart_actions: [],
         product_cards: [],
+        category_cards: [],
         order_actions: [],
       });
     }

@@ -2,28 +2,35 @@
  * Gates for chat media (voice STT / image analysis).
  * Default: simulate locally. Never bill Gemini unless explicitly enabled
  * AND simulation is off AND live hard caps allow it.
+ *
+ * Production: allowed only when CHATBOT_MEDIA_LIVE=1 and STT/vision flags
+ * are on (same second lock as chatMediaLiveAllowed). Never silently bills.
  */
 
 export type ChatMediaMode = 'disabled' | 'simulate' | 'live';
 
+function flagOn(env: NodeJS.ProcessEnv, key: string): boolean {
+  return ['1', 'true', 'yes'].includes((env[key] ?? '').trim().toLowerCase());
+}
+
 export function resolveChatMediaMode(
   env: NodeJS.ProcessEnv = process.env,
 ): ChatMediaMode {
+  const simulate = flagOn(env, 'CHATBOT_SIMULATE_GEMINI');
+  const stt = flagOn(env, 'CHATBOT_VOICE_STT');
+  const vision = flagOn(env, 'CHATBOT_IMAGE_ANALYSIS');
+  const mediaLive = flagOn(env, 'CHATBOT_MEDIA_LIVE');
   const nodeEnv = (env.NODE_ENV || '').trim().toLowerCase();
-  if (nodeEnv === 'production') return 'disabled';
-
-  const simulate = ['1', 'true', 'yes'].includes(
-    (env.CHATBOT_SIMULATE_GEMINI ?? '').trim().toLowerCase(),
-  );
-  const stt = ['1', 'true', 'yes'].includes(
-    (env.CHATBOT_VOICE_STT ?? '').trim().toLowerCase(),
-  );
-  const vision = ['1', 'true', 'yes'].includes(
-    (env.CHATBOT_IMAGE_ANALYSIS ?? '').trim().toLowerCase(),
-  );
 
   // Prefer simulate whenever simulator is on — no billable media calls.
   if (simulate) return 'simulate';
+
+  // Production requires the explicit media-live lock (pilot / Trueno).
+  if (nodeEnv === 'production') {
+    if (mediaLive && (stt || vision)) return 'live';
+    return 'disabled';
+  }
+
   if (stt || vision) return 'live';
   return 'simulate';
 }
@@ -38,10 +45,7 @@ export function chatMediaLiveAllowed(
     return { ok: false, reason: 'gemini_unconfigured' };
   }
   // Explicit second lock: require CHATBOT_MEDIA_LIVE=1 for any billable media.
-  const live = ['1', 'true', 'yes'].includes(
-    (env.CHATBOT_MEDIA_LIVE ?? '').trim().toLowerCase(),
-  );
-  if (!live) {
+  if (!flagOn(env, 'CHATBOT_MEDIA_LIVE')) {
     return { ok: false, reason: 'media_live_locked' };
   }
   return { ok: true };

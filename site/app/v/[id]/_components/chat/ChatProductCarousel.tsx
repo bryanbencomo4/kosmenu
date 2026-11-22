@@ -1,6 +1,9 @@
 'use client';
 
+import type { MouseEvent } from 'react';
+
 import { ChatHorizontalScroller } from './ChatHorizontalScroller';
+import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import type { ChatProductCardData } from './chat-types';
 
 type ChatProductCarouselProps = {
@@ -27,6 +30,15 @@ export function ChatProductCarouselCard({
   const price =
     card.price_label ||
     (card.price_unit != null ? `${card.price_unit} ${card.currency}` : 'Ver precio');
+
+  const handleAdd = (e: MouseEvent<HTMLButtonElement>) => {
+    // Visual only: grab the image rect first, then add via the normal path.
+    void flyToCart({
+      source: findProductImageEl(e.currentTarget),
+      imageUrl: card.image_url,
+    });
+    onAddSimple?.(card.product_id);
+  };
 
   return (
     <article
@@ -82,7 +94,8 @@ export function ChatProductCarouselCard({
           ) : canAdd ? (
             <button
               type="button"
-              onClick={() => onAddSimple?.(card.product_id)}
+              data-chat-add-simple={card.product_id}
+              onClick={handleAdd}
               className="w-full rounded-lg border border-[var(--chat-card-border)] bg-[var(--chat-input)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-text)] active:opacity-90"
             >
               Agregar
@@ -104,6 +117,7 @@ export function ChatProductCarousel({
   seeAllLabel = 'Ver todos los productos',
 }: ChatProductCarouselProps) {
   if (products.length === 0) return null;
+  const canSeeAll = typeof onSeeAll === 'function';
   return (
     <div data-chat-product-carousel="1">
       <ChatHorizontalScroller ariaLabel="Productos" className="py-1">
@@ -115,14 +129,30 @@ export function ChatProductCarousel({
             onAddSimple={onAddSimple}
           />
         ))}
+        {canSeeAll ? (
+          // Card-sized tail chip: visible while swiping, no need to reach the bottom button.
+          <button
+            type="button"
+            data-chat-see-all-inline="1"
+            onClick={onSeeAll}
+            className="flex w-[104px] shrink-0 snap-start flex-col items-center justify-center gap-1 self-stretch rounded-xl border border-dashed border-[var(--chat-card-border)] bg-[var(--chat-card)] px-2 text-center text-[12px] font-semibold text-[var(--chat-text)] shadow-sm active:opacity-90"
+          >
+            <span className="text-[18px] leading-none" aria-hidden>
+              →
+            </span>
+            <span>Ver todos</span>
+          </button>
+        ) : null}
       </ChatHorizontalScroller>
-      {typeof onSeeAll === 'function' ? (
-        <div className="px-3 pt-1">
+      {canSeeAll ? (
+        // In-flow (not sticky): sticky bottom stuck to the message scroller and
+        // disappeared under the composer on phones. Always visible under the rail.
+        <div className="px-3 pb-1 pt-1.5">
           <button
             type="button"
             data-chat-see-all="1"
             onClick={onSeeAll}
-            className="rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3 py-1.5 text-[12px] font-semibold text-[var(--chat-text)] shadow-sm active:opacity-90"
+            className="flex w-full min-h-[40px] items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-4 py-2 text-[12.5px] font-semibold text-[var(--chat-text)] shadow-sm active:opacity-90"
           >
             {seeAllLabel}
           </button>

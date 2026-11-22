@@ -33,7 +33,14 @@ import { ChatCatalogSheet } from './ChatCatalogSheet';
 import { ChatHeader } from './ChatHeader';
 import { ChatMessageList } from './ChatMessageList';
 import {
+  ChatSuggestedReplies,
+  buildSuggestedReplies,
+  type ChatSuggestedChip,
+} from './ChatSuggestedReplies';
+import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
+import {
   CHAT_CATALOG_PAGE_SIZE,
+  matchCatalogIntent,
   productsInCategory,
   suggestComplementProducts,
   toChatProductCard,
@@ -197,6 +204,60 @@ function markLatestUserMessage(
 const FALLBACK =
   'En este momento no puedo responderte. Puedes consultar nuestro menú o hablar directamente con el restaurante.';
 
+const VOICE_NOT_UNDERSTOOD =
+  'No pude entender la nota de voz. ¿Puedes escribirlo o intentar de nuevo?';
+
+/** STT returned nothing useful (empty / "[inaudible]" / punctuation only). */
+function isUnusableTranscript(value: string | null | undefined): boolean {
+  const t = (value ?? '').trim();
+  if (!t) return true;
+  if (/^[[(]?\s*inaudible\s*[\])]?[.!]?$/i.test(t)) return true;
+  return !/[\p{L}\p{N}]/u.test(t);
+}
+
+/** Maps media-route failures to a clear, user-facing note. */
+function describeVoiceMediaFailure(
+  status: number,
+  data: {
+    ok?: boolean;
+    mode?: string;
+    note?: string | null;
+    error?: string;
+    message?: string;
+  } | null,
+): string | null {
+  if (data?.error === 'production_blocked') {
+    return 'La transcripción de voz no está habilitada en este entorno (media bloqueado en producción).';
+  }
+  if (data?.error === 'commerce_not_allowlisted') {
+    return 'La transcripción de voz no está habilitada para este comercio.';
+  }
+  if (data?.error === 'gemini_unconfigured') {
+    return 'La transcripción de voz no está configurada (falta la clave del modelo).';
+  }
+  if (data?.error === 'audio_too_large') {
+    return 'La nota de voz es demasiado larga. Intenta con una más corta.';
+  }
+  if (data?.error === 'unsupported_audio') {
+    return 'El formato de la nota de voz no es compatible.';
+  }
+  if (data?.note) return data.note;
+  if (data?.mode === 'blocked') return 'La transcripción de voz está bloqueada ahora mismo.';
+  if (data?.ok === false || status >= 400) {
+    return data?.message?.trim() || 'No se pudo transcribir la nota de voz. Inténtalo de nuevo.';
+  }
+  return null;
+}
+
+function voiceFileName(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes('mp4') || m.includes('aac') || m.includes('m4a')) return 'voice.m4a';
+  if (m.includes('ogg')) return 'voice.ogg';
+  if (m.includes('wav')) return 'voice.wav';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'voice.mp3';
+  return 'voice.webm';
+}
+
 export function ChatAssistantView({
   comercioId,
   businessName,
@@ -279,6 +340,8 @@ export function ChatAssistantView({
   const [complementsShownCount, setComplementsShownCount] = useState(0);
   const [draft, setDraft] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  /** Mic recording in progress (hides suggested replies). */
+  const [recording, setRecording] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [cartBusy, setCartBusy] = useState(false);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
@@ -435,27 +498,57 @@ export function ChatAssistantView({
   }, []);
 
   /** Deterministic (no Gemini): show the category's products as a carousel. */
-  const onSelectCategory = useCallback(
-    (categoryId: string) => {
-      if (!catalog) return;
+  const buildCategoryMessage = useCallback(
+    (categoryId: string): ChatMessage | null => {
+      if (!catalog) return null;
       const category = catalog.categories.find((c) => c.id === categoryId);
-      if (!category) return;
+      if (!category) return null;
       const items = productsInCategory(catalog, categoryId);
       // Cap DOM size; the full list stays reachable through the sheet.
       const cards = items
         .slice(0, CHAT_CATALOG_PAGE_SIZE)
         .map(toChatProductCard);
-      const msg = createMessage(
+      return createMessage(
         'assistant',
         cards.length > 0
           ? `¡Claro! 🍕 Estas son las opciones de ${category.name}.`
           : `Por ahora no tengo productos en ${category.name}.`,
         { catalogProducts: cards, catalogCategoryId: categoryId },
       );
+    },
+    [catalog],
+  );
+
+  const onSelectCategory = useCallback(
+    (categoryId: string) => {
+      const msg = buildCategoryMessage(categoryId);
+      if (!msg) return;
       setMessages((prev) => [...prev, msg]);
       playAssistantReceivedOnce(msg);
     },
-    [catalog, playAssistantReceivedOnce],
+    [buildCategoryMessage, playAssistantReceivedOnce],
+  );
+
+  /**
+   * Deterministic answer for "ver menú / categorías / bebidas…" (no Gemini, no
+   * typing indicator). Returns true when the turn was fully handled locally.
+   */
+  const answerCatalogIntent = useCallback(
+    (text: string): boolean => {
+      const intent = matchCatalogIntent(text, catalog);
+      if (!intent || !catalog) return false;
+      const reply =
+        intent.kind === 'category'
+          ? buildCategoryMessage(intent.categoryId)
+          : createMessage('assistant', 'Estas son nuestras categorías:', {
+              catalogCategories: catalog.categories,
+            });
+      if (!reply) return false;
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      return true;
+    },
+    [catalog, buildCategoryMessage, playAssistantReceivedOnce],
   );
 
   useEffect(() => {
@@ -558,6 +651,23 @@ export function ChatAssistantView({
         if (action.proposal_id) {
           setConfirmedProposalIds((prev) => new Set(prev).add(action.proposal_id));
         }
+        if (action.type === 'propose_add') {
+          // Visual only: fly the proposal card's thumb to the cart (no-op if not found).
+          try {
+            const id = (action.proposal_id || '').replace(/["\\]/g, '');
+            const cardEl = id
+              ? document.querySelector(
+                  `[data-chat-cart-action="propose_add"][data-proposal-id="${id}"]`,
+                )
+              : null;
+            void flyToCart({
+              source: findProductImageEl(cardEl),
+              imageUrl: action.product_card.image_url,
+            });
+          } catch {
+            /* animation is best-effort */
+          }
+        }
         setMessages((prev) => [
           ...prev,
           createMessage('system', `Listo: ${action.label}`),
@@ -654,7 +764,16 @@ export function ChatAssistantView({
         const sessionId = ensureChatSessionId(comercioId);
         const apiHistory = history
           .filter((m) => m.role === 'user' || m.role === 'assistant')
-          .filter((m) => !m.demo);
+          .filter((m) => !m.demo)
+          // Voice notes that could not be transcribed carry no content for the model.
+          .filter(
+            (m) =>
+              !(
+                m.role === 'user' &&
+                m.attachments?.some((a) => a.kind === 'audio') &&
+                !m.attachments.some((a) => a.kind === 'audio' && a.analysis)
+              ),
+          );
         let lastUserIdx = -1;
         for (let i = apiHistory.length - 1; i >= 0; i--) {
           if (apiHistory[i].role === 'user') {
@@ -700,6 +819,7 @@ export function ChatAssistantView({
           fallback?: { useTraditionalMenu?: boolean };
           cart_actions?: ChatCartActionData[];
           product_cards?: ChatProductCardData[];
+          category_cards?: ChatCatalogCategory[];
         } | null;
 
         if (data?.sessionId) {
@@ -729,9 +849,20 @@ export function ChatAssistantView({
           return;
         }
 
+        // Prefer server category carousel; if the model listed categories as
+        // plain text after a categories intent, still attach the live catalog.
+        const categoryCards =
+          (data?.category_cards && data.category_cards.length > 0
+            ? data.category_cards
+            : null) ||
+          (matchCatalogIntent(userText, catalog)?.kind === 'categories' &&
+          catalog
+            ? catalog.categories
+            : undefined);
         const okMsg = createMessage('assistant', replyText, {
           productCards: data?.product_cards || [],
           cartActions: data?.cart_actions || [],
+          catalogCategories: categoryCards,
         });
         setMessages((prev) => [
           ...markLatestUserMessage(prev, 'read'),
@@ -748,90 +879,185 @@ export function ChatAssistantView({
         setIsTyping(false);
       }
     },
-    [live, businessName, comercioId, cartSnapshot, playAssistantReceivedOnce],
+    [
+      live,
+      businessName,
+      comercioId,
+      cartSnapshot,
+      catalog,
+      playAssistantReceivedOnce,
+    ],
+  );
+
+  /** Sends `rawText` as a user turn (typed draft or a tapped suggestion chip). */
+  const sendText = useCallback(
+    async (rawText: string) => {
+      const text = rawText.replace(/\s+/g, ' ').trim();
+      if (!text || isTyping) return;
+
+      setErrorText(null);
+      if (DECLINE_RE.test(text)) setDeclinedComplements(true);
+      const reply = replyTo;
+      setReplyTo(null);
+      const userMsg = createMessage('user', text, {
+        deliveryStatus: 'sent',
+        replyTo: reply,
+      });
+      const nextMessages = [...messages, userMsg];
+      setMessages(nextMessages);
+      // "ver menú / categorías / bebidas…" → carousel, never Gemini (live or demo).
+      if (answerCatalogIntent(text)) return;
+      await runAssistantTurn(text, nextMessages);
+    },
+    [isTyping, messages, replyTo, runAssistantTurn, answerCatalogIntent],
   );
 
   const sendMessage = useCallback(async () => {
     const text = draft.replace(/\s+/g, ' ').trim();
     if (!text || isTyping) return;
-
-    setErrorText(null);
     setDraft('');
-    if (DECLINE_RE.test(text)) setDeclinedComplements(true);
-    const reply = replyTo;
-    setReplyTo(null);
-    const userMsg = createMessage('user', text, {
-      deliveryStatus: 'sent',
-      replyTo: reply,
-    });
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
-    await runAssistantTurn(text, nextMessages);
-  }, [draft, isTyping, messages, replyTo, runAssistantTurn]);
+    await sendText(text);
+  }, [draft, isTyping, sendText]);
+
+  const onPickSuggestion = useCallback(
+    (chip: ChatSuggestedChip) => {
+      const action = chip.action;
+      switch (action.type) {
+        case 'category':
+          onSelectCategory(action.categoryId);
+          break;
+        case 'catalog':
+          if (catalog) openCatalogSheet(action.categoryId);
+          else onOpenMenu();
+          break;
+        case 'cart':
+          onOpenCart();
+          break;
+        case 'text':
+          void sendText(action.text);
+          break;
+      }
+    },
+    [catalog, onSelectCategory, openCatalogSheet, onOpenMenu, onOpenCart, sendText],
+  );
 
   const sendVoice = useCallback(
     async (payload: ChatVoicePayload) => {
       if (isTyping) return;
       setErrorText(null);
       const secs = Math.max(1, Math.round(payload.durationMs / 1000));
-      let transcript = payload.transcript?.trim() || '';
+      const placeholder = `🎤 Nota de voz (${secs}s)`;
+      const audioMime = payload.blob.type || 'audio/webm';
+      const browserTranscript = isUnusableTranscript(payload.transcript)
+        ? ''
+        : (payload.transcript ?? '').trim();
 
-      // Browser STT missing (common on Safari iOS) → gated backend helper (simulate by default).
-      if (!transcript) {
-        try {
-          const form = new FormData();
-          form.set('kind', 'audio');
-          form.set(
-            'file',
-            payload.blob,
-            payload.blob.type.includes('mp4') ? 'voice.m4a' : 'voice.webm',
-          );
-          const res = await fetch(
-            `/api/chat/${encodeURIComponent(comercioId)}/media`,
-            { method: 'POST', body: form },
-          );
-          const data = (await res.json().catch(() => null)) as {
-            transcript?: string | null;
-            note?: string | null;
-          } | null;
-          if (data?.transcript?.trim()) {
-            transcript = data.transcript.trim();
-          } else if (data?.note) {
-            setErrorText(data.note);
-          }
-        } catch {
-          /* keep audio without transcript */
-        }
-      }
-
-      const text = transcript || `🎤 Nota de voz (${secs}s)`;
-      if (transcript && DECLINE_RE.test(transcript)) {
-        setDeclinedComplements(true);
-      }
+      // Show the voice bubble right away; the transcript is filled in after STT.
       const reply = replyToRef.current;
       setReplyTo(null);
-      const userMsg = createMessage('user', text, {
+      const attachmentId = `audio-${Date.now()}`;
+      const userMsg = createMessage('user', placeholder, {
         replyTo: reply,
         deliveryStatus: 'sent',
         voiceUrl: payload.url,
         voiceDurationMs: payload.durationMs,
         attachments: [
           {
-            id: `audio-${Date.now()}`,
+            id: attachmentId,
             kind: 'audio',
             name: 'Nota de voz',
-            mime: payload.blob.type || 'audio/webm',
+            mime: audioMime,
             size: payload.blob.size,
             url: payload.url,
-            analysis: transcript || null,
+            analysis: null,
           },
         ],
       });
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
-      await runAssistantTurn(text, nextMessages);
+      setMessages((prev) => [...prev, userMsg]);
+      // Header shows "escribiendo…" and the composer locks while we transcribe.
+      setIsTyping(true);
+
+      let serverTranscript = '';
+      let note: string | null = null;
+      // Live: ALWAYS ask the server STT (browser STT is often short/empty).
+      // Not live: only when the browser gave us nothing, to surface why it can't.
+      if (live || !browserTranscript) {
+        try {
+          // Some browsers hand back an untyped Blob — media route needs audio/*.
+          const file = payload.blob.type
+            ? payload.blob
+            : new Blob([payload.blob], { type: audioMime });
+          const form = new FormData();
+          form.set('kind', 'audio');
+          form.set('durationSec', String(Math.min(60, secs)));
+          form.set('file', file, voiceFileName(audioMime));
+          const res = await fetch(
+            `/api/chat/${encodeURIComponent(comercioId)}/media`,
+            { method: 'POST', body: form },
+          );
+          const data = (await res.json().catch(() => null)) as {
+            ok?: boolean;
+            mode?: string;
+            transcript?: string | null;
+            note?: string | null;
+            error?: string;
+            message?: string;
+          } | null;
+          const t = (data?.transcript ?? '').trim();
+          if (res.ok && data?.ok !== false && !isUnusableTranscript(t)) {
+            serverTranscript = t;
+          } else {
+            note = describeVoiceMediaFailure(res.status, data);
+          }
+        } catch {
+          note = 'No se pudo contactar el servicio de transcripción de voz.';
+        }
+      }
+
+      // Prefer the server transcript when it is more complete; browser is the fallback.
+      const transcript =
+        serverTranscript.length > browserTranscript.length
+          ? serverTranscript
+          : browserTranscript || serverTranscript;
+
+      if (isUnusableTranscript(transcript)) {
+        // Nothing to send to the model: never run a turn on the placeholder.
+        const failMsg = createMessage('assistant', VOICE_NOT_UNDERSTOOD);
+        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), failMsg]);
+        if (note) setErrorText(note);
+        playAssistantReceivedOnce(failMsg);
+        setIsTyping(false);
+        return;
+      }
+
+      if (DECLINE_RE.test(transcript)) setDeclinedComplements(true);
+      const finalUserMsg: ChatMessage = {
+        ...userMsg,
+        text: transcript,
+        attachments: userMsg.attachments?.map((a) =>
+          a.id === attachmentId ? { ...a, analysis: transcript } : a,
+        ),
+      };
+      setMessages((prev) =>
+        prev.map((m) => (m.id === userMsg.id ? finalUserMsg : m)),
+      );
+      const nextMessages = [...messages, finalUserMsg];
+      if (answerCatalogIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
+      // runAssistantTurn owns the typing indicator from here on.
+      await runAssistantTurn(transcript, nextMessages);
     },
-    [isTyping, messages, runAssistantTurn, comercioId],
+    [
+      isTyping,
+      messages,
+      live,
+      runAssistantTurn,
+      comercioId,
+      answerCatalogIntent,
+      playAssistantReceivedOnce,
+    ],
   );
 
   const sendFile = useCallback(
@@ -881,6 +1107,29 @@ export function ChatAssistantView({
       await runAssistantTurn(userText, nextMessages);
     },
     [isTyping, messages, runAssistantTurn, comercioId],
+  );
+
+  /** Pull-to-refresh: re-attach welcome categories from the live catalog. */
+  const refreshConversation = useCallback(() => {
+    setErrorText(null);
+    const categories = welcomeCategories(catalog);
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.isWelcome);
+      if (idx < 0) return prev;
+      const next = prev.slice();
+      next[idx] = { ...next[idx], catalogCategories: categories };
+      return next;
+    });
+  }, [catalog]);
+
+  const suggestedChips = useMemo(
+    () =>
+      buildSuggestedReplies({
+        catalog,
+        cartCount,
+        activeCategoryId: messages[messages.length - 1]?.catalogCategoryId ?? null,
+      }),
+    [catalog, cartCount, messages],
   );
 
   const shareLocation = useCallback(
@@ -1007,9 +1256,17 @@ export function ChatAssistantView({
         onReply={(m) => setReplyTo(buildChatReplyRef(m))}
         onSelectCategory={catalog ? onSelectCategory : undefined}
         onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
+        onRefresh={refreshConversation}
+      />
+
+      <ChatSuggestedReplies
+        chips={suggestedChips}
+        hidden={isTyping || recording}
+        onPick={onPickSuggestion}
       />
 
       <ChatComposer
+        onRecordingChange={setRecording}
         value={draft}
         disabled={isTyping}
         replyTo={replyTo}

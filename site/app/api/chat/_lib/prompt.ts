@@ -19,6 +19,7 @@ export function buildChatSystemPrompt(params: {
     'Si el dato no sale de una herramienta o del catálogo verificado, dilo con claridad y ofrece el menú tradicional o WhatsApp. No “completes” con inventos.',
     'Usa herramientas para datos exactos. Prefiere UNA sola ronda de herramientas en paralelo; no encadenes llamadas innecesarias.',
     'Si el cliente pregunta por lo más barato/económico/menor precio: llama SIEMPRE find_cheapest_products (con category si aplica). No compares precios de memoria ni del resumen.',
+    'Si pide categorías / menú / “qué hay”: llama get_categories. La UI muestra el carrusel; responde SOLO una frase corta (ej. “Estas son nuestras categorías”) SIN listar nombres ni precios en texto. Formato estilo WhatsApp: *negrita* _cursiva_ (un solo asterisco/guion bajo), no uses **markdown**.',
     'Distingue price_base (lista) de price_min (configuración más barata válida) y price_max (con tamaños/extras).',
     `Los precios del catálogo están en ${currency} salvo que la herramienta indique otra cosa.`,
     'Delivery: usa SIEMPRE get_delivery_conditions. Si requires_customer_address=true o can_quote_exact_fee_now=false, NO inventes un monto exacto; explica rangos/zonas y que el checkout confirma con la dirección.',

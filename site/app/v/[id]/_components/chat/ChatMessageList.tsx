@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type TouchEvent as ReactTouchEvent,
+} from 'react';
 
 import { ChatMessageBubble } from './ChatMessageBubble';
 import type { ChatThemeMode } from './chat-theme';
@@ -8,6 +15,19 @@ import type { ChatCartActionData, ChatMessage } from './chat-types';
 
 /** Transparent doodle wallpaper (figures only; no solid fill). */
 const CHAT_DOODLE_URL = '/chat/doodle-pattern.png';
+
+/** Messages rendered initially (the window grows when scrolling up). */
+export const CHAT_HISTORY_INITIAL_WINDOW = 40;
+/** Extra messages revealed each time the user reaches the top. */
+export const CHAT_HISTORY_PAGE = 30;
+/** scrollTop below this (px) triggers loading older messages. */
+const LOAD_OLDER_THRESHOLD_PX = 80;
+/** Within this distance from the bottom the user counts as "following" the chat. */
+const NEAR_BOTTOM_PX = 140;
+/** Pull distance (px) at scrollTop 0 that triggers `onRefresh`. */
+const PULL_REFRESH_PX = 60;
+/** Keep the initial bottom pinned (images loading) until the user interacts or this elapses. */
+const INITIAL_PIN_MS = 1500;
 
 type ChatMessageListProps = {
   messages: ChatMessage[];
@@ -26,6 +46,8 @@ type ChatMessageListProps = {
   onSelectCategory?: (categoryId: string) => void;
   /** "Ver todos" under a product carousel (null = whole catalog). */
   onSeeAllCatalog?: (categoryId: string | null) => void;
+  /** Pull-to-refresh at the very top (touch). Parent may no-op. */
+  onRefresh?: () => void;
 };
 
 export function ChatMessageList({
@@ -42,12 +64,208 @@ export function ChatMessageList({
   onReply,
   onSelectCategory,
   onSeeAllCatalog,
+  onRefresh,
 }: ChatMessageListProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
+  const [visibleCount, setVisibleCount] = useState(CHAT_HISTORY_INITIAL_WINDOW);
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  /** True while the viewport is at / near the bottom (updated on scroll, pre-layout). */
+  const nearBottomRef = useRef(true);
+  /** Snapshot taken right before prepending older messages. */
+  const prependRef = useRef<{ height: number; top: number } | null>(null);
+  const initialPinRef = useRef(true);
+  const prevLenRef = useRef(0);
+  const prevLastIdRef = useRef<string | null>(null);
+  const pullStartRef = useRef<number | null>(null);
+  const pullRef = useRef(0);
+  const refreshTimerRef = useRef<number | null>(null);
+
+  const total = messages.length;
+  const windowSize = Math.min(visibleCount, total);
+  const offset = total - windowSize;
+  const visible = offset > 0 ? messages.slice(-visibleCount) : messages;
+  const hasOlder = offset > 0;
+
+  const pinTimerRef = useRef<number | null>(null);
+  /** Pin to the bottom while late images lay out; auto-released after a short window. */
+  const armInitialPin = useCallback(() => {
+    initialPinRef.current = true;
+    if (pinTimerRef.current !== null) window.clearTimeout(pinTimerRef.current);
+    pinTimerRef.current = window.setTimeout(() => {
+      pinTimerRef.current = null;
+      initialPinRef.current = false;
+    }, INITIAL_PIN_MS);
+  }, []);
+
+  const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (behavior === 'auto') {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    }
+  }, []);
+
+  // --- Bottom-first on mount / empty→nonempty / append ------------------------
+  useLayoutEffect(() => {
+    const lastId = messages.length ? messages[messages.length - 1]!.id : null;
+    const prevLen = prevLenRef.current;
+    const prevLastId = prevLastIdRef.current;
+    prevLenRef.current = messages.length;
+    prevLastIdRef.current = lastId;
+
+    if (messages.length === 0) return;
+
+    if (prevLen === 0) {
+      // First paint with content: jump to the end instantly (no animated scroll).
+      armInitialPin();
+      nearBottomRef.current = true;
+      scrollToEnd('auto');
+      return;
+    }
+
+    if (messages.length < prevLen) {
+      // Conversation reset / trimmed: back to a fresh window pinned at the bottom.
+      setVisibleCount(CHAT_HISTORY_INITIAL_WINDOW);
+      armInitialPin();
+      nearBottomRef.current = true;
+      scrollToEnd('auto');
+      return;
+    }
+
+    const appended = messages.length > prevLen && lastId !== prevLastId;
+    if (appended) {
+      const last = messages[messages.length - 1]!;
+      // Own message always follows; others only if the user was already at the bottom.
+      if (nearBottomRef.current || last.role === 'user') {
+        scrollToEnd('smooth');
+      }
+    }
+  }, [messages, scrollToEnd, armInitialPin]);
+
+  // Typing indicator / error bubble: keep them visible only if following the chat.
+  useLayoutEffect(() => {
+    if (!isTyping && !errorText) return;
+    if (nearBottomRef.current) scrollToEnd('smooth');
+  }, [isTyping, errorText, scrollToEnd]);
+
+  // Restore position after older messages were prepended.
+  useLayoutEffect(() => {
+    const snap = prependRef.current;
+    const el = scrollRef.current;
+    if (!snap || !el) return;
+    prependRef.current = null;
+    el.scrollTop = el.scrollHeight - snap.height + snap.top;
+  }, [visibleCount]);
+
+  // Late layout shifts (images) during the initial settle keep the bottom pinned.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, isTyping, errorText]);
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const release = () => {
+      initialPinRef.current = false;
+    };
+    el.addEventListener('wheel', release, { passive: true });
+    el.addEventListener('touchstart', release, { passive: true });
+    el.addEventListener('keydown', release);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        if (initialPinRef.current) el.scrollTop = el.scrollHeight;
+      });
+      ro.observe(content);
+    }
+    return () => {
+      // pinTimerRef only flips a ref; letting it fire after unmount is harmless
+      // (and clearing it here would break StrictMode's double effect run).
+      el.removeEventListener('wheel', release);
+      el.removeEventListener('touchstart', release);
+      el.removeEventListener('keydown', release);
+      ro?.disconnect();
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  // --- Scroll: track "near bottom" + load older history at the top ------------
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (
+      el.scrollTop < LOAD_OLDER_THRESHOLD_PX &&
+      hasOlder &&
+      prependRef.current === null &&
+      !initialPinRef.current
+    ) {
+      prependRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      setVisibleCount((c) => c + CHAT_HISTORY_PAGE);
+    }
+  }, [hasOlder]);
+
+  // --- Pull-to-refresh (touch, only when already at the very top) -------------
+  const onTouchStart = useCallback(
+    (e: ReactTouchEvent<HTMLDivElement>) => {
+      const el = scrollRef.current;
+      if (!onRefresh || refreshing || !el || el.scrollTop > 0) {
+        pullStartRef.current = null;
+        return;
+      }
+      pullStartRef.current = e.touches[0]?.clientY ?? null;
+    },
+    [onRefresh, refreshing],
+  );
+
+  const onTouchMove = useCallback((e: ReactTouchEvent<HTMLDivElement>) => {
+    const startY = pullStartRef.current;
+    const el = scrollRef.current;
+    if (startY === null || !el) return;
+    if (el.scrollTop > 0) {
+      pullStartRef.current = null;
+      pullRef.current = 0;
+      setPull(0);
+      return;
+    }
+    const dy = (e.touches[0]?.clientY ?? startY) - startY;
+    const next = dy > 0 ? Math.min(dy, 120) : 0;
+    pullRef.current = next;
+    setPull(next > 8 ? next * 0.5 : 0);
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    const dy = pullRef.current;
+    pullStartRef.current = null;
+    pullRef.current = 0;
+    setPull(0);
+    if (!onRefresh || dy <= PULL_REFRESH_PX) return;
+    setRefreshing(true);
+    try {
+      onRefresh();
+    } catch {
+      /* parent refresh is best-effort */
+    }
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      setRefreshing(false);
+    }, 700);
+  }, [onRefresh]);
+
+  const showPullIndicator = refreshing || pull > 0;
 
   return (
     <div
@@ -69,17 +287,46 @@ export function ChatMessageList({
           filter: theme === 'light' ? 'invert(1)' : 'none',
         }}
       />
+      {showPullIndicator ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center"
+          style={{ transform: `translateY(${refreshing ? 8 : Math.min(pull, 56)}px)` }}
+          data-chat-pull-indicator="1"
+          role="status"
+          aria-label={refreshing ? 'Actualizando' : 'Suelta para actualizar'}
+        >
+          <span
+            className={`h-6 w-6 rounded-full border-2 border-[var(--chat-send)] border-t-transparent bg-[var(--chat-card)] shadow ${
+              refreshing ? 'animate-spin' : ''
+            }`}
+            style={
+              refreshing ? undefined : { transform: `rotate(${Math.round(pull * 6)}deg)` }
+            }
+          />
+        </div>
+      ) : null}
       <div
+        ref={scrollRef}
         className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-0 py-2"
+        // We restore scroll manually when prepending history; native anchoring would double-apply.
+        style={{ overflowAnchor: 'none' }}
         role="log"
         aria-live="polite"
         aria-relevant="additions"
         data-chat-scroll="1"
+        data-chat-history-window={visibleCount}
+        data-chat-history-more={hasOlder ? '1' : '0'}
+        onScroll={onScroll}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col pb-1">
-          {messages.map((message, index) => {
-            const prev = messages[index - 1];
-            const next = messages[index + 1];
+        <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col pb-1">
+          {visible.map((message, index) => {
+            const globalIndex = offset + index;
+            const prev = messages[globalIndex - 1];
+            const next = messages[globalIndex + 1];
             const groupedWithPrev =
               Boolean(prev) &&
               prev.role === message.role &&

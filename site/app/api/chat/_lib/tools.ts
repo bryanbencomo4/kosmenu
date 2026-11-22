@@ -37,6 +37,7 @@ type ProductRow = {
 type CategoryRow = {
   id: string;
   nombre?: string | null;
+  imagen_url?: string | null;
 };
 
 export type ChatToolContext = {
@@ -48,6 +49,14 @@ export type ChatToolContext = {
   /** Accumulated validated proposals for this turn (server → UI). */
   pendingActions?: ChatCartAction[];
   pendingCards?: ChatProductCard[];
+  /** Categories from get_categories — UI renders a carousel, not a plain list. */
+  pendingCategories?: Array<{
+    id: string;
+    name: string;
+    imageUrl: string | null;
+    productCount: number;
+    availableCount: number;
+  }>;
 };
 
 export const CHAT_TOOL_DECLARATIONS = [
@@ -420,16 +429,36 @@ export function executeChatTool(
 
     case 'get_categories': {
       const products = asProducts(menu);
+      const categories = asCategories(menu).map((c) => {
+        const inCat = products.filter((p) => p.categoria_id === c.id);
+        const availableCount = inCat.filter((p) => p.disponible !== false)
+          .length;
+        return {
+          id: c.id,
+          name: c.nombre ?? '',
+          product_count: inCat.length,
+          available_count: availableCount,
+          // UI carousel shape (also mirrored onto ctx.pendingCategories).
+          imageUrl: c.imagen_url ?? null,
+          productCount: inCat.length,
+          availableCount,
+        };
+      });
+      ctx.pendingCategories = categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        imageUrl: c.imageUrl,
+        productCount: c.productCount,
+        availableCount: c.availableCount,
+      }));
       return {
-        categories: asCategories(menu).map((c) => {
-          const inCat = products.filter((p) => p.categoria_id === c.id);
-          return {
-            id: c.id,
-            name: c.nombre ?? '',
-            product_count: inCat.length,
-            available_count: inCat.filter((p) => p.disponible !== false).length,
-          };
-        }),
+        categories: categories.map((c) => ({
+          id: c.id,
+          name: c.name,
+          product_count: c.product_count,
+          available_count: c.available_count,
+        })),
+        note: 'La UI muestra el carrusel de categorías. Responde en 1 frase corta sin listar nombres.',
       };
     }
 

@@ -12,6 +12,7 @@ import {
 import type { KeyboardEvent } from 'react';
 
 import { ChatHorizontalScroller } from './ChatHorizontalScroller';
+import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
   CHAT_CATALOG_PAGE_SIZE,
   filterCatalogProducts,
@@ -385,7 +386,14 @@ function CatalogRow({
         <button
           type="button"
           aria-label={`Agregar ${card.name}`}
-          onClick={() => onAddSimple?.(card.product_id)}
+          data-chat-add-simple={card.product_id}
+          onClick={(e) => {
+            void flyToCart({
+              source: findProductImageEl(e.currentTarget),
+              imageUrl: card.image_url,
+            });
+            onAddSimple?.(card.product_id);
+          }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--chat-send)] text-[20px] font-semibold leading-none text-[var(--chat-send-fg)] active:opacity-90"
         >
           +

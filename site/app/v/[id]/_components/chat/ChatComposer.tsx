@@ -70,6 +70,8 @@ type ChatComposerProps = {
   replyTo?: ChatReplyRef | null;
   /** Called when the user dismisses the reply bar (X). */
   onClearReply?: () => void;
+  /** Fires when mic recording starts/stops (e.g. to hide suggested replies). */
+  onRecordingChange?: (recording: boolean) => void;
 };
 
 /** Live state of a mic press, kept in a ref so pointer handlers never go stale. */
@@ -124,6 +126,7 @@ export function ChatComposer({
   onShareLocation,
   replyTo = null,
   onClearReply,
+  onRecordingChange,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -169,6 +172,26 @@ export function ChatComposer({
   const disabledRef = useRef(disabled);
   onSendVoiceRef.current = onSendVoice;
   disabledRef.current = disabled;
+  /** True when browser SpeechRecognition was started for the current recording. */
+  const recognitionUsedRef = useRef(false);
+
+  const onRecordingChangeRef = useRef(onRecordingChange);
+  onRecordingChangeRef.current = onRecordingChange;
+  useEffect(() => {
+    onRecordingChangeRef.current?.(recording);
+  }, [recording]);
+
+  /**
+   * Browser STT keeps delivering results briefly after the recorder stops, so the
+   * payload built in `onstop` can be stale. Always re-read `transcriptRef` right
+   * before handing the payload to the parent (draft confirm AND locked "Send").
+   */
+  function withLatestTranscript(payload: ChatVoicePayload): ChatVoicePayload {
+    const latest = transcriptRef.current.trim();
+    const prior = payload.transcript?.trim() || '';
+    const best = latest.length >= prior.length ? latest : prior;
+    return { ...payload, transcript: best || undefined };
+  }
 
   useEffect(() => {
     const node = textareaRef.current;
@@ -382,7 +405,13 @@ export function ChatComposer({
         if (sendNow && onSendVoiceRef.current && !disabledRef.current) {
           unlockChatSounds();
           playChatSound('voiceSent');
-          onSendVoiceRef.current(payload);
+          const deliver = () => {
+            const send = onSendVoiceRef.current;
+            if (send) send(withLatestTranscript(payload));
+          };
+          // Give browser STT a beat to flush its final result before sending.
+          if (recognitionUsedRef.current) window.setTimeout(deliver, 300);
+          else deliver();
           return;
         }
         // Default (hold-release / stop): preview first, user confirms with Send.
@@ -392,6 +421,7 @@ export function ChatComposer({
       startedAtRef.current = Date.now();
       setRecordMs(0);
       transcriptRef.current = '';
+      recognitionUsedRef.current = false;
       const SpeechRecognitionCtor =
         (window as unknown as {
           SpeechRecognition?: new () => {
@@ -454,6 +484,7 @@ export function ChatComposer({
           recognition.onerror = () => {};
           recognition.start();
           recognitionRef.current = recognition;
+          recognitionUsedRef.current = true;
         } catch {
           recognitionRef.current = null;
         }
@@ -562,7 +593,7 @@ export function ChatComposer({
     setVoiceDraft(null);
     unlockChatSounds();
     playChatSound('voiceSent');
-    onSendVoice(payload);
+    onSendVoice(withLatestTranscript(payload));
   }
 
   // --- Mic press-and-hold gesture ----------------------------------------------

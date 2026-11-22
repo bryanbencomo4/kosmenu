@@ -134,6 +134,48 @@ describe('chat sound assets + manager', () => {
     await expect(playChatSoundAsync('messageSent')).resolves.toBeGreaterThan(0);
   });
 
+  it('cartAdd is a synth-only cue (no mp3 mapping) and still plays when licensed', async () => {
+    expect(Object.keys(__chatSoundUrlMapForTests())).not.toContain('cartAdd');
+    stubLocalStorage(new Map());
+    const starts: number[] = [];
+    const ctx = {
+      state: 'running',
+      currentTime: 0,
+      resume: async () => {},
+      createGain: () => ({
+        gain: {
+          value: 1,
+          setValueAtTime() {},
+          exponentialRampToValueAtTime() {},
+        },
+        connect() {},
+      }),
+      createOscillator: () => ({
+        type: 'sine',
+        frequency: { value: 440 },
+        connect() {},
+        start() {
+          starts.push(1);
+        },
+        stop() {},
+      }),
+      destination: {},
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        localStorage: { getItem: () => null, setItem: () => {} },
+        AudioContext: function AudioContext() {
+          return ctx;
+        },
+      },
+    });
+    __resetChatSoundManagerForTests();
+    // Licensed env is stubbed to '1' in beforeEach: cartAdd must skip sample loading.
+    await expect(playChatSoundAsync('cartAdd')).resolves.toBeGreaterThan(0);
+    expect(starts.length).toBe(2);
+  });
+
   it('playChatSound tolerates missing AudioContext (autoplay blocked)', () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,

@@ -55,6 +55,14 @@ export function __disableLiveBudgetForTests() {
 
 export type GeminiChatMessage = { role: 'user' | 'assistant'; text: string };
 
+export type GeminiCategoryCard = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  productCount: number;
+  availableCount: number;
+};
+
 export type GeminiChatResult = {
   text: string;
   model: string;
@@ -65,6 +73,7 @@ export type GeminiChatResult = {
   timedOut?: boolean;
   cartActions: ChatCartAction[];
   productCards: ChatProductCard[];
+  categoryCards: GeminiCategoryCard[];
   attribution: ReturnType<typeof publicCallAttribution>;
   skippedLlm?: boolean;
 };
@@ -296,6 +305,7 @@ export async function runChatWithGemini(params: {
   let geminiHttpCalls = 0;
   toolCtx.pendingActions = toolCtx.pendingActions || [];
   toolCtx.pendingCards = toolCtx.pendingCards || [];
+  toolCtx.pendingCategories = toolCtx.pendingCategories || [];
 
   function bodyForModel(activeModel: string) {
     const id = activeModel.trim().toLowerCase();
@@ -440,6 +450,7 @@ export async function runChatWithGemini(params: {
           geminiHttpCalls,
           cartActions: [...(toolCtx.pendingActions || [])],
           productCards: dedupeCards(toolCtx.pendingCards || []),
+          categoryCards: [...(toolCtx.pendingCategories || [])],
           attribution: publicCallAttribution(ledger),
         };
       }
@@ -502,6 +513,7 @@ export async function runChatWithGemini(params: {
             geminiHttpCalls,
             cartActions: [...pending],
             productCards: dedupeCards(toolCtx.pendingCards || []),
+            categoryCards: [...(toolCtx.pendingCategories || [])],
             attribution: publicCallAttribution(ledger),
           };
         }
@@ -568,6 +580,7 @@ export function runDeterministicCartSummary(params: {
           ]
         : [],
     productCards: [],
+    categoryCards: [],
     attribution: publicCallAttribution(ledger),
     skippedLlm: true,
   };
@@ -622,6 +635,7 @@ export function runDeterministicDeliveryInfo(params: {
     geminiHttpCalls: 0,
     cartActions: [],
     productCards: [],
+    categoryCards: [],
     attribution: publicCallAttribution(ledger),
     skippedLlm: true,
   };

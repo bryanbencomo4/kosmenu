@@ -1,5 +1,6 @@
 'use client';
 
+import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import type { ChatProductCardData } from './chat-types';
 
 type ChatProductCardProps = {
@@ -110,7 +111,14 @@ export function ChatProductCard({
             <button
               type="button"
               className="flex-1 rounded-lg border border-[var(--chat-card-border)] bg-[var(--chat-input)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-text)]"
-              onClick={() => onAddSimple?.(card.product_id)}
+              data-chat-add-simple={card.product_id}
+              onClick={(e) => {
+                void flyToCart({
+                  source: findProductImageEl(e.currentTarget),
+                  imageUrl: card.image_url,
+                });
+                onAddSimple?.(card.product_id);
+              }}
             >
               Agregar
             </button>
