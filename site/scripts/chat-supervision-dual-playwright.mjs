@@ -119,9 +119,12 @@ async function main() {
     try {
       await authProbe;
       ok('chat_runtime_authorized');
-    } catch {
-      // Soft: UI may still open; API path covers conversation creation.
-      ok('chat_runtime_authorized', 'soft — probe timed out');
+    } catch (err) {
+      fail(
+        'chat_runtime_authorized',
+        `auth probe timed out — ${err instanceof Error ? err.message : err}`,
+      );
+      process.exit(1);
     }
     await cPage.waitForTimeout(1500);
     const midOpen = await api(
@@ -264,6 +267,29 @@ async function main() {
       );
     }
 
+    // Escalation phrases must NOT demote human_handling / unpause Gemini.
+    const whileHumanEscalation = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        messages: [{ role: 'user', text: 'Tengo un reclamo, quiero hablar con el encargado' }],
+      }),
+    });
+    if (
+      whileHumanEscalation.res.ok &&
+      whileHumanEscalation.json?.skipped_llm === true &&
+      whileHumanEscalation.json?.supervision?.mode === 'human_handling'
+    ) {
+      ok('human_handling_holds_on_escalation');
+    } else {
+      fail(
+        'human_handling_holds_on_escalation',
+        whileHumanEscalation.text.slice(0, 240) ||
+          'expected human_handling + skipped_llm',
+      );
+    }
+
     // Staff message via panel UI + measure feed delivery latency
     const staffText = `Hola, te atiende el restaurante 👋 (${Date.now()})`;
     const draft = mPage.locator('[data-testid="staff-draft"]');
@@ -318,8 +344,16 @@ async function main() {
       .join('\n');
     if (deliveredMs != null) {
       ok('consumer_feed_staff', `${deliveredMs}ms`);
-      if (deliveredMs <= 2000) ok('staff_delivery_latency', `${deliveredMs}ms <= 2000`);
-      else ok('staff_delivery_latency_soft', `${deliveredMs}ms (target ~1–2s)`);
+      if (deliveredMs <= 2000) {
+        ok('staff_delivery_latency', `${deliveredMs}ms <= 2000`);
+      } else if (deliveredMs <= 5000) {
+        ok(
+          'staff_delivery_latency',
+          `${deliveredMs}ms (acceptable under 5s; target ~1–2s)`,
+        );
+      } else {
+        fail('staff_delivery_latency', `${deliveredMs}ms exceeds 5s ceiling`);
+      }
     } else {
       fail('consumer_feed_staff', staffBodies.slice(0, 200) || 'empty');
     }
@@ -496,16 +530,22 @@ async function main() {
       );
     }
 
-    // Cross-commerce denial
+    // Cross-commerce denial — E2E bearer is pinned; must not list another commerce.
     const other = await api(
       `/api/panel/conversaciones?comercioId=00000000-0000-4000-8000-000000000099`,
       { headers: { Authorization: `Bearer ${BEARER}` } },
     );
-    // E2E bearer may pin to configured comercio — expect forbidden or empty/disabled
-    if ([403, 400, 401].includes(other.res.status) || other.json?.error) {
+    if (
+      [403, 400, 401].includes(other.res.status) ||
+      other.json?.error ||
+      other.json?.enabled === false
+    ) {
       ok('cross_commerce_denied', String(other.res.status));
     } else {
-      ok('cross_commerce_soft', `status=${other.res.status}`);
+      fail(
+        'cross_commerce_denied',
+        `expected deny, got ${other.res.status} ${other.text.slice(0, 160)}`,
+      );
     }
   } finally {
     await browser.close();
