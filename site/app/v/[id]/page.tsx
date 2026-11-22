@@ -67,17 +67,16 @@ import {
   shouldForceCatalogModeFromQuery,
 } from '../../_lib/kiosk-home-config';
 import {
-  isChatbotPreviewEnabled,
+  isChatbotUxEnabledForSlug,
   shouldOpenChatbotFromQuery,
 } from '../../_lib/chatbot-preview';
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
-import { ChatAssistantView } from './_components/chat/ChatAssistantView';
+import { ChatAssistantLazy } from './_components/chat/ChatAssistantLazy';
 import type { ChatCatalogSnapshot } from './_components/chat/chat-catalog';
 import { buildChatHoursSnapshot } from './_components/chat/chat-hours';
 import { buildBusinessLocation } from './_components/chat/chat-location';
 import { toChatPaymentMethods } from './_components/chat/chat-payments';
-import { ChatModeSwitcher } from './_components/chat/ChatModeSwitcher';
 import type {
   ChatAppliedAddNotice,
   ChatCartActionData,
@@ -1972,12 +1971,12 @@ export default function PublicMenuPage() {
     modo: searchParams.get('modo'),
     qr: searchParams.get('qr'),
   });
-  const chatbotPreviewEnabled = isChatbotPreviewEnabled();
+  const chatbotUxEnabled = isChatbotUxEnabledForSlug(commerceIdentifier);
   const chatbotDecision = shouldOpenChatbotFromQuery({
     chatbot: searchParams.get('chatbot'),
     mode: searchParams.get('mode'),
     catalogForced: catalogFromUrl,
-    previewEnabled: chatbotPreviewEnabled,
+    previewEnabled: chatbotUxEnabled,
   });
   const isChatbotMode = chatbotDecision.open;
   const [chatIncomingProposal, setChatIncomingProposal] =
@@ -2098,6 +2097,8 @@ export default function PublicMenuPage() {
   const orderSubmitLockRef = useRef(false);
   /** True once the upsell sheet has seen a non-empty cart (avoids closing on the add→open race). */
   const preCheckoutHadCartRef = useRef(false);
+  /** Chat “listo para pagar” — survive ?chatbot=1 → menu replace racing checkout open. */
+  const pendingCheckoutFromChatRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -4066,10 +4067,9 @@ export default function PublicMenuPage() {
       }),
     [categoriasConProductos, comercioLogoUrl],
   );
-  // Slim catalog snapshot for the conversational chat UX (carousels + sheet).
-  // Prices are base-currency menu prices; cart/checkout stay authoritative here.
+  // Chat snapshots only when assistant mode is active — skip work on normal menu.
   const chatCatalog = useMemo<ChatCatalogSnapshot | null>(() => {
-    if (categoriasConProductos.length === 0) return null;
+    if (!isChatbotMode || categoriasConProductos.length === 0) return null;
     const currency = businessBaseCurrency;
     const categories: ChatCatalogSnapshot['categories'] = [];
     const products: ChatCatalogSnapshot['products'] = [];
@@ -4081,28 +4081,46 @@ export default function PublicMenuPage() {
             (left.orden ?? Number.MAX_SAFE_INTEGER) -
             (right.orden ?? Number.MAX_SAFE_INTEGER),
         );
-      categories.push({
-        id: categoria.id,
-        name: formatCategoryDisplayName(categoria.nombre),
-        imageUrl:
-          resolveCategoryCover(
-            categoria.imagen_url,
-            sorted,
-            comercioLogoUrl,
-            MENU_IMAGE_WIDTH.tile,
-          ) || null,
-        productCount: sorted.length,
-        availableCount: sorted.filter((p) => p.disponible !== false).length,
-      });
+      {
+        const customCover = (categoria.imagen_url ?? '').trim();
+        const firstProductCover =
+          sorted.find((product) => {
+            const url = (product.imagen_url ?? '').trim();
+            return Boolean(url) && url !== (comercioLogoUrl ?? '').trim();
+          })?.imagen_url ?? null;
+        const coverSource = (customCover || firstProductCover || '').trim() || null;
+        categories.push({
+          id: categoria.id,
+          name: formatCategoryDisplayName(categoria.nombre),
+          // Chat thumbs only (~70–110 CSS px) — keep small so assistant images
+          // do not compete with the normal menu tile/hero cascade.
+          imageUrl:
+            resolveCategoryCover(
+              categoria.imagen_url,
+              sorted,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.thumb,
+            ) || null,
+          imageSourceUrl: coverSource,
+          productCount: sorted.length,
+          availableCount: sorted.filter((p) => p.disponible !== false).length,
+        });
+      }
       for (const product of sorted) {
         const price = getProductMinimumPrice(product);
+        const rawImage = (product.imagen_url ?? '').trim() || null;
         products.push({
           id: product.id,
           categoryId: categoria.id,
           name: product.nombre,
           description: (product.descripcion ?? '').trim() || null,
           imageUrl:
-            displayProductImage(product.imagen_url, comercioLogoUrl, 280) || null,
+            displayProductImage(
+              product.imagen_url,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.thumb,
+            ) || null,
+          imageSourceUrl: rawImage,
           price: Number.isFinite(price) && price > 0 ? price : Number(product.precio ?? 0) || 0,
           currency,
           available: product.disponible !== false,
@@ -4111,32 +4129,60 @@ export default function PublicMenuPage() {
       }
     }
     return { currency, categories, products };
-  }, [categoriasConProductos, businessBaseCurrency, comercioLogoUrl]);
+  }, [
+    isChatbotMode,
+    categoriasConProductos,
+    businessBaseCurrency,
+    comercioLogoUrl,
+  ]);
   const chatPaymentMethods = useMemo(
-    () => toChatPaymentMethods(menuData?.metodosPago, businessBaseCurrency),
-    [menuData?.metodosPago, businessBaseCurrency],
+    () =>
+      isChatbotMode
+        ? toChatPaymentMethods(menuData?.metodosPago, businessBaseCurrency)
+        : [],
+    [isChatbotMode, menuData?.metodosPago, businessBaseCurrency],
   );
   const chatBusinessLocation = useMemo(
     () =>
-      buildBusinessLocation({
-        lat: businessLat,
-        lng: businessLng,
-        name: comercioNombre,
-        address: comercioAddress || null,
-      }),
-    [businessLat, businessLng, comercioNombre, comercioAddress],
+      isChatbotMode
+        ? buildBusinessLocation({
+            lat: businessLat,
+            lng: businessLng,
+            name: comercioNombre,
+            address: comercioAddress || null,
+          })
+        : null,
+    [
+      isChatbotMode,
+      businessLat,
+      businessLng,
+      comercioNombre,
+      comercioAddress,
+    ],
   );
   const chatBusinessHours = useMemo(
-    () => buildChatHoursSnapshot(menuData?.comercio?.horarios),
-    [menuData?.comercio?.horarios],
+    () =>
+      isChatbotMode
+        ? buildChatHoursSnapshot(menuData?.comercio?.horarios)
+        : null,
+    [isChatbotMode, menuData?.comercio?.horarios],
   );
   const chatFulfillmentOptions = useMemo(
-    () => ({
-      delivery: supportsDelivery && kioskHomeConfig.delivery !== false,
-      pickup: kioskHomeConfig.paraLlevar !== false,
-      dineIn: kioskHomeConfig.comerAqui !== false,
-    }),
-    [supportsDelivery, kioskHomeConfig.delivery, kioskHomeConfig.paraLlevar, kioskHomeConfig.comerAqui],
+    () =>
+      isChatbotMode
+        ? {
+            delivery: supportsDelivery && kioskHomeConfig.delivery !== false,
+            pickup: kioskHomeConfig.paraLlevar !== false,
+            dineIn: kioskHomeConfig.comerAqui !== false,
+          }
+        : null,
+    [
+      isChatbotMode,
+      supportsDelivery,
+      kioskHomeConfig.delivery,
+      kioskHomeConfig.paraLlevar,
+      kioskHomeConfig.comerAqui,
+    ],
   );
   const kioskProductsByCategory = useMemo(() => {
     const map: Record<string, Array<{
@@ -4226,8 +4272,11 @@ export default function PublicMenuPage() {
     // QR/catalog checkout is always “Comer aquí”; do not require delivery/pickup seed.
     if (inCatalogSession) return 'dine_in';
     if (publicFulfillmentIsValid) return kioskFulfillment;
-    if (!preferredCheckoutFulfillment) return null;
-    return selectKioskFulfillment(preferredCheckoutFulfillment);
+    if (preferredCheckoutFulfillment) {
+      return selectKioskFulfillment(preferredCheckoutFulfillment);
+    }
+    // Chat can reach pay without a home-mode pick; never block with a silent no-op.
+    return selectKioskFulfillment('takeaway');
   }
 
   function resetKioskFulfillment() {
@@ -5007,6 +5056,20 @@ export default function PublicMenuPage() {
     deliveryAutoLocateKeyRef.current = null;
   }, [isConfirmOpen]);
 
+  // If chat pay handed off but router.replace cleared checkout state, reopen once on menu.
+  useEffect(() => {
+    if (isChatbotMode) return;
+    if (!pendingCheckoutFromChatRef.current) return;
+    if (isConfirmOpen) {
+      pendingCheckoutFromChatRef.current = false;
+      return;
+    }
+    pendingCheckoutFromChatRef.current = false;
+    openCheckoutSheet({ skipUpsell: true });
+    // openCheckoutSheet reads latest render closures; only re-run when leaving chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional leave-chat handoff
+  }, [isChatbotMode, isConfirmOpen]);
+
   // If GPS/map pin exists but reverse-geocode left address empty, keep a usable label.
   useEffect(() => {
     if (!isDeliveryOrder || deliveryPointSource !== 'user' || !deliveryPoint) return;
@@ -5554,6 +5617,78 @@ export default function PublicMenuPage() {
     setAddToCartSheet({ open: true, suggestions });
   }
 
+  /**
+   * Chat carousel / sheet “Agregar” for products without options.
+   * Must notify the assistant so the pay CTA always appears (menu grid path does not).
+   */
+  function handleAddSimpleProductFromChat(productId: string) {
+    const product = productById.get(productId);
+    const category = categoryByProductId.get(productId) ?? null;
+    if (!product) return;
+    if (productRequiresConfiguration(product, category)) {
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
+    if (scheduleClosed && !catalogMode) {
+      window.alert('El restaurante está cerrado actualmente');
+      return;
+    }
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
+    if (getProductMinimumPrice(product) <= 0) return;
+
+    const selection: CartLineSelection = {};
+    const unitPrice = menuLinePrice(
+      product,
+      category,
+      selection,
+      productById,
+      categoryByProductId,
+    );
+    if (!(unitPrice > 0) || product.disponible === false) {
+      setChatAppliedNotice({
+        label: 'No se pudo agregar: precio o disponibilidad no válidos.',
+      });
+      return;
+    }
+
+    const cartKey = buildCartLineKey(productId, selection);
+    setCart((prev) => ({
+      ...prev,
+      [cartKey]: (prev[cartKey] ?? 0) + 1,
+    }));
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'add_to_cart', { product_id: productId });
+
+    const currency =
+      (menuData?.comercio as { moneda?: string } | undefined)?.moneda ||
+      selectedCurrencyCode ||
+      'USD';
+    setChatAppliedNotice({
+      label: `1× ${menuLineLabel(product, selection, category, productById)}`,
+      productCard: {
+        product_id: productId,
+        name: product.nombre || '',
+        description: (product.descripcion || '').slice(0, 160) || null,
+        image_url:
+          displayProductImage(product.imagen_url, comercioLogoUrl, 160) || null,
+        currency,
+        price_base: Number(product.precio) || null,
+        price_unit: unitPrice,
+        price_label: formatUpsellPrice(unitPrice),
+        line_total: unitPrice,
+        line_total_label: formatUpsellPrice(unitPrice),
+        available: true,
+        requires_configuration: false,
+        option_hints: [],
+        selected_options: [],
+        quantity: 1,
+      },
+    });
+  }
+
   function handleAcceptAddToCartSuggestion(suggestion: AddToCartSuggestion) {
     const cartAmountBefore = cartTotal;
     incrementProduct(suggestion.productId);
@@ -6008,9 +6143,9 @@ export default function PublicMenuPage() {
     setIsConfirmOpen(true);
   }
 
-  /** Toggle assistant preview via ?chatbot=1 without dropping other query params. */
+  /** Toggle assistant via ?chatbot=1 without dropping other query params. */
   function setChatbotMode(enabled: boolean) {
-    if (enabled && !chatbotPreviewEnabled) return;
+    if (enabled && !chatbotUxEnabled) return;
     if (enabled && (isAssistedMode || catalogFromUrl)) return;
     const params = new URLSearchParams(searchParams.toString());
     if (enabled) {
@@ -6031,12 +6166,30 @@ export default function PublicMenuPage() {
     setChatbotMode(false);
   }
 
+  /**
+   * Open shared checkout from the assistant.
+   * Open the sheet first (z-60 over chat), then clear ?chatbot=1 on the next
+   * tick so Next.js searchParams replace cannot drop isConfirmOpen.
+   */
+  function openCheckoutFromChat() {
+    pendingCheckoutFromChatRef.current = true;
+    openCheckoutSheet({ skipUpsell: true });
+    if (typeof window === 'undefined') {
+      openTraditionalMenuFromChat();
+      return;
+    }
+    window.setTimeout(() => {
+      openTraditionalMenuFromChat();
+    }, 0);
+  }
+
   function openSharedCartFromChat() {
     if (cartCount <= 0) {
       openTraditionalMenuFromChat();
       return;
     }
-    openCheckoutSheet();
+    // Cart chip in chat: same handoff as “listo para pagar”.
+    openCheckoutFromChat();
   }
 
   function cartLinesForPreCheckoutUpsell(
@@ -6073,7 +6226,7 @@ export default function PublicMenuPage() {
     return true;
   }
 
-  function openCheckoutSheet() {
+  function openCheckoutSheet(opts?: { skipUpsell?: boolean }) {
     if (kioskVoucher) return;
     if (isOwnerPreview) {
       window.alert(
@@ -6090,6 +6243,7 @@ export default function PublicMenuPage() {
       return;
     }
     if (
+      !opts?.skipUpsell &&
       shouldShowPreCheckoutUpsell({
         config: menuData?.preCheckoutUpsell ?? { upselling: false },
         categories: menuData?.categorias ?? [],
@@ -7205,7 +7359,7 @@ export default function PublicMenuPage() {
           </div>
         ) : null}
         {isChatbotMode ? (
-          <ChatAssistantView
+          <ChatAssistantLazy
             comercioId={resolvedComercioId || String(menuData.comercio.slug || commerceIdentifier)}
             businessName={comercioNombre}
             logoUrl={comercioLogoUrl || null}
@@ -7236,10 +7390,7 @@ export default function PublicMenuPage() {
             }
             onOpenMenu={openTraditionalMenuFromChat}
             onOpenCart={openSharedCartFromChat}
-            onOpenCheckout={() => {
-              openTraditionalMenuFromChat();
-              openCheckoutSheet();
-            }}
+            onOpenCheckout={openCheckoutFromChat}
             onQuoteDeliveryAt={(location) => {
               const quote = quoteDeliveryFee({
                 config: menuData?.comercio.delivery_tarifas,
@@ -7303,8 +7454,7 @@ export default function PublicMenuPage() {
                     `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
                 );
               }
-              openTraditionalMenuFromChat();
-              openCheckoutSheet();
+              openCheckoutFromChat();
             }}
             incomingProposal={chatIncomingProposal}
             onIncomingProposalConsumed={() => setChatIncomingProposal(null)}
@@ -7315,7 +7465,7 @@ export default function PublicMenuPage() {
               setProductOptionsSheet({ open: true, productId });
             }}
             onAddSimpleProduct={(productId) => {
-              handleAddToCartFromGrid(productId);
+              handleAddSimpleProductFromChat(productId);
             }}
             onApplyCartAction={(action) => {
               if (action.type === 'propose_add') {
@@ -7360,8 +7510,7 @@ export default function PublicMenuPage() {
                 return true;
               }
               if (action.type === 'open_checkout') {
-                openTraditionalMenuFromChat();
-                openCheckoutSheet();
+                openCheckoutFromChat();
                 return true;
               }
               return false;
@@ -7456,21 +7605,10 @@ export default function PublicMenuPage() {
           onToggleTheme={toggleKioskTheme}
           stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
           onHistoryDepthChange={setKioskHistoryDepth}
-        />
-        )}
-
-        <ChatModeSwitcher
-          visible={
-            chatbotPreviewEnabled &&
-            !isChatbotMode &&
-            !isAssistedMode &&
-            !catalogFromUrl &&
-            !catalogReady &&
-            !kioskVoucher &&
-            !isConfirmOpen
-          }
+          chatbotUxEnabled={chatbotUxEnabled}
           onOpenAssistant={openChatbotFromMenu}
         />
+        )}
 
         <PreCheckoutUpsellSheet
           open={isPreCheckoutUpsellOpen}

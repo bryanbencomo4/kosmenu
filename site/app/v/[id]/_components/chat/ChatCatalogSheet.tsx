@@ -12,6 +12,7 @@ import {
 import type { KeyboardEvent } from 'react';
 
 import { ChatHorizontalScroller } from './ChatHorizontalScroller';
+import { ChatThumbImage } from './ChatThumbImage';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
   CHAT_CATALOG_PAGE_SIZE,
@@ -348,23 +349,11 @@ function CatalogRow({
       }`}
     >
       <div className="h-[60px] w-[60px] shrink-0 overflow-hidden rounded-lg bg-[var(--chat-input)]">
-        {card.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={card.image_url}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-            draggable={false}
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center text-lg font-semibold text-[var(--chat-text-muted)]"
-            aria-hidden
-          >
-            {(card.name || '?').slice(0, 1).toUpperCase()}
-          </div>
-        )}
+        <ChatThumbImage
+          src={card.image_url}
+          sourceUrl={card.image_source_url || card.image_url}
+          fallbackLetter={card.name}
+        />
       </div>
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-semibold leading-snug">{card.name}</h3>

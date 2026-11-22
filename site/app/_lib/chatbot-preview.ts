@@ -1,10 +1,22 @@
 /**
  * Phase 1 — Sales assistant preview gate.
  *
- * Production stays off unless NEXT_PUBLIC_CHATBOT_PREVIEW=1 is set explicitly.
- * Local / non-production builds allow ?chatbot=1 for UI development.
+ * Public chatbot UX (home chooser + FAB) is allowlisted per commerce slug.
+ * Expand CHATBOT_UX_ENABLED_SLUGS when rolling out to more restaurants.
  * This does NOT grant Plan Pro and must not be treated as commercial activation.
  */
+
+/** Slugs with assistant entry points on the public menu. */
+export const CHATBOT_UX_ENABLED_SLUGS = ['pizzas-el-trueno'] as const;
+
+/** True when this public menu may show assistant entry (home / FAB). */
+export function isChatbotUxEnabledForSlug(
+  slug: string | null | undefined,
+): boolean {
+  const normalized = (slug ?? '').trim().toLowerCase();
+  if (!normalized) return false;
+  return (CHATBOT_UX_ENABLED_SLUGS as readonly string[]).includes(normalized);
+}
 
 export type ChatbotQueryConflict =
   | 'preview_disabled'

@@ -49,6 +49,8 @@ type ChatMessageListProps = {
   onSeeAllCatalog?: (categoryId: string | null) => void;
   /** CTA under payment-methods card. */
   onOpenCheckout?: () => void;
+  onCloseSaleWantMore?: (messageId: string) => void;
+  onCloseSaleReadyToPay?: (messageId: string) => void;
   /** Full-screen image viewer. */
   onOpenImage?: (src: string, alt: string) => void;
   /** Pull-to-refresh at the very top (touch). Parent may no-op. */
@@ -73,6 +75,8 @@ export function ChatMessageList({
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
+  onCloseSaleWantMore,
+  onCloseSaleReadyToPay,
   onOpenImage,
   onRefresh,
   voiceAvatarUrl = null,
@@ -371,6 +375,8 @@ export function ChatMessageList({
                 onSelectCategory={onSelectCategory}
                 onSeeAllCatalog={onSeeAllCatalog}
                 onOpenCheckout={onOpenCheckout}
+                onCloseSaleWantMore={onCloseSaleWantMore}
+                onCloseSaleReadyToPay={onCloseSaleReadyToPay}
                 onOpenImage={onOpenImage}
                 voiceAvatarUrl={voiceAvatarUrl}
                 voiceAvatarLetter={voiceAvatarLetter}

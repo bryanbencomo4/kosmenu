@@ -8,6 +8,8 @@ export type ChatCatalogProduct = {
   name: string;
   description: string | null;
   imageUrl: string | null;
+  /** Raw Storage URL for chat image cascade (menu parity). */
+  imageSourceUrl?: string | null;
   price: number;
   currency: string;
   available: boolean;
@@ -62,6 +64,7 @@ export function toChatProductCard(p: ChatCatalogProduct): ChatProductCardData {
     name: p.name,
     description: p.description,
     image_url: p.imageUrl,
+    image_source_url: p.imageSourceUrl ?? null,
     currency: p.currency,
     price_base: price > 0 ? price : null,
     price_unit: price > 0 ? price : null,

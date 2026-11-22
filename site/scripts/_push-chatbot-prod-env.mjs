@@ -59,8 +59,8 @@ const vars = {
   CHATBOT_MAX_MONTHLY_REQUESTS_PER_COMMERCE: '500',
   CHATBOT_MAX_MONTHLY_TOKENS_PER_COMMERCE: '2000000',
   NEXT_PUBLIC_CHATBOT_PREVIEW: '1',
-  // Unlicensed WhatsApp-derived cues stay off in public.
-  NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED: '0',
+  // Product chat cues (efecto pack) enabled for Trueno UX.
+  NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED: '1',
   GEMINI_API_KEY: gemini,
 };
 

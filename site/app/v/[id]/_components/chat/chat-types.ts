@@ -7,6 +7,8 @@ export type ChatProductCardData = {
   name: string;
   description: string | null;
   image_url: string | null;
+  /** Raw Storage URL for the same cascade the menu uses. */
+  image_source_url?: string | null;
   currency: string;
   price_base: number | null;
   price_unit: number | null;
@@ -92,6 +94,8 @@ export type ChatCatalogCategory = {
   id: string;
   name: string;
   imageUrl: string | null;
+  /** Raw Storage URL for cold→hot→original cascade (same as menu). */
+  imageSourceUrl?: string | null;
   productCount: number;
   availableCount: number;
 };
@@ -156,6 +160,8 @@ export type ChatMessage = {
   contactCard?: import('./chat-contact').ChatContactCardData | null;
   /** Sticker sent as a message (id + accessible label). */
   sticker?: { id: string; label: string } | null;
+  /** Post-add close-sale CTAs (pay vs want more). */
+  closeSale?: ChatCloseSalePrompt | null;
 };
 
 export type ChatSharedLocation = {
@@ -169,4 +175,14 @@ export type ChatSharedLocation = {
 export type ChatAppliedAddNotice = {
   label: string;
   productCard?: ChatProductCardData;
+};
+
+/**
+ * Close-sale prompt after an add: pay now (skip menu upsell sheet) or see more.
+ * Suggestions stay hidden until the guest picks “algo más”.
+ */
+export type ChatCloseSalePrompt = {
+  id: string;
+  status: 'pending' | 'answered_more' | 'answered_pay';
+  pendingProducts: ChatProductCardData[];
 };

@@ -5,10 +5,19 @@ import {
   buildChatbotWelcomeMessage,
   isChatbotPreviewEnabled,
   isChatbotQueryEnabled,
+  isChatbotUxEnabledForSlug,
   shouldOpenChatbotFromQuery,
 } from '../app/_lib/chatbot-preview';
 
 describe('chatbot preview gate', () => {
+  it('enables public UX only for allowlisted commerce slugs', () => {
+    expect(isChatbotUxEnabledForSlug('pizzas-el-trueno')).toBe(true);
+    expect(isChatbotUxEnabledForSlug('Pizzas-El-Trueno')).toBe(true);
+    expect(isChatbotUxEnabledForSlug('otro-comercio')).toBe(false);
+    expect(isChatbotUxEnabledForSlug('')).toBe(false);
+    expect(isChatbotUxEnabledForSlug(null)).toBe(false);
+  });
+
   it('enables preview outside production by default', () => {
     expect(
       isChatbotPreviewEnabled({ nodeEnv: 'development', publicPreviewFlag: null }),

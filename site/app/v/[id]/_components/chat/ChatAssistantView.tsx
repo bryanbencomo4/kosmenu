@@ -110,6 +110,7 @@ import type {
   ChatAttachment,
   ChatCartActionData,
   ChatCatalogCategory,
+  ChatCloseSalePrompt,
   ChatDeliveryStatus,
   ChatMessage,
   ChatProductCardData,
@@ -119,7 +120,10 @@ import type {
 
 /** User declined extras / the recommendation ("no gracias", "ahora no", "no quiero"). */
 const DECLINE_RE = /\b(no[, ]?gracias|ahora no|no quiero)\b/i;
-/** Max complement carousels per conversation. */
+/** Typed “ready to pay” from the close-sale moment. */
+const READY_TO_PAY_RE =
+  /\b(estoy\s+list[oa]\s+para\s+pagar|list[oa]\s+para\s+pagar|quiero\s+pagar|pasar\s+a\s+pagar|ir\s+a\s+pagar)\b/i;
+/** Max close-sale / complement prompts per conversation. */
 const MAX_COMPLEMENT_ROUNDS = 2;
 
 export type ChatCartSnapshotLine = {
@@ -128,7 +132,7 @@ export type ChatCartSnapshotLine = {
   selection: CartLineSelection;
 };
 
-type ChatAssistantViewProps = {
+export type ChatAssistantViewProps = {
   comercioId: string;
   businessName: string;
   logoUrl: string | null;
@@ -206,6 +210,7 @@ function createMessage(
     hoursSchedule?: ChatHoursSnapshot | null;
     contactCard?: ChatContactCardData | null;
     sticker?: ChatMessage['sticker'];
+    closeSale?: ChatCloseSalePrompt | null;
   },
 ): ChatMessage {
   return {
@@ -233,7 +238,32 @@ function createMessage(
     hoursSchedule: options?.hoursSchedule ?? undefined,
     contactCard: options?.contactCard ?? undefined,
     sticker: options?.sticker ?? undefined,
+    closeSale: options?.closeSale ?? undefined,
   };
+}
+
+/** Post-add close-sale prompt — CTAs first; complements only after “sí”. */
+function buildCloseSaleMessage(
+  pendingProducts: ChatProductCardData[],
+): ChatMessage {
+  const text =
+    pendingProducts.length > 0
+      ? '¡Listo! Ya está en tu pedido. ¿Seguimos o pasamos a pagar?'
+      : '¡Listo! Ya está en tu pedido. Cuando quieras, pasamos a pagar.';
+  return createMessage('assistant', text, {
+    closeSale: {
+      id: `close_${Date.now().toString(36)}`,
+      status: 'pending',
+      pendingProducts,
+    },
+  });
+}
+
+/** Drop older unanswered pay prompts so only the latest CTAs stay active. */
+function clearPendingCloseSales(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) =>
+    m.closeSale?.status === 'pending' ? { ...m, closeSale: undefined } : m,
+  );
 }
 
 function welcomeCategories(
@@ -889,6 +919,42 @@ export function ChatAssistantView({
     onIncomingProposalConsumed?.();
   }, [incomingProposal, onIncomingProposalConsumed, playAssistantReceivedOnce]);
 
+  /**
+   * Always offer pay after a successful add. Complement suggestions are optional
+   * and capped — never suppress the pay CTA (that left guests stranded).
+   */
+  const offerCloseSaleAfterAdd = useCallback(
+    (extraProductIds: string[] = []) => {
+      const allowComplements =
+        !declinedComplements && complementsShownCount < MAX_COMPLEMENT_ROUNDS;
+      const cartProductIds = Array.from(
+        new Set([
+          ...cartSnapshot.map((line) => line.productId),
+          ...extraProductIds,
+        ]),
+      );
+      const suggestions =
+        allowComplements && catalog
+          ? suggestComplementProducts(catalog, cartProductIds, {
+              limit: 4,
+            }).map(toChatProductCard)
+          : [];
+      const closeMsg = buildCloseSaleMessage(suggestions);
+      setMessages((prev) => [...clearPendingCloseSales(prev), closeMsg]);
+      if (allowComplements) {
+        setComplementsShownCount((n) => n + 1);
+      }
+      playAssistantReceivedOnce(closeMsg);
+    },
+    [
+      catalog,
+      cartSnapshot,
+      declinedComplements,
+      complementsShownCount,
+      playAssistantReceivedOnce,
+    ],
+  );
+
   useEffect(() => {
     if (!incomingAppliedNotice) return;
     const notice = incomingAppliedNotice;
@@ -898,42 +964,15 @@ export function ChatAssistantView({
         productCards: notice.productCard ? [notice.productCard] : [],
       }),
     ]);
-    if (
-      catalog &&
-      !declinedComplements &&
-      complementsShownCount < MAX_COMPLEMENT_ROUNDS
-    ) {
-      const cartProductIds = Array.from(
-        new Set([
-          ...cartSnapshot.map((line) => line.productId),
-          ...(notice.productCard?.product_id
-            ? [notice.productCard.product_id]
-            : []),
-        ]),
-      );
-      const suggestions = suggestComplementProducts(catalog, cartProductIds, {
-        limit: 4,
-      });
-      if (suggestions.length > 0) {
-        const suggestMsg = createMessage(
-          'assistant',
-          '¡Listo! Ya está en tu pedido. ¿Te provoca algo más?',
-          { catalogProducts: suggestions.map(toChatProductCard) },
-        );
-        setMessages((prev) => [...prev, suggestMsg]);
-        setComplementsShownCount((n) => n + 1);
-        playAssistantReceivedOnce(suggestMsg);
-      }
+    // Only successful adds (with a product card) unlock the pay handoff.
+    if (notice.productCard?.product_id) {
+      offerCloseSaleAfterAdd([notice.productCard.product_id]);
     }
     onIncomingAppliedNoticeConsumed?.();
   }, [
     incomingAppliedNotice,
     onIncomingAppliedNoticeConsumed,
-    catalog,
-    cartSnapshot,
-    declinedComplements,
-    complementsShownCount,
-    playAssistantReceivedOnce,
+    offerCloseSaleAfterAdd,
   ]);
 
   const confirmCartAction = useCallback(
@@ -993,34 +1032,8 @@ export function ChatAssistantView({
           createMessage('system', `Listo: ${action.label}`),
         ]);
 
-        // Complement upsell: at most twice, never after the user said no.
-        if (
-          action.type === 'propose_add' &&
-          catalog &&
-          !declinedComplements &&
-          complementsShownCount < MAX_COMPLEMENT_ROUNDS
-        ) {
-          const cartProductIds = Array.from(
-            new Set([
-              ...cartSnapshot.map((line) => line.productId),
-              action.product_id,
-            ]),
-          );
-          const suggestions = suggestComplementProducts(
-            catalog,
-            cartProductIds,
-            { limit: 4 },
-          );
-          if (suggestions.length > 0) {
-            const suggestMsg = createMessage(
-              'assistant',
-              '¡Listo! Ya está en tu pedido. ¿Te provoca algo más?',
-              { catalogProducts: suggestions.map(toChatProductCard) },
-            );
-            setMessages((prev) => [...prev, suggestMsg]);
-            setComplementsShownCount((n) => n + 1);
-            playAssistantReceivedOnce(suggestMsg);
-          }
+        if (action.type === 'propose_add') {
+          offerCloseSaleAfterAdd([action.product_id]);
         }
       } finally {
         setCartBusy(false);
@@ -1030,12 +1043,77 @@ export function ChatAssistantView({
       onApplyCartAction,
       onOpenCheckout,
       confirmedProposalIds,
-      catalog,
-      cartSnapshot,
-      declinedComplements,
-      complementsShownCount,
-      playAssistantReceivedOnce,
+      offerCloseSaleAfterAdd,
     ],
+  );
+
+  const handleCloseSaleWantMore = useCallback(
+    (messageId: string) => {
+      let products: ChatProductCardData[] = [];
+      let applied = false;
+      setMessages((prev) => {
+        const target = prev.find((m) => m.id === messageId);
+        if (!target?.closeSale || target.closeSale.status !== 'pending') {
+          return prev;
+        }
+        applied = true;
+        products = target.closeSale.pendingProducts ?? [];
+        return prev.map((m) =>
+          m.id !== messageId
+            ? m
+            : {
+                ...m,
+                closeSale: {
+                  ...m.closeSale!,
+                  status: 'answered_more',
+                },
+                catalogProducts:
+                  products.length > 0 ? products : m.catalogProducts,
+              },
+        );
+      });
+      if (!applied) return;
+      if (products.length === 0) {
+        openCatalogSheet(null);
+      }
+    },
+    [openCatalogSheet],
+  );
+
+  const handleCloseSaleReadyToPay = useCallback(
+    (messageId: string) => {
+      // Allow pending + answered_more (pay stays available after “algo más”).
+      setMessages((prev) => {
+        const target = prev.find((m) => m.id === messageId);
+        const status = target?.closeSale?.status;
+        if (!target?.closeSale || (status !== 'pending' && status !== 'answered_more')) {
+          return prev;
+        }
+        return [
+          ...prev.map((m) =>
+            m.id !== messageId
+              ? m
+              : {
+                  ...m,
+                  closeSale: {
+                    ...m.closeSale!,
+                    status: 'answered_pay' as const,
+                  },
+                },
+          ),
+          createMessage('user', 'Estoy listo para pagar', {
+            deliveryStatus: 'read',
+          }),
+          createMessage(
+            'assistant',
+            'Perfecto. Te llevo a revisar y pagar tu pedido.',
+          ),
+        ];
+      });
+      setDeclinedComplements(true);
+      onOpenCheckout?.();
+    },
+    [onOpenCheckout],
   );
 
   const dismissCartAction = useCallback((action: ChatCartActionData) => {
@@ -1234,6 +1312,34 @@ export function ChatAssistantView({
       });
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
+
+      // Typed close-sale: go straight to checkout (no menu upsell sheet).
+      if (READY_TO_PAY_RE.test(text) && cartCount > 0 && onOpenCheckout) {
+        setDeclinedComplements(true);
+        const ack = createMessage(
+          'assistant',
+          'Perfecto. Te llevo a revisar y pagar tu pedido.',
+        );
+        setMessages([
+          ...nextMessages.map((m) =>
+            m.closeSale?.status === 'pending' ||
+            m.closeSale?.status === 'answered_more'
+              ? {
+                  ...m,
+                  closeSale: {
+                    ...m.closeSale,
+                    status: 'answered_pay' as const,
+                  },
+                }
+              : m,
+          ),
+          ack,
+        ]);
+        playAssistantReceivedOnce(ack);
+        onOpenCheckout();
+        return;
+      }
+
       // Local UX answers first (carousels / location / hours / contact / …), then Gemini.
       if (await answerCatalogIntent(text)) return;
       if (await answerLocationIntent(text)) return;
@@ -1248,6 +1354,9 @@ export function ChatAssistantView({
       isTyping,
       messages,
       replyTo,
+      cartCount,
+      onOpenCheckout,
+      playAssistantReceivedOnce,
       runAssistantTurn,
       answerCatalogIntent,
       answerLocationIntent,
@@ -1760,7 +1869,7 @@ export function ChatAssistantView({
         onNewConversation={resetConversation}
         onOpenCheckout={onOpenCheckout}
         whatsappUrl={whatsappUrl}
-        showCheckoutHint={live && cartCount > 0}
+        showCheckoutHint={cartCount > 0 && Boolean(onOpenCheckout)}
         isTyping={isTyping}
         soundsEnabled={soundsEnabled}
         onToggleSounds={() => {
@@ -1806,6 +1915,8 @@ export function ChatAssistantView({
         onSelectCategory={catalog ? onSelectCategory : undefined}
         onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
         onOpenCheckout={onOpenCheckout}
+        onCloseSaleWantMore={handleCloseSaleWantMore}
+        onCloseSaleReadyToPay={handleCloseSaleReadyToPay}
         onOpenImage={openImage}
         onRefresh={refreshConversation}
         voiceAvatarUrl={logoUrl}

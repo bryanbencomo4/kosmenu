@@ -2,6 +2,7 @@
 
 import { Plus, Settings2 } from 'lucide-react';
 
+import { ChatThumbImage } from './ChatThumbImage';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import type { ChatProductCardData } from './chat-types';
 
@@ -56,22 +57,11 @@ export function ChatProductCard({
           aria-label={card.image_url ? `Ver foto de ${card.name}` : undefined}
           data-chat-product-image="1"
         >
-          {card.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={card.image_url}
-              alt=""
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <div
-              className="flex h-full w-full items-center justify-center text-base font-semibold text-[var(--chat-text-muted)]"
-              aria-hidden
-            >
-              {(card.name || '?').slice(0, 1).toUpperCase()}
-            </div>
-          )}
+          <ChatThumbImage
+            src={card.image_url}
+            sourceUrl={card.image_source_url || card.image_url}
+            fallbackLetter={card.name}
+          />
         </button>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[14px] font-semibold leading-snug text-[var(--chat-text)]">

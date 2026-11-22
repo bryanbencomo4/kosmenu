@@ -10,9 +10,11 @@ import {
   useState,
 } from 'react';
 
+import { KioskAssistantFab } from './KioskAssistantFab';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskHome } from './KioskHome';
 import { KioskImage } from './KioskImage';
+import { KioskOrderModeSheet } from './KioskOrderModeSheet';
 import { KioskTopBar } from './KioskTopBar';
 import { KioskVoucher } from './KioskVoucher';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
@@ -127,6 +129,9 @@ type KioskMenuExperienceProps = {
   onToggleTheme: () => void;
   stickyOffsetClass?: string;
   onHistoryDepthChange?: (depth: number) => void;
+  /** When true, home “Ver menú” offers assistant vs digital menu; FAB on catalog. */
+  chatbotUxEnabled?: boolean;
+  onOpenAssistant?: () => void;
 };
 
 function kioskSessionLocksHome(options: {
@@ -206,9 +211,12 @@ export const KioskMenuExperience = forwardRef<
     onToggleTheme,
     stickyOffsetClass,
     onHistoryDepthChange,
+    chatbotUxEnabled = false,
+    onOpenAssistant,
   },
   ref,
 ) {
+  const [orderModeSheetOpen, setOrderModeSheetOpen] = useState(false);
   const hasOrderMode =
     homeConfig.comerAqui ||
     homeConfig.paraLlevar ||
@@ -216,11 +224,29 @@ export const KioskMenuExperience = forwardRef<
   // Fulfillment is chosen while assembling the order, so an open menu can be ordered
   // before a mode is selected. Closed, catalog-locked, or mode-less menus stay view-only.
   const browseOnly = !assistedMode && !catalogMode && (!isOpen || !hasOrderMode);
-  useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
+  useLockBodyScroll(Boolean((addedPrompt && !browseOnly) || orderModeSheetOpen));
   const [screen, setScreen] = useState<KioskScreen>(
     assistedMode || fulfillment ? 'categories' : 'home',
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+
+  function goToDigitalMenu() {
+    if (catalogOnlySession) return;
+    onLeaveCatalog();
+    onSearchChange('');
+    setActiveCategoryId(null);
+    setScreen('categories');
+  }
+
+  function handleBrowseMenu() {
+    if (catalogOnlySession) return;
+    if (chatbotUxEnabled && onOpenAssistant) {
+      setOrderModeSheetOpen(true);
+      return;
+    }
+    goToDigitalMenu();
+  }
+
   const sessionOpts = {
     assistedMode,
     catalogOnlySession,
@@ -473,21 +499,25 @@ export const KioskMenuExperience = forwardRef<
             setActiveCategoryId(null);
             setScreen('categories');
           }}
-          onBrowseMenu={() => {
-            // Only mesa QR (?catalogo=1) skips "Ver menú". Merchant flag
-            // homeConfig.catalogo enables that QR flow — it must not block browse
-            // on the normal URL when the restaurant is closed.
-            if (catalogOnlySession) return;
-            onLeaveCatalog();
-            onSearchChange('');
-            setActiveCategoryId(null);
-            setScreen('categories');
-          }}
+          onBrowseMenu={handleBrowseMenu}
           onOpenCatalog={() => {
             onEnterCatalog();
             onSearchChange('');
             setActiveCategoryId(null);
             setScreen('categories');
+          }}
+        />
+        <KioskOrderModeSheet
+          open={orderModeSheetOpen}
+          businessName={businessName}
+          onClose={() => setOrderModeSheetOpen(false)}
+          onChooseAssistant={() => {
+            setOrderModeSheetOpen(false);
+            onOpenAssistant?.();
+          }}
+          onChooseMenu={() => {
+            setOrderModeSheetOpen(false);
+            goToDigitalMenu();
           }}
         />
       </div>
@@ -936,6 +966,30 @@ export const KioskMenuExperience = forwardRef<
           </div>
         </div>
       ) : null}
+
+      <KioskAssistantFab
+        visible={
+          chatbotUxEnabled &&
+          Boolean(onOpenAssistant) &&
+          !voucher &&
+          (screen === 'categories' || screen === 'products')
+        }
+        onOpen={() => onOpenAssistant?.()}
+      />
+
+      <KioskOrderModeSheet
+        open={orderModeSheetOpen}
+        businessName={businessName}
+        onClose={() => setOrderModeSheetOpen(false)}
+        onChooseAssistant={() => {
+          setOrderModeSheetOpen(false);
+          onOpenAssistant?.();
+        }}
+        onChooseMenu={() => {
+          setOrderModeSheetOpen(false);
+          goToDigitalMenu();
+        }}
+      />
     </section>
   );
 });

@@ -12,6 +12,7 @@ import {
 
 import { ChatCartActionCard } from './ChatCartActionCard';
 import { ChatCategoryCarousel } from './ChatCategoryCarousel';
+import { ChatCloseSaleCard } from './ChatCloseSaleCard';
 import { ChatContactCard } from './ChatContactCard';
 import { ChatHoursCard } from './ChatHoursCard';
 import { ChatPaymentMethodsCard } from './ChatPaymentMethodsCard';
@@ -206,6 +207,10 @@ type ChatMessageBubbleProps = {
   onSeeAllCatalog?: (categoryId: string | null) => void;
   /** CTA under payment-methods card. */
   onOpenCheckout?: () => void;
+  /** Close-sale: guest wants more complements. */
+  onCloseSaleWantMore?: (messageId: string) => void;
+  /** Close-sale: guest is ready to pay (skip menu upsell sheet). */
+  onCloseSaleReadyToPay?: (messageId: string) => void;
   /** Full-screen image viewer (product / attachment / avatar). */
   onOpenImage?: (src: string, alt: string) => void;
   /** Avatar for incoming WhatsApp-like voice notes. */
@@ -239,6 +244,8 @@ export function ChatMessageBubble({
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
+  onCloseSaleWantMore,
+  onCloseSaleReadyToPay,
   onOpenImage,
   voiceAvatarUrl = null,
   voiceAvatarLetter = '?',
@@ -293,6 +300,10 @@ export function ChatMessageBubble({
   );
   const catalogCategories = message.catalogCategories ?? [];
   const catalogProducts = message.catalogProducts ?? [];
+  const closeSale = message.closeSale ?? null;
+  const showCatalogProducts =
+    catalogProducts.length > 0 &&
+    (!closeSale || closeSale.status === 'answered_more');
   const hasCartActions = Boolean(message.cartActions?.length);
   const hasVoice = Boolean(message.voiceUrl);
   const hasLocation = Boolean(message.location);
@@ -547,12 +558,12 @@ export function ChatMessageBubble({
         </div>
       ) : null}
 
-      {catalogProducts.length > 0 || standaloneCards.length > 0 ? (
+      {showCatalogProducts || standaloneCards.length > 0 ? (
         <div
           className="-mx-3 mt-1.5 w-[calc(100%+1.5rem)] max-w-5xl"
           data-chat-catalog-products="1"
         >
-          {catalogProducts.length > 0 ? (
+          {showCatalogProducts ? (
             <ChatProductCarousel
               products={catalogProducts}
               onConfigure={onConfigureProduct}
@@ -575,6 +586,20 @@ export function ChatMessageBubble({
               }
             />
           )}
+        </div>
+      ) : null}
+
+      {closeSale ? (
+        <div
+          className={`mt-1.5 flex w-full max-w-[min(92%,22.5rem)] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+          data-chat-close-sale-block="1"
+        >
+          <ChatCloseSaleCard
+            prompt={closeSale}
+            busy={cartActionBusy}
+            onWantMore={() => onCloseSaleWantMore?.(message.id)}
+            onReadyToPay={() => onCloseSaleReadyToPay?.(message.id)}
+          />
         </div>
       ) : null}
 

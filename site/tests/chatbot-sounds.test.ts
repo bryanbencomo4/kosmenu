@@ -57,8 +57,8 @@ describe('chat sound assets + manager', () => {
     const manifest = JSON.parse(
       readFileSync(join(publicChatSounds, 'manifest.json'), 'utf8'),
     );
-    expect(manifest.events.messageSent.source).toBe('efecto-01.mp3');
-    expect(manifest.events.messageReceived.source).toBe('efecto-02.mp3');
+    expect(manifest.events.messageSent.source).toBe('efecto-05.mp3');
+    expect(manifest.events.messageReceived.source).toBe('efecto-04.mp3');
     expect(manifest.events.recordingStart.source).toBe('efecto-05.mp3');
     expect(manifest.events.recordingStop.source).toBe('efecto-03.mp3');
     expect(manifest.events.voiceSent.source).toBe('efecto-06.mp3');
