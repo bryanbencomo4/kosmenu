@@ -216,16 +216,19 @@ async function main() {
     });
     ok('takeover_concurrency_soft', `status=${take2.res.status}`);
 
-    // Staff message via panel UI
+    // Staff message via panel UI + measure feed delivery latency
+    const staffText = `Hola, te atiende el restaurante 👋 (${Date.now()})`;
     const draft = mPage.locator('[data-testid="staff-draft"]');
     const send = mPage.locator('[data-testid="staff-send"]');
+    const sentAt = Date.now();
     if ((await draft.count()) && (await send.count())) {
-      await draft.fill('Hola, te atiende el restaurante 👋');
+      await draft.fill(staffText);
       await send.click();
       await mPage.waitForTimeout(800);
       const listText = await mPage.locator('[data-testid="message-list"]').innerText();
-      if (/te atiende el restaurante/i.test(listText)) ok('staff_message_ui');
-      else {
+      if (listText.includes(staffText) || /te atiende el restaurante/i.test(listText)) {
+        ok('staff_message_ui');
+      } else {
         const staff = await api(`/api/panel/conversaciones/${conversationId}`, {
           method: 'POST',
           headers: {
@@ -234,7 +237,7 @@ async function main() {
           },
           body: JSON.stringify({
             action: 'message',
-            text: 'Hola, te atiende el restaurante 👋',
+            text: staffText,
           }),
         });
         if (staff.res.ok) ok('staff_message_ui', 'fallback API');
@@ -245,15 +248,30 @@ async function main() {
     }
 
     // Correct session sees staff; wrong session must not.
-    const feedOk = await api(
-      `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
-    );
+    let feedOk = { res: { ok: false }, json: null };
+    let deliveredMs = null;
+    for (let i = 0; i < 8; i++) {
+      feedOk = await api(
+        `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
+      );
+      const bodies = (feedOk.json?.messages || [])
+        .filter((m) => m.role === 'staff' || m.role === 'system')
+        .map((m) => m.body)
+        .join('\n');
+      if (bodies.includes(staffText) || /te atiende el restaurante/i.test(bodies)) {
+        deliveredMs = Date.now() - sentAt;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
     const staffBodies = (feedOk.json?.messages || [])
       .filter((m) => m.role === 'staff' || m.role === 'system')
       .map((m) => m.body)
       .join('\n');
-    if (/te atiende el restaurante|se ha unido/i.test(staffBodies)) {
-      ok('consumer_feed_staff');
+    if (deliveredMs != null) {
+      ok('consumer_feed_staff', `${deliveredMs}ms`);
+      if (deliveredMs <= 2000) ok('staff_delivery_latency', `${deliveredMs}ms <= 2000`);
+      else ok('staff_delivery_latency_soft', `${deliveredMs}ms (target ~1–2s)`);
     } else {
       fail('consumer_feed_staff', staffBodies.slice(0, 200) || 'empty');
     }

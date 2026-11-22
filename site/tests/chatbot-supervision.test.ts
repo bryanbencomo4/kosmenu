@@ -29,6 +29,7 @@ import {
 } from '../app/api/chat/_lib/supervision-memory';
 import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
 import { canSendStaffMessage } from '../app/api/panel/conversaciones/_lib/staff-authz';
+import { resolveE2ePanelBearer } from '../app/panel/_lib/e2e-panel-bearer';
 
 const COMERCIO = '0aa8c53b-07f1-446e-8b88-66c2b7ae89ea';
 
@@ -162,6 +163,15 @@ describe('chat supervision helpers', () => {
     const w = buildChatbotWelcomeMessage('Pizzas El Trueno');
     expect(w).toMatch(/personal autorizado/i);
     expect(w).toMatch(/procesada por IA/i);
+  });
+
+  it('blocks E2E panel bearer on production hosts', () => {
+    expect(resolveE2ePanelBearer('e2e-token', '127.0.0.1')).toBe('e2e-token');
+    expect(resolveE2ePanelBearer('e2e-token', 'localhost')).toBe('e2e-token');
+    expect(resolveE2ePanelBearer('e2e-token', 'elmenuxfa.com')).toBeNull();
+    expect(resolveE2ePanelBearer('e2e-token', 'www.elmenuxfa.com')).toBeNull();
+    expect(resolveE2ePanelBearer('e2e-token', 'preview.elmenuxfa.com')).toBeNull();
+    expect(resolveE2ePanelBearer('', '127.0.0.1')).toBeNull();
   });
 
   it('picks supervision notify phone from dedicated config only', () => {

@@ -4,6 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
+import { resolveE2ePanelBearer } from './e2e-panel-bearer';
+
+function readE2eBearer() {
+  if (typeof window === 'undefined') return null;
+  return resolveE2ePanelBearer(
+    process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER,
+    window.location.hostname,
+  );
+}
 
 export function usePanelSession(options?: { requireAuth?: boolean }) {
   const requireAuth = options?.requireAuth !== false;
@@ -16,10 +25,8 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
   const [userId, setUserId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    // Local/E2E harness only — never set NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER in prod.
-    const e2eBearer = (
-      process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER || ''
-    ).trim();
+    // Local/E2E harness only — blocked on elmenuxfa.com even if env leaks.
+    const e2eBearer = readE2eBearer();
     if (e2eBearer) {
       setToken(e2eBearer);
       setEmail('e2e@local');
@@ -51,9 +58,7 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
     (async () => {
       const access = await refresh();
       if (cancelled) return;
-      const e2eBearer = (
-        process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER || ''
-      ).trim();
+      const e2eBearer = readE2eBearer();
       if (requireAuth && !access && !e2eBearer) {
         const qs = searchParams?.toString();
         const next = `${pathname}${qs ? `?${qs}` : ''}`;
@@ -63,9 +68,7 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
     const sb = getBrowserSupabase();
     const { data: sub } = sb
       ? sb.auth.onAuthStateChange((_event, session) => {
-          if (
-            (process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER || '').trim()
-          ) {
+          if (readE2eBearer()) {
             return;
           }
           setToken(session?.access_token || null);

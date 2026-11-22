@@ -468,8 +468,8 @@ export function ChatAssistantView({
     useState<PendingChatConfiguration | null>(null);
   const pendingConfigurationRef = useRef<PendingChatConfiguration | null>(null);
   pendingConfigurationRef.current = pendingConfiguration;
-  /** Merchant is actively handling — skip expecting Gemini replies. */
-  const [, setHumanSupervisionActive] = useState(false);
+  /** Merchant is actively handling — skip expecting Gemini replies; speeds feed. */
+  const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
   /** Watch feed after server created a supervised conversation (idle takeover). */
   const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
   const supervisionAfterSeqRef = useRef(0);
@@ -620,8 +620,9 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
-  // Staff/system (and late assistant) via session-scoped REST after a conversation
-  // exists — so idle takeover still reaches the consumer. Not 1–5s polling.
+  // Staff/system via session-scoped REST after a conversation exists.
+  // Faster cadence only while a human is (or may be) attending — target ~1–2s
+  // delivery under controlled network; idle AI watch stays sparse (not 1–5s spam).
   useEffect(() => {
     if (!supervisionWatchActive || !live) return;
     let cancelled = false;
@@ -679,13 +680,14 @@ export function ChatAssistantView({
       if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', onVis);
-    const id = window.setInterval(() => void tick(), 8000);
+    const intervalMs = humanSupervisionActive ? 1500 : 8000;
+    const id = window.setInterval(() => void tick(), intervalMs);
     return () => {
       cancelled = true;
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [supervisionWatchActive, live, comercioId]);
+  }, [supervisionWatchActive, live, comercioId, humanSupervisionActive]);
 
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
