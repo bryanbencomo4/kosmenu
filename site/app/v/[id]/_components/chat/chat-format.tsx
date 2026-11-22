@@ -93,8 +93,33 @@ function renderInline(text: string, keyPrefix: string, depth = 0): ReactNode[] {
   return out;
 }
 
-function digitsOnly(value: string): string {
+export function digitsOnly(value: string): string {
   return value.replace(/\D+/g, '');
+}
+
+/** Digits for `tel:` (keeps country code when the raw text had `+`). */
+export function phoneDigitsForCall(raw: string): string {
+  const digits = digitsOnly(raw);
+  if (!digits) return '';
+  return digits;
+}
+
+/**
+ * Digits for WhatsApp (`api.whatsapp.com`). Local VE mobiles like
+ * `0414…` are normalized to `58414…`.
+ */
+export function phoneDigitsForWhatsApp(raw: string): string {
+  const digits = digitsOnly(raw);
+  if (!digits) return '';
+  if (raw.trim().startsWith('+')) return digits;
+  // Common VE local form: 04XXXXXXXXX → 584XXXXXXXXX
+  if (/^0(412|414|416|424|426)\d{7}$/.test(digits)) {
+    return `58${digits.slice(1)}`;
+  }
+  if (digits.startsWith('0') && digits.length >= 10 && digits.length <= 11) {
+    return `58${digits.slice(1)}`;
+  }
+  return digits;
 }
 
 function collectLinkMatches(line: string): LinkMatch[] {
@@ -150,6 +175,22 @@ function renderLink(
   raw: string,
   key: string,
 ): ReactNode {
+  if (kind === 'phone') {
+    // Keep tel: as progressive-enhancement fallback; the chat shell intercepts
+    // clicks to show the WhatsApp-like call/chat action sheet.
+    return (
+      <a
+        key={key}
+        href={hrefFor('phone', raw)}
+        className={LINK_CLASS}
+        data-chat-link="phone"
+        data-chat-phone-raw={raw}
+        data-chat-phone-display={raw}
+      >
+        {raw}
+      </a>
+    );
+  }
   return (
     <a
       key={key}

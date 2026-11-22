@@ -55,9 +55,19 @@ describe('formatChatText (WhatsApp-like)', () => {
     const phone = html('WhatsApp: +58 414-0821633');
     expect(phone).toContain('data-chat-link="phone"');
     expect(phone).toContain('href="tel:+584140821633"');
+    expect(phone).toContain('data-chat-phone-raw="+58 414-0821633"');
     const email = html('escribe a hola@negocio.com');
     expect(email).toContain('data-chat-link="email"');
     expect(email).toContain('href="mailto:hola@negocio.com"');
+  });
+
+  it('normalizes local VE mobiles for WhatsApp digits', async () => {
+    const { phoneDigitsForWhatsApp, phoneDigitsForCall } = await import(
+      '../app/v/[id]/_components/chat/chat-format'
+    );
+    expect(phoneDigitsForWhatsApp('+58 414-0821635')).toBe('584140821635');
+    expect(phoneDigitsForWhatsApp('0414-0821635')).toBe('584140821635');
+    expect(phoneDigitsForCall('+58 414-0821635')).toBe('584140821635');
   });
 
   it('ignores unmatched, spaced and intra-word markers', () => {

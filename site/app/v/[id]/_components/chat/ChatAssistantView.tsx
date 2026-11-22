@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
@@ -32,6 +33,10 @@ import {
 import { ChatCatalogSheet } from './ChatCatalogSheet';
 import { ChatHeader } from './ChatHeader';
 import { ChatMessageList } from './ChatMessageList';
+import {
+  ChatPhoneActionSheet,
+  type ChatPhoneAction,
+} from './ChatPhoneActionSheet';
 import {
   ChatSuggestedReplies,
   buildSuggestedReplies,
@@ -380,6 +385,7 @@ export function ChatAssistantView({
     }) as ChatMessage[];
   });
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
+  const [phoneAction, setPhoneAction] = useState<ChatPhoneAction | null>(null);
   const [catalogSheetOpen, setCatalogSheetOpen] = useState(false);
   const [catalogSheetCategoryId, setCatalogSheetCategoryId] = useState<
     string | null
@@ -1565,10 +1571,30 @@ export function ChatAssistantView({
     ],
   );
 
+  const onPhoneLinkClick = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const link = target.closest('a[data-chat-link="phone"]');
+      if (!link) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const raw =
+        link.getAttribute('data-chat-phone-raw') ||
+        link.textContent ||
+        '';
+      const display =
+        link.getAttribute('data-chat-phone-display') || raw;
+      if (!raw.trim()) return;
+      setPhoneAction({ raw: raw.trim(), display: display.trim() || raw.trim() });
+    },
+    [],
+  );
+
   return (
     <section
       ref={frameRef}
-      className="z-[55] flex w-full flex-col overflow-hidden"
+      className="relative z-[55] flex w-full flex-col overflow-hidden"
       style={{
         ...frameStyle,
         ...themeStyle,
@@ -1583,6 +1609,7 @@ export function ChatAssistantView({
       data-chat-theme={theme}
       data-cart-count={cartCount}
       data-chat-sounds={soundsEnabled ? '1' : '0'}
+      onClick={onPhoneLinkClick}
       onPointerDownCapture={() => {
         unlockChatSounds();
         prefetchChatSounds();
@@ -1698,6 +1725,11 @@ export function ChatAssistantView({
           onAddSimpleProduct={onAddSimpleProduct}
         />
       ) : null}
+
+      <ChatPhoneActionSheet
+        phone={phoneAction}
+        onClose={() => setPhoneAction(null)}
+      />
     </section>
   );
 }
