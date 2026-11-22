@@ -5,6 +5,7 @@
 import {
   convertAmountBetweenCurrencies,
   normalizeCurrencyCode,
+  resolveCheckoutCurrencyRate,
 } from '../../../_lib/checkout-exchange-rate';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
 
@@ -156,4 +157,147 @@ export function convertMenuPrice(
       ? 'Conversión con la tasa del checkout del menú (referencial; el checkout confirma).'
       : 'Conversión referencial; confirma en el checkout si esa moneda está habilitada para pago.',
   };
+}
+
+export type DescribeExchangeRateResult =
+  | {
+      ok: true;
+      currency_menu: string;
+      quote_currency: string;
+      rate: number;
+      rate_label: string;
+      source: string | null;
+      mode: string | null;
+      accepted_currencies: string[];
+      amount_from?: number;
+      amount_from_label?: string;
+      amount_to?: number;
+      amount_to_label?: string;
+      note: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      currency_menu: string;
+      accepted_currencies: string[];
+    };
+
+/**
+ * Describe the restaurant's configured FX for chat answers.
+ * Never invents a public market rate outside checkout config.
+ */
+export function describeBusinessExchangeRate(
+  menu: LoadedPublicMenu,
+  args: {
+    quoteCurrency?: string;
+    amount?: number;
+    fromCurrency?: string;
+  } = {},
+): DescribeExchangeRateResult {
+  const menuCurrency = resolveMenuCurrency(menu);
+  const accepted = listCheckoutCurrencies(menu);
+  const fx = readBusinessExchange(menu);
+  const quoteRaw =
+    args.quoteCurrency ||
+    (menuCurrency === 'COP' ? 'USD' : menuCurrency === 'USD' ? 'COP' : 'USD');
+  const quote = normalizeCurrencyCode(quoteRaw) || 'USD';
+
+  if (quote === menuCurrency) {
+    return {
+      ok: true,
+      currency_menu: menuCurrency,
+      quote_currency: quote,
+      rate: 1,
+      rate_label: `1 ${menuCurrency} = 1 ${quote}`,
+      source: null,
+      mode: null,
+      accepted_currencies: accepted,
+      note: 'Misma moneda del menú; no hay conversión.',
+    };
+  }
+
+  const rate = resolveCheckoutCurrencyRate(quote, {
+    baseCurrency: menuCurrency,
+    checkoutExchange: menu.checkoutExchange || {
+      currencies: accepted,
+      exchangeRates: {},
+      exchangeRateModes: {},
+      exchangeRateSources: {},
+      exchangeRateAdjustments: {},
+    },
+    businessExchangeRate: fx.businessExchangeRate,
+    businessQuoteCurrency: fx.businessQuoteCurrency,
+    businessExchangeSource: fx.businessExchangeSource,
+    businessExchangeMode: fx.businessExchangeMode,
+    marketRates: menu.marketRates as never,
+  });
+
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return {
+      ok: false,
+      error: `No hay una tasa verificable de ${menuCurrency} a ${quote} configurada para este restaurante.`,
+      currency_menu: menuCurrency,
+      accepted_currencies: accepted,
+    };
+  }
+
+  const source =
+    menu.checkoutExchange?.exchangeRateSources?.[quote] ||
+    fx.businessExchangeSource ||
+    null;
+  const mode =
+    menu.checkoutExchange?.exchangeRateModes?.[quote] ||
+    fx.businessExchangeMode ||
+    null;
+
+  const fxOpts = {
+    baseCurrency: menuCurrency,
+    checkoutExchange: menu.checkoutExchange || {
+      currencies: accepted,
+      exchangeRates: {},
+      exchangeRateModes: {},
+      exchangeRateSources: {},
+      exchangeRateAdjustments: {},
+    },
+    businessExchangeRate: fx.businessExchangeRate,
+    businessQuoteCurrency: fx.businessQuoteCurrency,
+    businessExchangeSource: fx.businessExchangeSource,
+    businessExchangeMode: fx.businessExchangeMode,
+    marketRates: menu.marketRates as never,
+  };
+
+  // Natural "a cómo el dólar": 1 quote → menu units (e.g. 1 USD = $X COP).
+  const oneQuoteInMenu = convertAmountBetweenCurrencies(1, quote, menuCurrency, fxOpts);
+  const rateLabel =
+    Number.isFinite(oneQuoteInMenu) && oneQuoteInMenu > 0
+      ? `1 ${quote} = ${formatChatMoney(oneQuoteInMenu, menuCurrency)}`
+      : `1 ${menuCurrency} = ${rate} ${quote}`;
+
+  const result: Extract<DescribeExchangeRateResult, { ok: true }> = {
+    ok: true,
+    currency_menu: menuCurrency,
+    quote_currency: quote,
+    rate,
+    rate_label: rateLabel,
+    source,
+    mode,
+    accepted_currencies: accepted,
+    note:
+      'Tasa del checkout de este restaurante (referencial). El checkout confirma al pagar.',
+  };
+
+  const amount = Number(args.amount);
+  if (Number.isFinite(amount) && amount > 0) {
+    const from = normalizeCurrencyCode(args.fromCurrency || quote) || quote;
+    const to = from === menuCurrency ? quote : menuCurrency;
+    const converted = convertAmountBetweenCurrencies(amount, from, to, fxOpts);
+    if (Number.isFinite(converted) && converted >= 0) {
+      result.amount_from = amount;
+      result.amount_from_label = formatChatMoney(amount, from);
+      result.amount_to = converted;
+      result.amount_to_label = formatChatMoney(converted, to);
+    }
+  }
+
+  return result;
 }

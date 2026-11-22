@@ -92,6 +92,8 @@ export function buildContextualQuickReplies(input: {
   hasWhatsApp?: boolean;
   /** Session: user declined complements */
   suppressComplements?: boolean;
+  /** Real size choices from pending combinación / needs_options */
+  pendingSizeChoices?: string[] | null;
 }): {
   chips: ChatContextualChip[];
   context: ChatQuickReplyContext | null;
@@ -101,7 +103,28 @@ export function buildContextualQuickReplies(input: {
     cartCount,
     messages,
     suppressComplements = false,
+    pendingSizeChoices = null,
   } = input;
+
+  // Pending size attribute — highest priority over product carousels
+  if (pendingSizeChoices && pendingSizeChoices.length >= 2) {
+    const contextId = newContextId('size');
+    return {
+      chips: pendingSizeChoices.slice(0, OPTION_CHIP_CAP).map((label) =>
+        chip(
+          `size-${label}`,
+          label,
+          { type: 'text', text: label },
+          contextId,
+        ),
+      ),
+      context: {
+        id: contextId,
+        kind: 'size_or_flavor',
+        createdAt: Date.now(),
+      },
+    };
+  }
 
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   const lastAssistant = [...messages]

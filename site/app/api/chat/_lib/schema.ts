@@ -5,15 +5,25 @@ export const chatMessageSchema = z.object({
   text: z.string().trim().min(1).max(2000),
 });
 
-const cartSelectionSchema = z
-  .object({
-    tamanoId: z.string().optional(),
-    tamanoLabel: z.string().optional(),
-    servicioAdicional: z.boolean().optional(),
-    ajusteIds: z.array(z.string()).optional(),
-    grupos: z.record(z.string(), z.array(z.string())).optional(),
-    textos: z.record(z.string(), z.record(z.string(), z.string())).optional(),
-    exclusionesIds: z.array(z.string()).optional(),
+const cartSelectionBaseSchema = z.object({
+  tamanoId: z.string().optional(),
+  tamanoLabel: z.string().optional(),
+  servicioAdicional: z.boolean().optional(),
+  ajusteIds: z.array(z.string()).optional(),
+  grupos: z.record(z.string(), z.array(z.string())).optional(),
+  textos: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  exclusionesIds: z.array(z.string()).optional(),
+});
+
+/** One nesting level for traditional-menu combinación (partner selection). */
+const cartSelectionSchema = cartSelectionBaseSchema
+  .extend({
+    combinacion: z
+      .object({
+        productId: z.string().trim().min(1).max(80),
+        seleccion: cartSelectionBaseSchema.default({}),
+      })
+      .optional(),
   })
   .strict()
   .optional();
@@ -22,6 +32,19 @@ export const chatCartSnapshotLineSchema = z.object({
   productId: z.string().trim().min(1).max(80),
   quantity: z.number().finite().positive().max(99),
   selection: cartSelectionSchema.default({}),
+});
+
+export const pendingConfigurationSchema = z.object({
+  product_id: z.string().trim().min(1).max(80),
+  product_name: z.string().trim().max(120).optional(),
+  combine_with_product_id: z.string().trim().min(1).max(80),
+  combine_with_product_name: z.string().trim().max(120).optional(),
+  quantity: z.number().finite().positive().max(99).default(1),
+  option_labels: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+  exclude_ingredients: z
+    .array(z.string().trim().min(1).max(40))
+    .max(8)
+    .default([]),
 });
 
 export const chatRequestSchema = z.object({
@@ -43,8 +66,10 @@ export const chatRequestSchema = z.object({
    * Free-text NLU still goes through Gemini.
    */
   deterministic_action: z
-    .enum(['summarize_cart', 'delivery_info'])
+    .enum(['summarize_cart', 'delivery_info', 'complete_pending_config'])
     .optional(),
+  /** Completes a pending combinación / size ask without Gemini. */
+  pending_configuration: pendingConfigurationSchema.optional(),
 });
 
 export type ChatRequestBody = z.infer<typeof chatRequestSchema>;

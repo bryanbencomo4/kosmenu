@@ -14,6 +14,7 @@ export type PublicCheckoutExchangeConfig = {
 function normalizeCurrencyCode(value: unknown) {
   const code = (value ?? '').toString().trim().toUpperCase();
   if (!code || code === 'SIN MONEDA') return 'COP';
+  if (code === 'PCO') return 'COP';
   return code;
 }
 

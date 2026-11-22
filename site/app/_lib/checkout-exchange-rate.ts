@@ -42,6 +42,8 @@ export type CheckoutExchangeConfigInput = {
 export function normalizeCurrencyCode(value: string | null | undefined) {
   const code = (value ?? '').trim().toUpperCase();
   if (!code || code === 'SIN MONEDA') return 'COP';
+  // Legacy / typo alias — never treat PCO as a real ISO currency.
+  if (code === 'PCO') return 'COP';
   return code;
 }
 

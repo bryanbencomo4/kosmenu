@@ -115,7 +115,9 @@ describe('voice first-turn blockers (no Gemini spend)', () => {
     const tool = CHAT_TOOL_DECLARATIONS.find(
       (t) => t.name === 'prepare_cart_line_proposal',
     );
-    expect(tool?.description).toMatch(/aunque otros ítems pedidos no existan/i);
+    expect(tool?.description).toMatch(
+      /UNA sola llamada|combine_with_product_name|por l[ií]nea/i,
+    );
   });
 
   it('STT transcript as first user turn → two size proposals (sim)', () => {

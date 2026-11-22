@@ -205,10 +205,11 @@ export async function POST(
     cartSnapshot: (body.cart_snapshot || []).map((l) => ({
       productId: l.productId,
       quantity: l.quantity,
-      selection: l.selection || {},
+      selection: (l.selection || {}) as import('../_lib/cart-proposals').ChatCartSnapshotLine['selection'],
     })),
     pendingActions: [],
     pendingCards: [],
+    pendingConfiguration: null,
   };
 
   // Local Gemini simulator — zero Google HTTP (Phase 3.1 visual/integration).
@@ -218,6 +219,21 @@ export async function POST(
       commerceId,
       messages,
       cartSnapshot: toolCtx.cartSnapshot,
+      pendingConfiguration: body.pending_configuration
+        ? {
+            product_id: body.pending_configuration.product_id,
+            product_name: body.pending_configuration.product_name || '',
+            combine_with_product_id:
+              body.pending_configuration.combine_with_product_id,
+            combine_with_product_name:
+              body.pending_configuration.combine_with_product_name || '',
+            quantity: body.pending_configuration.quantity,
+            option_labels: body.pending_configuration.option_labels,
+            exclude_ingredients: body.pending_configuration.exclude_ingredients,
+            missing_attribute: 'size',
+            size_choices: [],
+          }
+        : null,
     });
     return json({
       ok: true,
@@ -236,12 +252,71 @@ export async function POST(
       },
       cart_actions: simulated.cartActions,
       product_cards: simulated.productCards,
+      pending_configuration: simulated.pendingConfiguration ?? null,
       category_cards: [],
       order_actions: [],
     });
   }
 
   // Deterministic paths — zero Gemini HTTP (cost control).
+  if (body.deterministic_action === 'complete_pending_config') {
+    const pending = body.pending_configuration;
+    if (!pending) {
+      return publicError(400, 'missing_pending_configuration');
+    }
+    const { prepareCartLineProposal } = await import('../_lib/cart-proposals');
+    const lastText = messages[messages.length - 1]?.text || '';
+    const sizeHint = /\b(grande|normal|mediana|familiar)\b/i.exec(lastText)?.[1];
+    const optionLabels = [
+      ...(pending.option_labels || []),
+      ...(sizeHint ? [sizeHint] : []),
+    ];
+    const result = prepareCartLineProposal(menu, commerceId, {
+      product_id: pending.product_id,
+      product_name: pending.product_name,
+      combine_with_product_id: pending.combine_with_product_id,
+      combine_with_product_name: pending.combine_with_product_name,
+      quantity: pending.quantity || 1,
+      option_labels: optionLabels,
+      exclude_ingredients: pending.exclude_ingredients,
+    });
+    const cartActions =
+      result.status === 'ready' ? [result.action] : [];
+    const productCards =
+      result.status === 'ready'
+        ? [result.action.product_card]
+        : result.status === 'needs_options' && !result.ask_attribute_only
+          ? result.product_card
+            ? [result.product_card]
+            : []
+          : [];
+    return json({
+      ok: true,
+      reply:
+        result.status === 'ready'
+          ? result.message
+          : result.message || 'Necesito un dato más para armar la combinación.',
+      sessionId,
+      model: 'deterministic',
+      commerceId,
+      requestId,
+      skipped_llm: true,
+      usage: {
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls: 1,
+        geminiHttpCalls: 0,
+      },
+      cart_actions: cartActions,
+      product_cards: productCards,
+      pending_configuration:
+        result.status === 'needs_options'
+          ? result.pending_configuration || null
+          : null,
+      category_cards: [],
+      order_actions: [],
+    });
+  }
   if (body.deterministic_action === 'summarize_cart') {
     const result = runDeterministicCartSummary({ toolCtx, requestId });
     return json({
@@ -340,6 +415,7 @@ export async function POST(
       live_budget: liveBudgetPublicSnapshot(),
       cart_actions: result.cartActions,
       product_cards: result.productCards,
+      pending_configuration: toolCtx.pendingConfiguration ?? null,
       category_cards: result.categoryCards,
       // Never create orders from chat in Phase 3.
       order_actions: [],

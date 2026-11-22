@@ -7,12 +7,20 @@ import {
   buildCartLineKey,
   parseProductMenuOptions,
   resolveCartLineUnitPrice,
+  resolveCombinedUnitPrice,
+  validateCustomizationSelection,
   validateOptionGroupSelection,
   type CartLineSelection,
 } from '../../../_lib/menu-product-options';
 import { foldSearchText, fuzzyIncludes } from '../../../_lib/search-text';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
 import { resolveCatalogProduct } from './catalog-search';
+import {
+  buildCombinationSelection,
+  canCombineProducts,
+  combinationDisplayName,
+  type PendingCombinationConfig,
+} from './chat-combination';
 import { formatChatMoney, resolveMenuCurrency } from './chat-currency';
 
 export type ChatCartSnapshotLine = {
@@ -289,6 +297,9 @@ export type PrepareCartLineInput = {
   option_choices?: Array<{ group?: string; option: string }>;
   /** Ingredients to exclude if the product allows it */
   exclude_ingredients?: string[];
+  /** Second half for traditional-menu combinación (one cart line, MAX price). */
+  combine_with_product_id?: string;
+  combine_with_product_name?: string;
   /** Client-supplied absolute price — always rejected */
   client_unit_price?: number;
 };
@@ -299,6 +310,7 @@ export type PrepareCartLineResult =
       action: Extract<ChatCartAction, { type: 'propose_add' }>;
       missing_groups: [];
       message: string;
+      pending_configuration?: undefined;
     }
   | {
       status: 'needs_options';
@@ -310,9 +322,19 @@ export type PrepareCartLineResult =
         choices: string[];
       }>;
       message: string;
+      /** Structured pending op so the client can complete size without re-searching. */
+      pending_configuration?: PendingCombinationConfig | null;
+      /** When true, UI must NOT show a product browse carousel — only attribute chips. */
+      ask_attribute_only?: boolean;
     }
   | {
-      status: 'unavailable' | 'not_found' | 'foreign_product' | 'invalid_options' | 'price_tamper';
+      status:
+        | 'unavailable'
+        | 'not_found'
+        | 'foreign_product'
+        | 'invalid_options'
+        | 'price_tamper'
+        | 'combination_not_allowed';
       message: string;
       product_card?: ChatProductCard;
     };
@@ -361,7 +383,35 @@ export function prepareCartLineProposal(
   const quantity =
     Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.min(99, Math.floor(qtyRaw)) : 1;
 
-  const selection: CartLineSelection = { grupos: {}, exclusionesIds: [] };
+  // Resolve optional combination partner (traditional-menu combinación).
+  let partner: ProductRow | null = null;
+  const wantCombine =
+    Boolean(input.combine_with_product_id?.trim()) ||
+    Boolean(input.combine_with_product_name?.trim());
+  if (wantCombine) {
+    partner =
+      resolveProductWithHints(
+        menu,
+        input.combine_with_product_id,
+        input.combine_with_product_name,
+      )?.product ?? null;
+    if (!partner) {
+      return {
+        status: 'not_found',
+        message: `No encontré la segunda mitad «${input.combine_with_product_name || input.combine_with_product_id}» en este menú.`,
+      };
+    }
+    const allowed = canCombineProducts(product, partner);
+    if (allowed.ok === false) {
+      return {
+        status: 'combination_not_allowed',
+        message: allowed.reason,
+        product_card: buildProductCard(menu, product),
+      };
+    }
+  }
+
+  let selection: CartLineSelection = { grupos: {}, exclusionesIds: [] };
   // option_choices first; then explicit labels; then labels inferred when the
   // product was resolved via an option value (e.g. “Coca-Cola” → refresco).
   const choices: Array<{ group?: string; option: string }> = [
@@ -369,7 +419,9 @@ export function prepareCartLineProposal(
   ];
   for (const option of [
     ...(input.option_labels || []),
-    ...(resolved?.suggested_option_labels || []),
+    // For combinations, do NOT auto-apply option labels from name resolution
+    // of the partner (avoids flavor confusion). Only use primary suggested.
+    ...(!partner ? resolved?.suggested_option_labels || [] : []),
   ]) {
     if (
       choices.some((c) =>
@@ -417,25 +469,70 @@ export function prepareCartLineProposal(
       choices: (g.opciones || []).map((o) => o.nombre),
     }));
   if (missing_groups.length > 0) {
+    const sizeGroup = missing_groups.find((g) =>
+      /tamano|tamaño|size/i.test(g.name),
+    );
+    const pending_configuration: PendingCombinationConfig | null =
+      partner
+        ? {
+            product_id: product.id,
+            product_name: product.nombre || '',
+            combine_with_product_id: partner.id,
+            combine_with_product_name: partner.nombre || '',
+            quantity,
+            option_labels: (input.option_labels || []).slice(),
+            exclude_ingredients: (input.exclude_ingredients || []).slice(),
+            missing_attribute: sizeGroup ? 'size' : 'options',
+            size_choices: sizeGroup?.choices ?? missing_groups[0]?.choices ?? [],
+          }
+        : null;
+    const comboHint = partner
+      ? ` pizza combinada ${product.nombre} + ${partner.nombre}`
+      : ` ${product.nombre}`;
     return {
       status: 'needs_options',
       product_card: buildProductCard(menu, product),
       missing_groups,
-      message: `Falta elegir: ${missing_groups.map((g) => g.name).join(', ')}.`,
+      ask_attribute_only: true,
+      pending_configuration,
+      message: partner
+        ? `¡Dale! ¿Qué tamaño prefieres para tu${comboHint}? ${missing_groups.map((g) => g.choices.join(' o ')).join(' / ')}.`
+        : `Falta elegir: ${missing_groups.map((g) => g.name).join(', ')}.`,
     };
   }
 
-  const issues = validateOptionGroupSelection(product, selection);
+  if (partner) {
+    selection = buildCombinationSelection(product, partner, selection);
+  }
+
+  const issues = partner
+    ? [
+        ...validateCustomizationSelection(product, selection),
+        ...validateCustomizationSelection(
+          partner,
+          selection.combinacion!.seleccion,
+        ),
+      ]
+    : validateOptionGroupSelection(product, selection).map((i) => i.message);
   if (issues.length > 0) {
     return {
       status: 'invalid_options',
-      message: issues.map((i) => i.message).join(' ') || 'Selección inválida.',
+      message: issues.join(' ') || 'Selección inválida.',
       product_card: buildProductCard(menu, product),
     };
   }
 
   const category = categoryFor(menu, product);
-  const unit_price = resolveCartLineUnitPrice(product, category, selection);
+  const partnerCategory = partner ? categoryFor(menu, partner) : null;
+  const unit_price = partner
+    ? resolveCombinedUnitPrice(
+        product,
+        category,
+        selection,
+        partner,
+        partnerCategory,
+      )
+    : resolveCartLineUnitPrice(product, category, selection);
   if (!(unit_price > 0)) {
     return {
       status: 'invalid_options',
@@ -447,7 +544,10 @@ export function prepareCartLineProposal(
   const currency = resolveMenuCurrency(menu);
   const cart_key = buildCartLineKey(product.id, selection);
   const selectedLabels = describeSelection(product, selection);
-  const label = `${quantity}× ${product.nombre}${
+  const displayName = partner
+    ? combinationDisplayName(product, partner)
+    : product.nombre || 'Producto';
+  const label = `${quantity}× ${displayName}${
     selectedLabels.length
       ? ` (${selectedLabels.join(', ')})`
       : choices.length
@@ -461,6 +561,13 @@ export function prepareCartLineProposal(
     selection,
     lineTotal: line_total,
   });
+  if (partner) {
+    product_card.name = displayName;
+    product_card.selected_options = [
+      ...(product_card.selected_options || []),
+      `Mitad 2: ${partner.nombre}`,
+    ];
+  }
   const fingerprint = catalogFingerprint(product);
 
   return {
@@ -511,19 +618,55 @@ export function buildProposeAddFromSelection(params: {
     };
   }
   const qty = Math.min(99, Math.max(1, Math.floor(Number(params.quantity) || 1)));
-  const issues = validateOptionGroupSelection(product, params.selection);
-  if (issues.length) {
+  const partnerId = params.selection.combinacion?.productId;
+  const partner = partnerId
+    ? findProduct(params.menu, partnerId, null)
+    : null;
+  if (params.selection.combinacion && !partner) {
     return {
-      status: 'invalid_options',
-      message: issues.map((i) => i.message).join(' '),
+      status: 'combination_not_allowed',
+      message: 'Esta combinación no está permitida.',
       product_card: buildProductCard(params.menu, product),
     };
   }
-  const unit_price = resolveCartLineUnitPrice(
-    product,
-    categoryFor(params.menu, product),
-    params.selection,
-  );
+  if (partner) {
+    const allowed = canCombineProducts(product, partner);
+    if (allowed.ok === false) {
+      return {
+        status: 'combination_not_allowed',
+        message: allowed.reason,
+        product_card: buildProductCard(params.menu, product),
+      };
+    }
+  }
+  const issues = partner
+    ? [
+        ...validateCustomizationSelection(product, params.selection),
+        ...validateCustomizationSelection(
+          partner,
+          params.selection.combinacion!.seleccion,
+        ),
+      ]
+    : validateOptionGroupSelection(product, params.selection).map(
+        (i) => i.message,
+      );
+  if (issues.length) {
+    return {
+      status: 'invalid_options',
+      message: issues.join(' '),
+      product_card: buildProductCard(params.menu, product),
+    };
+  }
+  const category = categoryFor(params.menu, product);
+  const unit_price = partner
+    ? resolveCombinedUnitPrice(
+        product,
+        category,
+        params.selection,
+        partner,
+        categoryFor(params.menu, partner),
+      )
+    : resolveCartLineUnitPrice(product, category, params.selection);
   if (!(unit_price > 0)) {
     return {
       status: 'invalid_options',
@@ -534,8 +677,11 @@ export function buildProposeAddFromSelection(params: {
   const currency = resolveMenuCurrency(params.menu);
   const cart_key = buildCartLineKey(product.id, params.selection);
   const selectedLabels = describeSelection(product, params.selection);
+  const displayName = partner
+    ? combinationDisplayName(product, partner)
+    : product.nombre || 'Producto';
   const line_total = Math.round(unit_price * qty * 100) / 100;
-  const label = `${qty}× ${product.nombre}${
+  const label = `${qty}× ${displayName}${
     selectedLabels.length ? ` (${selectedLabels.join(', ')})` : ''
   }`;
   const product_card = buildProductCard(params.menu, product, {
@@ -544,6 +690,9 @@ export function buildProposeAddFromSelection(params: {
     selection: params.selection,
     lineTotal: line_total,
   });
+  if (partner) {
+    product_card.name = displayName;
+  }
   return {
     status: 'ready',
     missing_groups: [],

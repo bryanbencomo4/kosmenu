@@ -9,6 +9,12 @@ import {
   summarizeCartSnapshot,
   type ChatCartSnapshotLine,
 } from './cart-proposals';
+import {
+  detectSizeLabel,
+  parseHalfHalfIntent,
+  type PendingCombinationConfig,
+} from './chat-combination';
+import { describeBusinessExchangeRate } from './chat-currency';
 import { getDeliveryConditions } from './delivery-conditions';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
 import { executeChatTool } from './tools';
@@ -38,6 +44,7 @@ export type SimulatedChatResult = {
   geminiHttpCalls: 0;
   cartActions: ChatCartAction[];
   productCards: ChatProductCard[];
+  pendingConfiguration?: PendingCombinationConfig | null;
   skippedLlm: true;
 };
 
@@ -46,6 +53,7 @@ export function runSimulatedChat(params: {
   commerceId: string;
   messages: Array<{ role: 'user' | 'assistant'; text: string }>;
   cartSnapshot?: ChatCartSnapshotLine[];
+  pendingConfiguration?: PendingCombinationConfig | null;
 }): SimulatedChatResult {
   const last =
     [...params.messages].reverse().find((m) => m.role === 'user')?.text || '';
@@ -54,11 +62,14 @@ export function runSimulatedChat(params: {
   const actions: ChatCartAction[] = [];
   const cards: ChatProductCard[] = [];
   let toolCalls = 0;
+  let pendingConfiguration: PendingCombinationConfig | null =
+    params.pendingConfiguration || null;
 
   const pushReady = (input: {
     product_name: string;
     quantity?: number;
     option_labels?: string[];
+    combine_with_product_name?: string;
   }) => {
     toolCalls += 1;
     const r = prepareCartLineProposal(params.menu, params.commerceId, input);
@@ -68,11 +79,138 @@ export function runSimulatedChat(params: {
       return r;
     }
     if (r.status === 'needs_options') {
-      cards.push(r.product_card);
+      if (!r.ask_attribute_only) cards.push(r.product_card);
       return r;
     }
     return r;
   };
+
+  // Complete pending combinación when the user only answers size.
+  if (pendingConfiguration && detectSizeLabel(last)) {
+    const size = detectSizeLabel(last)!;
+    const r = pushReady({
+      product_name: pendingConfiguration.product_name,
+      option_labels: [...pendingConfiguration.option_labels, size],
+      combine_with_product_name:
+        pendingConfiguration.combine_with_product_name,
+    });
+    // Prefer id-based prepare for accuracy
+    toolCalls += 1;
+    const precise = prepareCartLineProposal(params.menu, params.commerceId, {
+      product_id: pendingConfiguration.product_id,
+      combine_with_product_id: pendingConfiguration.combine_with_product_id,
+      quantity: pendingConfiguration.quantity,
+      option_labels: [...pendingConfiguration.option_labels, size],
+      exclude_ingredients: pendingConfiguration.exclude_ingredients,
+    });
+    if (precise.status === 'ready') {
+      return {
+        text: precise.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: [precise.action],
+        productCards: [precise.action.product_card],
+        pendingConfiguration: null,
+        skippedLlm: true,
+      };
+    }
+    void r;
+  }
+
+  const halfIntent = parseHalfHalfIntent(last);
+  if (halfIntent.kind === 'combine') {
+    toolCalls += 1;
+    const r = prepareCartLineProposal(params.menu, params.commerceId, {
+      product_name: halfIntent.firstName,
+      combine_with_product_name: halfIntent.secondName,
+      quantity: halfIntent.quantity,
+      option_labels: halfIntent.sizeLabel ? [halfIntent.sizeLabel] : [],
+      exclude_ingredients: halfIntent.excludeIngredients,
+    });
+    if (r.status === 'ready') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: [r.action],
+        productCards: [r.action.product_card],
+        pendingConfiguration: null,
+        skippedLlm: true,
+      };
+    }
+    if (r.status === 'needs_options') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: [],
+        productCards: [],
+        pendingConfiguration: r.pending_configuration || null,
+        skippedLlm: true,
+      };
+    }
+    return {
+      text: r.message,
+      model: 'simulated',
+      tokensInput: 0,
+      tokensOutput: 0,
+      toolCalls,
+      geminiHttpCalls: 0,
+      cartActions: [],
+      productCards: [],
+      pendingConfiguration: null,
+      skippedLlm: true,
+    };
+  }
+
+  if (
+    /tasa|cambio|a como|a c[oó]mo|dolar|d[oó]lar|cu[aá]ntos pesos|aceptan d[oó]lares|pagar en pesos|equivalente/.test(
+      q,
+    )
+  ) {
+    toolCalls += 1;
+    const amountMatch = last.match(/(\d+(?:[.,]\d+)?)/);
+    const amount = amountMatch
+      ? Number(amountMatch[1]!.replace(',', '.'))
+      : undefined;
+    const fx = describeBusinessExchangeRate(params.menu, {
+      quoteCurrency: 'USD',
+      amount: Number.isFinite(amount) ? amount : undefined,
+      fromCurrency: 'USD',
+    });
+    return {
+      text: fx.ok
+        ? [
+            `Claro. ${fx.rate_label}.`,
+            fx.amount_from_label && fx.amount_to_label
+              ? `${fx.amount_from_label} equivalen a ${fx.amount_to_label} (referencial).`
+              : null,
+            fx.note,
+          ]
+            .filter(Boolean)
+            .join(' ')
+        : fx.ok === false
+          ? fx.error
+          : 'No pude consultar la tasa.',
+      model: 'simulated',
+      tokensInput: 0,
+      tokensOutput: 0,
+      toolCalls,
+      geminiHttpCalls: 0,
+      cartActions: [],
+      productCards: [],
+      skippedLlm: true,
+    };
+  }
 
   // Scenario A: two Hawaianas with sizes (also covers voice STT compound orders
   // that mention an unavailable drink like Coca-Cola — propose pizzas first).

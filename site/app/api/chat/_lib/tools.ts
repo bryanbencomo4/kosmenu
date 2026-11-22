@@ -35,10 +35,12 @@ import {
 import { buildWhatsAppHref } from '../../../_lib/whatsapp-href';
 import {
   convertMenuPrice,
+  describeBusinessExchangeRate,
   formatChatMoney,
   listCheckoutCurrencies,
   resolveMenuCurrency,
 } from './chat-currency';
+import type { PendingCombinationConfig } from './chat-combination';
 import { getDeliveryConditions } from './delivery-conditions';
 
 type ProductRow = {
@@ -67,6 +69,8 @@ export type ChatToolContext = {
   /** Accumulated validated proposals for this turn (server → UI). */
   pendingActions?: ChatCartAction[];
   pendingCards?: ChatProductCard[];
+  /** Pending combinación / size ask — client completes without re-search. */
+  pendingConfiguration?: PendingCombinationConfig | null;
   /** Categories from get_categories — UI renders a carousel, not a plain list. */
   pendingCategories?: Array<{
     id: string;
@@ -239,7 +243,7 @@ export const CHAT_TOOL_DECLARATIONS = [
   {
     name: 'prepare_cart_line_proposal',
     description:
-      'Prepara una propuesta VALIDADA para agregar al carrito. El servidor calcula precio y valida opciones. Requiere confirmación del cliente en la UI. No crea pedidos. En pedidos compuestos: llámala UNA vez por cada línea disponible aunque otros ítems pedidos no existan (ej. dos tamaños de pizza aunque falte una bebida). No esperes a resolver ítems faltantes antes de proponer lo disponible.',
+      'Prepara UNA propuesta VALIDADA para el carrito (precio servidor). Requiere confirmación UI. No crea pedidos. Pedidos compuestos independientes: una llamada por línea. Mitad/mitad o combinación del menú tradicional: UNA sola llamada con product_name=primera mitad + combine_with_product_name=segunda mitad (NUNCA dos propose_add). Si falta tamaño, pregunta Normal/Grande sin volver a buscar productos.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -255,6 +259,38 @@ export const CHAT_TOOL_DECLARATIONS = [
           type: 'ARRAY',
           items: { type: 'STRING' },
           description: 'Ingredientes a quitar si el producto lo permite',
+        },
+        combine_with_product_id: {
+          type: 'STRING',
+          description:
+            'Id de la segunda mitad (combinación del menú). Usa esto O combine_with_product_name.',
+        },
+        combine_with_product_name: {
+          type: 'STRING',
+          description:
+            'Nombre de la segunda mitad (ej. Campesina). Solo si el menú permite combinación entre ambos.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_exchange_rate',
+    description:
+      'Consulta la tasa de cambio REAL configurada para este restaurante (checkout). Úsala si preguntan “a cómo el dólar”, “tasa de cambio”, “cuántos pesos son N dólares”. NUNCA inventes ni uses cotizaciones públicas genéricas ajenas al negocio.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        quote_currency: {
+          type: 'STRING',
+          description: 'Moneda cotizada (ej. USD). Por defecto USD si el menú es COP.',
+        },
+        amount: {
+          type: 'NUMBER',
+          description: 'Monto opcional a convertir (en quote_currency o menu currency según from_currency).',
+        },
+        from_currency: {
+          type: 'STRING',
+          description: 'Moneda del amount (default: quote_currency).',
         },
       },
     },
@@ -784,6 +820,14 @@ export function executeChatTool(
       );
     }
 
+    case 'get_exchange_rate': {
+      return describeBusinessExchangeRate(menu, {
+        quoteCurrency: String(args.quote_currency ?? '').trim() || undefined,
+        amount: Number(args.amount),
+        fromCurrency: String(args.from_currency ?? '').trim() || undefined,
+      });
+    }
+
     case 'prepare_cart_line_proposal': {
       const result = prepareCartLineProposal(menu, ctx.commerceId, {
         product_id: String(args.product_id ?? '').trim() || undefined,
@@ -795,6 +839,10 @@ export function executeChatTool(
         exclude_ingredients: Array.isArray(args.exclude_ingredients)
           ? args.exclude_ingredients.map((x) => String(x))
           : undefined,
+        combine_with_product_id:
+          String(args.combine_with_product_id ?? '').trim() || undefined,
+        combine_with_product_name:
+          String(args.combine_with_product_name ?? '').trim() || undefined,
         client_unit_price:
           typeof args.unit_price === 'number' ? args.unit_price : undefined,
       });
@@ -803,6 +851,12 @@ export function executeChatTool(
         ctx.pendingActions.push(result.action);
         ctx.pendingCards = ctx.pendingCards || [];
         ctx.pendingCards.push(result.action.product_card);
+      } else if (
+        result.status === 'needs_options' &&
+        result.ask_attribute_only
+      ) {
+        // Attribute question only — do NOT attach browse product cards.
+        ctx.pendingConfiguration = result.pending_configuration || null;
       } else if (result.product_card) {
         ctx.pendingCards = ctx.pendingCards || [];
         ctx.pendingCards.push(result.product_card);
