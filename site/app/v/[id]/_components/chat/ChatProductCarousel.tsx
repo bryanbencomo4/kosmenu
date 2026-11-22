@@ -11,6 +11,7 @@ type ChatProductCarouselProps = {
   products: ChatProductCardData[];
   onConfigure?: (productId: string) => void;
   onAddSimple?: (productId: string) => void;
+  onOpenImage?: (src: string, alt: string) => void;
   onSeeAll?: () => void;
   seeAllLabel?: string;
 };
@@ -22,10 +23,12 @@ export function ChatProductCarouselCard({
   card,
   onConfigure,
   onAddSimple,
+  onOpenImage,
 }: {
   card: ChatProductCardData;
   onConfigure?: (productId: string) => void;
   onAddSimple?: (productId: string) => void;
+  onOpenImage?: (src: string, alt: string) => void;
 }) {
   const canConfigure =
     card.available && card.requires_configuration && typeof onConfigure === 'function';
@@ -50,7 +53,16 @@ export function ChatProductCarouselCard({
         card.available ? '' : 'opacity-70'
       }`}
     >
-      <div className="relative h-[110px] w-full shrink-0 bg-[var(--chat-input)]">
+      <button
+        type="button"
+        className="relative h-[110px] w-full shrink-0 bg-[var(--chat-input)]"
+        disabled={!card.image_url || !onOpenImage}
+        onClick={() => {
+          if (card.image_url) onOpenImage?.(card.image_url, card.name);
+        }}
+        aria-label={card.image_url ? `Ver foto de ${card.name}` : undefined}
+        data-chat-product-image="1"
+      >
         {card.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -73,7 +85,7 @@ export function ChatProductCarouselCard({
             No disponible
           </span>
         ) : null}
-      </div>
+      </button>
       <div className="flex min-h-0 flex-1 flex-col p-2">
         <h3 className="line-clamp-1 text-[13px] font-semibold leading-snug text-[var(--chat-text)]">
           {card.name}
@@ -118,6 +130,7 @@ export function ChatProductCarousel({
   products,
   onConfigure,
   onAddSimple,
+  onOpenImage,
   onSeeAll,
   seeAllLabel = 'Ver todos los productos',
 }: ChatProductCarouselProps) {
@@ -132,6 +145,7 @@ export function ChatProductCarousel({
             card={card}
             onConfigure={onConfigure}
             onAddSimple={onAddSimple}
+            onOpenImage={onOpenImage}
           />
         ))}
         {canSeeAll ? (

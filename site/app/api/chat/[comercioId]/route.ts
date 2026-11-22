@@ -309,7 +309,7 @@ export async function POST(
       config,
       toolCtx,
       businessName: String(comercio.nombre || 'el restaurante'),
-      currency: comercio.moneda || 'USD',
+      currency: (comercio.moneda || 'COP').toString().trim().toUpperCase() || 'COP',
       messages,
       requestId,
     });

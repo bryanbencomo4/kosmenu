@@ -9,6 +9,8 @@ type ChatProductCardProps = {
   card: ChatProductCardData;
   onConfigure?: (productId: string) => void;
   onAddSimple?: (productId: string) => void;
+  /** Tap product photo → full-screen viewer. */
+  onOpenImage?: (src: string, alt: string) => void;
   /** Skip outer chrome when embedded in a proposal card. */
   bare?: boolean;
 };
@@ -17,6 +19,7 @@ export function ChatProductCard({
   card,
   onConfigure,
   onAddSimple,
+  onOpenImage,
   bare = false,
 }: ChatProductCardProps) {
   const showAdd =
@@ -43,7 +46,16 @@ export function ChatProductCard({
       data-chat-product-card={card.product_id}
     >
       <div className="flex gap-2.5 p-2">
-        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-[var(--chat-input)]">
+        <button
+          type="button"
+          className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-[var(--chat-input)]"
+          disabled={!card.image_url || !onOpenImage}
+          onClick={() => {
+            if (card.image_url) onOpenImage?.(card.image_url, card.name);
+          }}
+          aria-label={card.image_url ? `Ver foto de ${card.name}` : undefined}
+          data-chat-product-image="1"
+        >
           {card.image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -60,7 +72,7 @@ export function ChatProductCard({
               {(card.name || '?').slice(0, 1).toUpperCase()}
             </div>
           )}
-        </div>
+        </button>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[14px] font-semibold leading-snug text-[var(--chat-text)]">
             {card.name}

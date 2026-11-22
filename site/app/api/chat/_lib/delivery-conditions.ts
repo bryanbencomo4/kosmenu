@@ -42,7 +42,7 @@ export type DeliveryConditionsResult = {
 
 export function getDeliveryConditions(menu: LoadedPublicMenu): DeliveryConditionsResult {
   const comercio = menu.comercio as Record<string, unknown>;
-  const menuCurrency = String(comercio.moneda || 'USD').trim() || 'USD';
+  const menuCurrency = String(comercio.moneda || 'COP').trim().toUpperCase() || 'COP';
   const branding = menu.comercioRow?.branding_ia ?? null;
   const inicio =
     (branding as { config_negocio?: { inicio_menu?: Record<string, boolean> } } | null)

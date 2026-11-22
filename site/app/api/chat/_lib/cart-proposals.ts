@@ -12,6 +12,7 @@ import {
 } from '../../../_lib/menu-product-options';
 import { fuzzyIncludes } from '../../../_lib/search-text';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
+import { formatChatMoney, resolveMenuCurrency } from './chat-currency';
 
 export type ChatCartSnapshotLine = {
   productId: string;
@@ -106,8 +107,7 @@ function norm(s: string) {
 }
 
 function moneyLabel(amount: number, currency: string) {
-  const n = Math.round(Math.max(0, amount) * 100) / 100;
-  return `${n} ${(currency || 'USD').trim() || 'USD'}`;
+  return formatChatMoney(amount, currency);
 }
 
 export function catalogFingerprint(product: {
@@ -233,7 +233,7 @@ export function buildProductCard(
     lineTotal?: number | null;
   },
 ): ChatProductCard {
-  const currency = (menu.comercio as { moneda?: string })?.moneda || 'USD';
+  const currency = resolveMenuCurrency(menu);
   const base = Number(product.precio);
   const unit = extras?.unitPrice ?? (Number.isFinite(base) ? base : null);
   const qty = extras?.quantity && extras.quantity > 0 ? extras.quantity : 1;
@@ -418,7 +418,7 @@ export function prepareCartLineProposal(
     };
   }
 
-  const currency = (menu.comercio as { moneda?: string })?.moneda || 'USD';
+  const currency = resolveMenuCurrency(menu);
   const cart_key = buildCartLineKey(product.id, selection);
   const selectedLabels = describeSelection(product, selection);
   const label = `${quantity}× ${product.nombre}${
@@ -505,7 +505,7 @@ export function buildProposeAddFromSelection(params: {
       product_card: buildProductCard(params.menu, product),
     };
   }
-  const currency = (params.menu.comercio as { moneda?: string })?.moneda || 'USD';
+  const currency = resolveMenuCurrency(params.menu);
   const cart_key = buildCartLineKey(product.id, params.selection);
   const selectedLabels = describeSelection(product, params.selection);
   const line_total = Math.round(unit_price * qty * 100) / 100;
@@ -584,7 +584,7 @@ export function revalidateProposeAdd(
   // Ignore any client-claimed unit_price — server wins (Fase 0).
   const quantity = Math.min(99, Math.max(1, Math.floor(action.quantity || 1)));
   const line_total = Math.round(unit_price * quantity * 100) / 100;
-  const currency = (menu.comercio as { moneda?: string })?.moneda || 'USD';
+  const currency = resolveMenuCurrency(menu);
   const cart_key = buildCartLineKey(product.id, action.selection);
   return {
     ok: true,
@@ -627,7 +627,7 @@ export function summarizeCartSnapshot(
   }>;
   errors: string[];
 } {
-  const currency = (menu.comercio as { moneda?: string })?.moneda || 'USD';
+  const currency = resolveMenuCurrency(menu);
   if (menu.resolvedComercioId !== commerceId) {
     return {
       ok: false,

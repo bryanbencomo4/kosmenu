@@ -9,7 +9,7 @@ export function buildChatSystemPrompt(params: {
   catalogDigest?: string | null;
 }): string {
   const name = params.businessName.trim() || 'este restaurante';
-  const currency = (params.currency || 'USD').trim() || 'USD';
+  const currency = (params.currency || 'COP').trim().toUpperCase() || 'COP';
   const digest = (params.catalogDigest || '').trim();
   return [
     `Eres el asistente virtual de ventas de ${name}.`,
@@ -26,7 +26,8 @@ export function buildChatSystemPrompt(params: {
     'Si el cliente pregunta por lo más barato/económico/menor precio: llama SIEMPRE find_cheapest_products (con category si aplica). No compares precios de memoria ni del resumen.',
     'Si pide categorías / menú / “qué hay”: llama get_categories. La UI muestra el carrusel; responde SOLO una frase corta (ej. “Estas son nuestras categorías”) SIN listar nombres ni precios en texto. Formato estilo WhatsApp: *negrita* _cursiva_ (un solo asterisco/guion bajo), no uses **markdown**.',
     'Distingue price_base (lista) de price_min (configuración más barata válida) y price_max (con tamaños/extras).',
-    `Los precios del catálogo están en ${currency} salvo que la herramienta indique otra cosa.`,
+    `Los precios del catálogo están en ${currency}. Usa SIEMPRE esa moneda al citar precios (nunca digas USD si el menú es ${currency}).`,
+    'Si preguntan el precio en otra moneda (dólares/USD, bolívares/VES, euros…): llama convert_menu_price con target_currency y el producto o monto. NUNCA inventes tasas ni redondeos de memoria; usa label_menu + label_target de la herramienta y aclara que el checkout confirma.',
     'Delivery / recogida: llama get_available_fulfillment_methods y, si hay delivery, get_delivery_conditions. Explica con claridad que puede pedir *delivery* (si está activo) o *pasar a recoger / para llevar*. No asumas solo una opción.',
     'Delivery: usa SIEMPRE get_delivery_conditions. Si requires_customer_address=true o can_quote_exact_fee_now=false, NO inventes un monto exacto; explica rangos/zonas y que el checkout confirma con la dirección.',
     'Si el cliente comparte coordenadas/ubicación (texto o pin), confírmalo como punto de *delivery*, pide cualquier dato faltante breve, y llama propose_open_checkout cuando corresponda. No inventes distancia ni tarifa.',

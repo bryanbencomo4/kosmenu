@@ -1,6 +1,7 @@
 /**
  * Client-side chat history for Phase 2 — sessionStorage only, keyed by commerce.
  */
+import { isPersistedMediaUrl } from '../v/[id]/_components/chat/chat-media-persist';
 import type { ChatMessage } from '../v/[id]/_components/chat/chat-types';
 
 const PREFIX = 'elmenuxfa:chat-v1:';
@@ -95,12 +96,16 @@ export function saveChatHistory(
       // rebuilt from the live catalog, so they are intentionally not persisted.
       replyTo: m.replyTo ?? undefined,
       sticker: m.sticker ?? undefined,
-      // GPS share (serializable); blob media URLs are session-only and omitted.
+      // GPS share (serializable).
       location: m.location
         ? {
             lat: m.location.lat,
             lng: m.location.lng,
             label: m.location.label,
+            kind: m.location.kind,
+            address: m.location.address,
+            mapsUrl: m.location.mapsUrl,
+            directionsUrl: m.location.directionsUrl,
           }
         : null,
       attachments: (m.attachments || [])
@@ -111,8 +116,8 @@ export function saveChatHistory(
           name: a.name,
           mime: a.mime,
           size: a.size,
-          // blob: URLs die on remount — keep analysis text only.
-          url: '',
+          // Persist data:/https images; blob: URLs die on remount.
+          url: isPersistedMediaUrl(a.url) ? a.url : '',
           analysis: a.analysis ?? null,
         })),
       // voiceUrl is a blob: URL — do not persist across reloads.

@@ -10,6 +10,7 @@ type ChatCartActionCardProps = {
   onConfirm: (action: ChatCartActionData) => void;
   onDismiss?: (action: ChatCartActionData) => void;
   onConfigure?: (productId: string) => void;
+  onOpenImage?: (src: string, alt: string) => void;
 };
 
 export function ChatCartActionCard({
@@ -19,6 +20,7 @@ export function ChatCartActionCard({
   onConfirm,
   onDismiss,
   onConfigure,
+  onOpenImage,
 }: ChatCartActionCardProps) {
   if (action.type === 'propose_add') {
     const opts = action.product_card.selected_options?.join(' · ');
@@ -36,6 +38,7 @@ export function ChatCartActionCard({
             requires_configuration: false,
           }}
           bare
+          onOpenImage={onOpenImage}
         />
         <div className="border-t border-[var(--chat-card-border)] px-2.5 py-2">
           <p className="text-[12px] leading-snug text-[var(--chat-text-muted)]">

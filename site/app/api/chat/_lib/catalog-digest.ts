@@ -7,6 +7,7 @@ import {
   getProductMaximumPrice,
   getProductMinimumPrice,
 } from '../../../_lib/menu-product-options';
+import { formatChatMoney, resolveMenuCurrency } from './chat-currency';
 
 type ProductRow = {
   id: string;
@@ -27,8 +28,7 @@ const DIGEST_MAX_CHARS = 1200;
 export function buildCatalogDigest(menu: LoadedPublicMenu): string {
   const products = (menu.productos as ProductRow[]) || [];
   const categories = (menu.categorias as CategoryRow[]) || [];
-  const currency =
-    (menu.comercio as { moneda?: string } | undefined)?.moneda || 'USD';
+  const currency = resolveMenuCurrency(menu);
 
   const available = products.filter((p) => p.disponible !== false);
   const priced = available
@@ -55,7 +55,7 @@ export function buildCatalogDigest(menu: LoadedPublicMenu): string {
         ? `${p.price_min}–${p.price_max}`
         : String(p.price_min);
     const cat = p.category ? ` [${p.category}]` : '';
-    return `- ${p.name}${cat}: desde ${range} ${currency} (base ${p.base_price})`;
+    return `- ${p.name}${cat}: desde ${formatChatMoney(p.price_min, currency)} (base ${formatChatMoney(p.base_price, currency)})`;
   });
 
   const text = [

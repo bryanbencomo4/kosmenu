@@ -30,8 +30,15 @@ import {
   type ChatFilePayload,
   type ChatVoicePayload,
 } from './ChatComposer';
+import { ChatBusinessProfileSheet } from './ChatBusinessProfileSheet';
 import { ChatCatalogSheet } from './ChatCatalogSheet';
+import { buildDeliveryLocationReply } from './chat-delivery-quote';
 import { ChatHeader } from './ChatHeader';
+import { fileToPersistedDataUrl } from './chat-media-persist';
+import {
+  ChatMediaLightbox,
+  type ChatMediaLightboxState,
+} from './ChatMediaLightbox';
 import { ChatMessageList } from './ChatMessageList';
 import {
   ChatPhoneActionSheet,
@@ -42,6 +49,7 @@ import {
   buildSuggestedReplies,
   type ChatSuggestedChip,
 } from './ChatSuggestedReplies';
+import type { DeliveryQuote } from '../../../../_lib/delivery-config';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
   buildFulfillmentReplyText,
@@ -152,6 +160,14 @@ type ChatAssistantViewProps = {
    * Parent should set delivery mode/point and open checkout when ready.
    */
   onShareLocationForDelivery?: (location: ChatSharedLocation) => void;
+  /** Quote delivery for a shared GPS pin (client-side zones/fees). */
+  onQuoteDeliveryAt?: (location: ChatSharedLocation) => {
+    supportsDelivery: boolean;
+    pickupAvailable?: boolean;
+    quote: DeliveryQuote | null;
+    feeLabel: string | null;
+    currency?: string | null;
+  };
   onApplyCartAction?: (
     action: ChatCartActionData,
   ) => boolean | 'stale' | void;
@@ -330,6 +346,7 @@ export function ChatAssistantView({
   onOpenCart,
   onOpenCheckout,
   onShareLocationForDelivery,
+  onQuoteDeliveryAt,
   onApplyCartAction,
   onConfigureProduct,
   onAddSimpleProduct,
@@ -386,6 +403,9 @@ export function ChatAssistantView({
   });
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [phoneAction, setPhoneAction] = useState<ChatPhoneAction | null>(null);
+  const [mediaLightbox, setMediaLightbox] =
+    useState<ChatMediaLightboxState>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [catalogSheetOpen, setCatalogSheetOpen] = useState(false);
   const [catalogSheetCategoryId, setCatalogSheetCategoryId] = useState<
     string | null
@@ -1444,49 +1464,120 @@ export function ChatAssistantView({
     async (payload: ChatFilePayload) => {
       if (isTyping) return;
       setErrorText(null);
-      let analysis: string | null = null;
-      try {
-        const form = new FormData();
-        form.set('kind', payload.kind === 'image' ? 'image' : 'file');
-        form.set('file', payload.file, payload.file.name);
-        const res = await fetch(
-          `/api/chat/${encodeURIComponent(comercioId)}/media`,
-          { method: 'POST', body: form },
+
+      // Images in chat are not payment proofs — steer the customer to checkout.
+      if (payload.kind === 'image') {
+        let persistedUrl = payload.url;
+        try {
+          persistedUrl = await fileToPersistedDataUrl(payload.file);
+          if (payload.url.startsWith('blob:')) {
+            try {
+              URL.revokeObjectURL(payload.url);
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch {
+          persistedUrl = payload.url;
+        }
+        const label = `📷 ${payload.file.name || 'Imagen'}`;
+        const attachment: ChatAttachment = {
+          id: `file-${Date.now()}`,
+          kind: 'image',
+          name: payload.file.name || label,
+          mime: payload.file.type || 'image/jpeg',
+          size: payload.file.size,
+          url: persistedUrl,
+          analysis: null,
+        };
+        const reply = replyToRef.current;
+        setReplyTo(null);
+        const userMsg = createMessage('user', label, {
+          replyTo: reply,
+          deliveryStatus: 'sent',
+          attachments: [attachment],
+        });
+        setIsTyping(true);
+        const withUser = [...messages, userMsg];
+        setMessages(withUser);
+        saveChatHistory(comercioId, withUser);
+        await sleep(humanLocalReplyMs());
+        const notice = createMessage(
+          'assistant',
+          'Si es un *comprobante de pago*, adjúntalo en el *checkout* al confirmar el pedido (ahí queda registrado para el local). Desde el chat no procesamos comprobantes.',
+          cartCount > 0 && onOpenCheckout
+            ? {
+                cartActions: [
+                  {
+                    type: 'open_checkout',
+                    requires_confirmation: true,
+                    proposal_id: `checkout_proof_${Date.now().toString(36)}`,
+                    catalog_fingerprint: null,
+                    label: 'Ir al checkout',
+                  },
+                ],
+              }
+            : undefined,
         );
-        const data = (await res.json().catch(() => null)) as {
-          analysis?: string | null;
-        } | null;
-        analysis = data?.analysis?.trim() || null;
-      } catch {
-        analysis = null;
+        const next = [...markLatestUserMessage(withUser, 'read'), notice];
+        setMessages(next);
+        saveChatHistory(comercioId, next);
+        playAssistantReceivedOnce(notice);
+        setIsTyping(false);
+        return;
       }
 
-      const label =
-        payload.kind === 'image'
-          ? `📷 ${payload.file.name || 'Imagen'}`
-          : `📎 ${payload.file.name || 'Archivo'}`;
+      const label = `📎 ${payload.file.name || 'Archivo'}`;
       const attachment: ChatAttachment = {
         id: `file-${Date.now()}`,
-        kind: payload.kind,
+        kind: 'file',
         name: payload.file.name || label,
         mime: payload.file.type || 'application/octet-stream',
         size: payload.file.size,
         url: payload.url,
-        analysis,
+        analysis: null,
       };
-      const userText = analysis || label;
       const reply = replyToRef.current;
       setReplyTo(null);
-      const userMsg = createMessage('user', userText, {
+      const userMsg = createMessage('user', label, {
         replyTo: reply,
         deliveryStatus: 'sent',
         attachments: [attachment],
       });
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
-      await runAssistantTurn(userText, nextMessages);
+      setIsTyping(true);
+      const withUser = [...messages, userMsg];
+      setMessages(withUser);
+      await sleep(humanLocalReplyMs());
+      const notice = createMessage(
+        'assistant',
+        'Recibí el archivo. Si es un *comprobante de pago*, súbelo en el *checkout* al pagar para que el restaurante lo vea con el pedido.',
+        cartCount > 0 && onOpenCheckout
+          ? {
+              cartActions: [
+                {
+                  type: 'open_checkout',
+                  requires_confirmation: true,
+                  proposal_id: `checkout_file_${Date.now().toString(36)}`,
+                  catalog_fingerprint: null,
+                  label: 'Ir al checkout',
+                },
+              ],
+            }
+          : undefined,
+      );
+      const next = [...markLatestUserMessage(withUser, 'read'), notice];
+      setMessages(next);
+      playAssistantReceivedOnce(notice);
+      setIsTyping(false);
     },
-    [isTyping, messages, runAssistantTurn, comercioId],
+    [
+      isTyping,
+      messages,
+      comercioId,
+      cartCount,
+      onOpenCheckout,
+      playAssistantReceivedOnce,
+    ],
   );
 
   /** Pull-to-refresh: re-attach welcome categories from the live catalog. */
@@ -1547,27 +1638,53 @@ export function ChatAssistantView({
           },
         },
       );
-      const nextMessages = [...messages, userMsg];
-      // Persist before parent may unmount this view (menu/checkout handoff).
-      setMessages(nextMessages);
-      saveChatHistory(comercioId, nextMessages);
-      await runAssistantTurn(
-        [
-          'TIPO: ubicacion_delivery',
-          `RESUMEN: El cliente compartió su GPS para delivery (${location.lat}, ${location.lng}).`,
-          'DETALLES: Usar estas coordenadas en el checkout de delivery. Confirma, explica que también puede recoger en el local si aplica, y propone abrir checkout. No inventes tarifa.',
-        ].join('\n'),
-        nextMessages,
-      );
-      // Open checkout after the turn so reply + receipts are saved while mounted.
-      onShareLocationForDelivery?.(location);
+      const withUser = [...messages, userMsg];
+      setMessages(withUser);
+      saveChatHistory(comercioId, withUser);
+
+      const quoted = onQuoteDeliveryAt?.(location);
+      const result = buildDeliveryLocationReply({
+        supportsDelivery: quoted?.supportsDelivery ?? false,
+        pickupAvailable: quoted?.pickupAvailable,
+        quote: quoted?.quote ?? null,
+        feeLabel: quoted?.feeLabel ?? null,
+        currency: quoted?.currency ?? null,
+      });
+
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      const assistantMsg = createMessage('assistant', result.message, {
+        cartActions:
+          result.openCheckout && onOpenCheckout
+            ? [
+                {
+                  type: 'open_checkout',
+                  requires_confirmation: true,
+                  proposal_id: `checkout_del_${Date.now().toString(36)}`,
+                  catalog_fingerprint: null,
+                  label: 'Continuar al checkout',
+                },
+              ]
+            : undefined,
+      });
+      const next = [...markLatestUserMessage(withUser, 'read'), assistantMsg];
+      setMessages(next);
+      saveChatHistory(comercioId, next);
+      playAssistantReceivedOnce(assistantMsg);
+      setIsTyping(false);
+
+      if (result.openCheckout) {
+        onShareLocationForDelivery?.(location);
+      }
     },
     [
       isTyping,
       messages,
-      runAssistantTurn,
+      onQuoteDeliveryAt,
       onShareLocationForDelivery,
+      onOpenCheckout,
       comercioId,
+      playAssistantReceivedOnce,
     ],
   );
 
@@ -1590,6 +1707,11 @@ export function ChatAssistantView({
     },
     [],
   );
+
+  const openImage = useCallback((src: string, alt: string) => {
+    if (!src) return;
+    setMediaLightbox({ src, alt });
+  }, []);
 
   return (
     <section
@@ -1646,6 +1768,10 @@ export function ChatAssistantView({
           setChatSoundsEnabled(next);
           setSoundsEnabled(next);
         }}
+        onOpenAvatar={
+          logoUrl ? () => openImage(logoUrl, businessName) : undefined
+        }
+        onOpenProfile={() => setProfileOpen(true)}
       />
 
       {!live &&
@@ -1680,6 +1806,7 @@ export function ChatAssistantView({
         onSelectCategory={catalog ? onSelectCategory : undefined}
         onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
         onOpenCheckout={onOpenCheckout}
+        onOpenImage={openImage}
         onRefresh={refreshConversation}
       />
 
@@ -1729,6 +1856,30 @@ export function ChatAssistantView({
       <ChatPhoneActionSheet
         phone={phoneAction}
         onClose={() => setPhoneAction(null)}
+      />
+
+      <ChatBusinessProfileSheet
+        open={profileOpen}
+        profile={{
+          name: businessName,
+          logoUrl,
+          initialLetter,
+          address: businessLocation?.address ?? null,
+          whatsappUrl,
+          whatsappDisplay,
+          location: businessLocation,
+          hours: businessHours,
+        }}
+        onClose={() => setProfileOpen(false)}
+        onOpenAvatar={(src, alt) => {
+          setProfileOpen(false);
+          openImage(src, alt);
+        }}
+      />
+
+      <ChatMediaLightbox
+        media={mediaLightbox}
+        onClose={() => setMediaLightbox(null)}
       />
     </section>
   );

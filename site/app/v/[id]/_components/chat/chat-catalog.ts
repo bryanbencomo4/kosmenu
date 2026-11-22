@@ -23,8 +23,27 @@ export type ChatCatalogSnapshot = {
 export const CHAT_CATALOG_PAGE_SIZE = 24;
 
 function moneyLabel(amount: number, currency: string) {
-  const n = Math.round(Math.max(0, amount) * 100) / 100;
-  return `${n} ${(currency || 'USD').trim() || 'USD'}`;
+  const safe = Number.isFinite(amount) ? amount : 0;
+  const code = (currency || 'COP').trim().toUpperCase() || 'COP';
+  if (code === 'VES') {
+    return `Bs ${new Intl.NumberFormat('es-VE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(safe)}`;
+  }
+  try {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: code === 'COP' || code === 'JPY' ? 0 : 2,
+    }).format(safe);
+  } catch {
+    const n =
+      code === 'COP' || code === 'JPY'
+        ? Math.round(safe)
+        : Math.round(safe * 100) / 100;
+    return `${n} ${code}`;
+  }
 }
 
 /** Lowercase + strip diacritics for forgiving search / heuristics. */

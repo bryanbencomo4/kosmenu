@@ -205,6 +205,8 @@ type ChatMessageBubbleProps = {
   onSeeAllCatalog?: (categoryId: string | null) => void;
   /** CTA under payment-methods card. */
   onOpenCheckout?: () => void;
+  /** Full-screen image viewer (product / attachment / avatar). */
+  onOpenImage?: (src: string, alt: string) => void;
 };
 
 function formatChatTime(ts: number) {
@@ -241,6 +243,7 @@ export function ChatMessageBubble({
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
+  onOpenImage,
 }: ChatMessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -272,7 +275,7 @@ export function ChatMessageBubble({
             key={`${message.id}-${card.product_id}`}
             className="w-full max-w-[min(100%,20.5rem)]"
           >
-            <ChatProductCard card={card} />
+            <ChatProductCard card={card} onOpenImage={onOpenImage} />
           </div>
         ))}
       </div>
@@ -429,22 +432,32 @@ export function ChatMessageBubble({
           ) : null}
           {mediaAttachments.map((att) =>
             att.kind === 'image' ? (
-              <a
-                key={att.id}
-                href={att.url}
-                target="_blank"
-                rel="noreferrer"
-                className="mb-1 block overflow-hidden rounded-lg"
-                data-chat-media-image="1"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={att.url}
-                  alt={att.name}
-                  className="max-h-48 w-full object-cover"
-                />
-              </a>
-            ) : (
+              att.url ? (
+                <button
+                  key={att.id}
+                  type="button"
+                  className="mb-1 block w-full overflow-hidden rounded-lg text-left"
+                  data-chat-media-image="1"
+                  onClick={() => onOpenImage?.(att.url, att.name)}
+                  aria-label={`Ver ${att.name}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={att.url}
+                    alt={att.name}
+                    className="max-h-48 w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div
+                  key={att.id}
+                  className="mb-1 flex items-center gap-2 rounded-lg bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] px-2.5 py-2 text-[13px] text-[var(--chat-text-muted)]"
+                  data-chat-media-image-missing="1"
+                >
+                  📷 {att.name || 'Imagen'} (vista no disponible)
+                </div>
+              )
+            ) : att.url ? (
               <a
                 key={att.id}
                 href={att.url}
@@ -455,6 +468,14 @@ export function ChatMessageBubble({
               >
                 📎 {att.name}
               </a>
+            ) : (
+              <div
+                key={att.id}
+                className="mb-1 flex items-center gap-2 rounded-lg bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] px-2.5 py-2 text-[13px] text-[var(--chat-text-muted)]"
+                data-chat-media-file="1"
+              >
+                📎 {att.name}
+              </div>
             ),
           )}
           {hasLocation && message.location ? (
@@ -564,6 +585,7 @@ export function ChatMessageBubble({
               products={catalogProducts}
               onConfigure={onConfigureProduct}
               onAddSimple={onAddSimpleProduct}
+              onOpenImage={onOpenImage}
               onSeeAll={
                 onSeeAllCatalog
                   ? () => onSeeAllCatalog(message.catalogCategoryId ?? null)
@@ -575,6 +597,7 @@ export function ChatMessageBubble({
               products={standaloneCards}
               onConfigure={onConfigureProduct}
               onAddSimple={onAddSimpleProduct}
+              onOpenImage={onOpenImage}
               onSeeAll={
                 onSeeAllCatalog ? () => onSeeAllCatalog(null) : undefined
               }
@@ -630,6 +653,7 @@ export function ChatMessageBubble({
               onConfirm={(a) => onConfirmCartAction?.(a)}
               onDismiss={onDismissCartAction}
               onConfigure={onConfigureProduct}
+              onOpenImage={onOpenImage}
             />
           ))}
         </div>

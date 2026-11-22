@@ -48,6 +48,8 @@ type ChatMessageListProps = {
   onSeeAllCatalog?: (categoryId: string | null) => void;
   /** CTA under payment-methods card. */
   onOpenCheckout?: () => void;
+  /** Full-screen image viewer. */
+  onOpenImage?: (src: string, alt: string) => void;
   /** Pull-to-refresh at the very top (touch). Parent may no-op. */
   onRefresh?: () => void;
 };
@@ -67,6 +69,7 @@ export function ChatMessageList({
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
+  onOpenImage,
   onRefresh,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -356,6 +359,7 @@ export function ChatMessageList({
                 onSelectCategory={onSelectCategory}
                 onSeeAllCatalog={onSeeAllCatalog}
                 onOpenCheckout={onOpenCheckout}
+                onOpenImage={onOpenImage}
               />
             );
           })}

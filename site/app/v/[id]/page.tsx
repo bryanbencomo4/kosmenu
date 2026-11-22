@@ -7240,6 +7240,50 @@ export default function PublicMenuPage() {
               openTraditionalMenuFromChat();
               openCheckoutSheet();
             }}
+            onQuoteDeliveryAt={(location) => {
+              const quote = quoteDeliveryFee({
+                config: menuData?.comercio.delivery_tarifas,
+                isDelivery: true,
+                subtotal: cartTotal,
+                origin:
+                  hasBusinessCoords && businessLat != null && businessLng != null
+                    ? { lat: businessLat, lng: businessLng }
+                    : null,
+                destination: { lat: location.lat, lng: location.lng },
+                fallbackFee: toNumberOrNull(menuData?.comercio.costo_envio) ?? 0,
+                convertToBase: (amount) =>
+                  convertAmountBetweenCurrencies(
+                    amount,
+                    deliveryTariffCurrency,
+                    businessBaseCurrency,
+                    {
+                      baseCurrency: businessBaseCurrency,
+                      checkoutExchange: checkoutExchangeConfig,
+                      businessExchangeRate,
+                      businessQuoteCurrency,
+                      businessExchangeSource,
+                      businessExchangeMode,
+                      marketRates: menuData?.marketRates,
+                    },
+                  ),
+              });
+              const feeConverted = convertFromBaseCurrency(
+                quote.fee,
+                businessBaseCurrency,
+                selectedCurrencyCode,
+                selectedExchangeRate,
+              );
+              return {
+                supportsDelivery,
+                pickupAvailable: kioskHomeConfig.paraLlevar !== false,
+                quote,
+                feeLabel: formatAmountByCurrency(
+                  feeConverted,
+                  selectedCurrencyCode,
+                ),
+                currency: selectedCurrencyCode,
+              };
+            }}
             onShareLocationForDelivery={(location) => {
               if (supportsDelivery) {
                 setDeliveryMode('delivery');

@@ -35,6 +35,10 @@ type ChatHeaderProps = {
   isTyping?: boolean;
   soundsEnabled?: boolean;
   onToggleSounds?: () => void;
+  /** Tap avatar → full-screen photo (WhatsApp-like). */
+  onOpenAvatar?: () => void;
+  /** Tap name → business profile info. */
+  onOpenProfile?: () => void;
 };
 
 export function ChatHeader({
@@ -55,6 +59,8 @@ export function ChatHeader({
   isTyping = false,
   soundsEnabled: soundsEnabledProp,
   onToggleSounds,
+  onOpenAvatar,
+  onOpenProfile,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [soundsOn, setSoundsOn] = useState(true);
@@ -106,7 +112,16 @@ export function ChatHeader({
         <ArrowLeft className="h-[22px] w-[22px]" strokeWidth={2} aria-hidden />
       </button>
 
-      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[var(--chat-input)] ring-1 ring-black/5 dark:ring-white/10">
+      <button
+        type="button"
+        className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[var(--chat-input)] ring-1 ring-black/5 dark:ring-white/10"
+        onClick={() => {
+          if (logoUrl && onOpenAvatar) onOpenAvatar();
+          else onOpenProfile?.();
+        }}
+        aria-label={logoUrl ? 'Ver foto de perfil' : 'Ver info del negocio'}
+        data-chat-header-avatar="1"
+      >
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={logoUrl} alt="" className="h-full w-full object-cover" />
@@ -118,9 +133,15 @@ export function ChatHeader({
             {initialLetter}
           </span>
         )}
-      </div>
+      </button>
 
-      <div className="min-w-0 flex-1 px-2">
+      <button
+        type="button"
+        className="min-w-0 flex-1 px-2 text-left"
+        onClick={() => onOpenProfile?.()}
+        aria-label={`Ver info de ${businessName}`}
+        data-chat-header-profile="1"
+      >
         <p className="truncate text-[15.5px] font-semibold leading-tight tracking-[-0.01em] text-[var(--chat-text)]">
           {businessName}
         </p>
@@ -130,7 +151,7 @@ export function ChatHeader({
         >
           {isTyping ? 'escribiendo…' : 'Asistente virtual'}
         </p>
-      </div>
+      </button>
 
       <button
         type="button"

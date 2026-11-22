@@ -26,6 +26,12 @@ import {
   resolveBusinessScheduleStatus,
 } from '../../_lib/business-hours';
 import { buildWhatsAppHref } from '../../../_lib/whatsapp-href';
+import {
+  convertMenuPrice,
+  formatChatMoney,
+  listCheckoutCurrencies,
+  resolveMenuCurrency,
+} from './chat-currency';
 import { getDeliveryConditions } from './delivery-conditions';
 
 type ProductRow = {
@@ -141,6 +147,27 @@ export const CHAT_TOOL_DECLARATIONS = [
     parameters: { type: 'OBJECT', properties: {} },
   },
   {
+    name: 'convert_menu_price',
+    description:
+      'Convierte un precio del menú (o el price_min de un producto) a otra moneda con las tasas del checkout. Úsalo si preguntan “cuánto es en dólares/USD/VES/EUR…”. NUNCA inventes tasas.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        target_currency: {
+          type: 'STRING',
+          description: 'Moneda destino (USD, VES, EUR, COP…)',
+        },
+        amount: {
+          type: 'NUMBER',
+          description: 'Monto en moneda del menú (si ya lo tienes)',
+        },
+        product_id: { type: 'STRING' },
+        product_name: { type: 'STRING' },
+      },
+      required: ['target_currency'],
+    },
+  },
+  {
     name: 'get_cart_snapshot',
     description:
       'Estado actual del carrito compartido (enviado por la app). Usa esto para “qué llevo”, subtotal o quitar/cambiar. No inventes líneas.',
@@ -239,7 +266,12 @@ function productSummary(menu: LoadedPublicMenu, p: ProductRow) {
     price_min: min,
     /** Priciest typical configuration with sizes/extras */
     price_max: max,
-    currency: (menu.comercio as { moneda?: string })?.moneda ?? 'USD',
+    currency: resolveMenuCurrency(menu),
+    price_min_label: formatChatMoney(min, resolveMenuCurrency(menu)),
+    price_base_label:
+      Number.isFinite(base) && base > 0
+        ? formatChatMoney(base, resolveMenuCurrency(menu))
+        : null,
     requires_configuration: productRequiresConfiguration(p),
     options_summary: getProductOptionsSummary(p) || null,
     has_option_groups: Boolean(options?.grupos?.length),
@@ -303,13 +335,14 @@ export function findCheapestProducts(
     count: results.length,
     cheapest_price_min: cheapestPrice,
     tie_count: ties.length,
-    currency: (menu.comercio as { moneda?: string })?.moneda ?? 'USD',
+    currency: resolveMenuCurrency(menu),
+    cheapest_price_label: formatChatMoney(cheapestPrice, resolveMenuCurrency(menu)),
     results,
     note:
       ties.length > limit
-        ? `Hay ${ties.length} productos empatados en ${cheapestPrice}; se muestran ${limit}.`
+        ? `Hay ${ties.length} productos empatados en ${formatChatMoney(cheapestPrice, resolveMenuCurrency(menu))}; se muestran ${limit}.`
         : ties.length > 1
-          ? `Empate: ${ties.length} productos comparten el precio mínimo ${cheapestPrice}.`
+          ? `Empate: ${ties.length} productos comparten el precio mínimo ${formatChatMoney(cheapestPrice, resolveMenuCurrency(menu))}.`
           : undefined,
   };
 }
@@ -507,7 +540,8 @@ export function executeChatTool(
         directions_url: mapsQuery
           ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapsQuery)}`
           : null,
-        currency: c.moneda ?? 'USD',
+        currency: resolveMenuCurrency(menu),
+        checkout_currencies: listCheckoutCurrencies(menu),
         online: c.en_linea === true,
         hours: hoursRaw,
         hours_status: {
@@ -552,6 +586,52 @@ export function executeChatTool(
 
     case 'get_delivery_conditions': {
       return getDeliveryConditions(menu);
+    }
+
+    case 'convert_menu_price': {
+      const target = String(args.target_currency ?? '').trim();
+      let amount = Number(args.amount);
+      let productLabel: string | null = null;
+      const productId = String(args.product_id ?? '').trim();
+      const productName = String(args.product_name ?? '').trim();
+      if ((!Number.isFinite(amount) || amount <= 0) && (productId || productName)) {
+        let product: ProductRow | undefined;
+        if (productId) {
+          product = asProducts(menu).find((p) => p.id === productId);
+        }
+        if (!product && productName) {
+          const n = norm(productName);
+          product =
+            asProducts(menu).find((p) => norm(p.nombre || '') === n) ||
+            asProducts(menu).find((p) => norm(p.nombre || '').includes(n));
+        }
+        if (!product) {
+          return {
+            ok: false,
+            error: 'Producto no encontrado para convertir.',
+            currency_menu: resolveMenuCurrency(menu),
+            available_currencies: listCheckoutCurrencies(menu),
+          };
+        }
+        amount = getProductMinimumPrice(product);
+        productLabel = String(product.nombre || '').trim() || null;
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return {
+          ok: false,
+          error: 'Indica un monto del menú o un producto para convertir.',
+          currency_menu: resolveMenuCurrency(menu),
+          available_currencies: listCheckoutCurrencies(menu),
+        };
+      }
+      const converted = convertMenuPrice(menu, amount, target);
+      return {
+        ...converted,
+        product_name: productLabel,
+        hint: converted.ok
+          ? 'Responde con label_menu y label_target. Aclara que es referencial y el checkout confirma.'
+          : undefined,
+      };
     }
 
     case 'get_cart_snapshot': {
