@@ -30,6 +30,7 @@ import 'package:kosmenu_app/screens/comercio_staff_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/merchant_client_profile_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
+import 'package:kosmenu_app/screens/chat_conversations_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/merchant_shell_history.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
@@ -174,6 +175,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     unawaited(_refreshBillingGate());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openPendingMerchantOrder());
+      unawaited(_openPendingChatConversation());
       unawaited(_loadMetricsOrders());
       unawaited(_loadTotalOrdersCount());
       // Normalize `/` → `/panel` (or keep deep link) without creating a Back trap.
@@ -987,6 +989,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         initialBusinessLogoUrl: _cachedComercio?.logoUrl,
       ),
       standalone: openPaymentProof,
+    );
+  }
+
+  Future<void> _openPendingChatConversation() async {
+    final conversationId = MerchantDeepLink.peekConversation();
+    if (conversationId == null || conversationId.isEmpty || !mounted) {
+      return;
+    }
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+    MerchantDeepLink.consumeConversation();
+    await _openChatConversations(initialConversationId: conversationId);
+  }
+
+  Future<void> _openChatConversations({String? initialConversationId}) async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty || !mounted) return;
+    if (!MerchantSession.isAdmin &&
+        MerchantSession.role != MerchantStaffRole.caja &&
+        MerchantSession.role != MerchantStaffRole.marketing) {
+      _showInfo(MerchantSession.deniedMessage('abrir conversaciones'));
+      return;
+    }
+    await _pushInShell(
+      ChatConversationsScreen(
+        comercioId: comercioId,
+        initialConversationId: initialConversationId,
+      ),
     );
   }
 
@@ -3980,6 +4010,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           onOpenAccount: _openAccount,
           onOpenKioskHome: _openKioskHome,
           onOpenDelivery: _openDeliverySettings,
+          onOpenConversations: () => unawaited(_openChatConversations()),
         );
       case MerchantNavDestination.plan:
         return const MerchantEmbeddedBilling();

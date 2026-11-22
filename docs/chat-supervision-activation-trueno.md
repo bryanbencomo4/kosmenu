@@ -51,10 +51,11 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
    node site/scripts/set-trueno-supervision-whatsapp.mjs
    ```
 
-## Deep links
+## Deep links / panel comerciante
 
-- WaSender apunta a `https://elmenuxfa.com/panel/conversaciones/{id}` (Next).
-- Si el enlace cae en el host Flutter (`app.elmenuxfa.com/panel/...`), AuthGate recuerda el id y abre el panel Next tras login.
+- WaSender puede apuntar a `https://elmenuxfa.com/panel/conversaciones/{id}` (Next) **o** `https://app.elmenuxfa.com/panel/conversaciones/{id}` (Flutter).
+- En Flutter: Configuración → **Conversaciones del asistente** (bandeja nativa + Realtime postgres_changes).
+- Deep link en host Flutter: tras login abre la conversación en la bandeja nativa.
 
 Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.
 

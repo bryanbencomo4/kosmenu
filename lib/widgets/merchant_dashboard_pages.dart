@@ -1798,6 +1798,7 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.onOpenAccount,
     required this.onOpenKioskHome,
     required this.onOpenDelivery,
+    required this.onOpenConversations,
   });
 
   final ComercioModel comercio;
@@ -1814,6 +1815,7 @@ class MerchantSettingsHub extends StatelessWidget {
   final VoidCallback onOpenAccount;
   final VoidCallback onOpenKioskHome;
   final VoidCallback onOpenDelivery;
+  final VoidCallback onOpenConversations;
 
   @override
   Widget build(BuildContext context) {
@@ -1862,6 +1864,12 @@ class MerchantSettingsHub extends StatelessWidget {
                 ? 'Dirección, entrega y contacto'
                 : comercio.whatsapp!.trim(),
             onTap: onOpenOperations,
+          ),
+          (
+            icon: Icons.forum_outlined,
+            title: 'Conversaciones del asistente',
+            subtitle: 'Supervisa el chat, toma el control y responde',
+            onTap: onOpenConversations,
           ),
           (
             icon: Icons.group_outlined,

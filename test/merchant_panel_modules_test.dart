@@ -19,6 +19,7 @@ void main() {
     var operationsOpens = 0;
     var kioskHomeOpens = 0;
     var deliveryOpens = 0;
+    var conversationsOpens = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -37,6 +38,7 @@ void main() {
             onOpenAccount: () {},
             onOpenKioskHome: () => kioskHomeOpens++,
             onOpenDelivery: () => deliveryOpens++,
+            onOpenConversations: () => conversationsOpens++,
           ),
         ),
       ),
@@ -58,6 +60,8 @@ void main() {
     expect(kioskHomeOpens, 1);
     await tester.tap(find.text('Delivery'));
     expect(deliveryOpens, 1);
+    await tester.tap(find.text('Conversaciones del asistente'));
+    expect(conversationsOpens, 1);
   });
 
   test('nav title for sales tools is honest', () {
