@@ -15,7 +15,7 @@
 | Repo | `kosmenu_app` (workspace local) |
 | Rama de trabajo | `qa/chatbot-intelligence-v2` |
 | HEAD al iniciar QA | `350bcc7` — *Ship Trueno chatbot UX: order-mode entry, close-sale pay CTAs, and reliable checkout handoff.* |
-| Commit de consolidación | *(ver `git log -1` tras el commit de este informe)* |
+| Commit de consolidación | `6e3c7b5a3b7590cdd857ac690fda31a2bb494d7c` |
 
 ### Archivos incluidos en la consolidación (código chatbot)
 
