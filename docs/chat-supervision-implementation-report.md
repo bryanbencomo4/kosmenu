@@ -68,6 +68,8 @@ Modo `CHAT_SUPERVISION_MEMORY=1` permite probar sin migración.
 
 RPC atómicos (DB) o equivalentes memoria. Gemini gated por `human_handling`/`closed`. Respuestas IA en vuelo descartadas si `attention_version` cambió. Staff no llama Gemini ni WaSender como transporte.
 
+**Fix crítico (migración):** `chat_take_conversation` / `chat_return_to_assistant` autorizan con `chat_user_can_supervise(comercio_id, p_user_id)` — el panel Next invoca RPC con **service_role**, donde `auth.uid()` es null; el diseño previo basado solo en `is_comercio_member()` habría fallado en Postgres real.
+
 ## 12. Multi-empleado
 
 Primer `take` gana; segundo usuario → conflicto 409 (DB) / null (memoria). Assignee o `administrador` puede enviar.

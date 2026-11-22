@@ -112,6 +112,41 @@ create policy chat_supervision_events_member_select
   to authenticated
   using (public.is_comercio_member(comercio_id));
 
+-- Membership check by explicit user id (panel APIs call RPCs with service_role,
+-- so auth.uid() is null — never gate takeover solely on auth.uid()).
+create or replace function public.chat_user_can_supervise(
+  p_comercio_id uuid,
+  p_user_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    p_user_id is not null
+    and (
+      exists (
+        select 1
+        from public.comercios c
+        where c.id = p_comercio_id
+          and c.owner_id = p_user_id
+      )
+      or exists (
+        select 1
+        from public.comercio_members m
+        where m.comercio_id = p_comercio_id
+          and m.user_id = p_user_id
+          and m.status = 'active'
+          and m.role = any (array['administrador', 'caja', 'marketing']::text[])
+      )
+    );
+$$;
+
+revoke all on function public.chat_user_can_supervise(uuid, uuid) from public, anon;
+grant execute on function public.chat_user_can_supervise(uuid, uuid) to authenticated, service_role;
+
 -- Atomic takeover: only succeeds if still ai_handling / needs_attention
 -- or already assigned to the same user.
 create or replace function public.chat_take_conversation(
@@ -129,6 +164,10 @@ begin
   if p_user_id is null then
     raise exception 'unauthorized';
   end if;
+  -- If called with a user JWT, forbid impersonation.
+  if auth.uid() is not null and auth.uid() <> p_user_id then
+    raise exception 'unauthorized';
+  end if;
 
   update public.chat_conversations c
   set
@@ -138,11 +177,7 @@ begin
     attention_version = c.attention_version + 1,
     updated_at = clock_timestamp()
   where c.id = p_conversation_id
-    and public.is_comercio_member(c.comercio_id)
-    and public.comercio_has_role(
-      c.comercio_id,
-      array['administrador', 'caja', 'marketing']::text[]
-    )
+    and public.chat_user_can_supervise(c.comercio_id, p_user_id)
     and (
       c.status in ('ai_handling', 'needs_attention')
       or (c.status = 'human_handling' and c.assigned_user_id = p_user_id)
@@ -172,6 +207,13 @@ as $$
 declare
   v_row public.chat_conversations;
 begin
+  if p_user_id is null then
+    raise exception 'unauthorized';
+  end if;
+  if auth.uid() is not null and auth.uid() <> p_user_id then
+    raise exception 'unauthorized';
+  end if;
+
   update public.chat_conversations c
   set
     status = 'ai_handling',
@@ -180,11 +222,7 @@ begin
     attention_version = c.attention_version + 1,
     updated_at = clock_timestamp()
   where c.id = p_conversation_id
-    and public.is_comercio_member(c.comercio_id)
-    and public.comercio_has_role(
-      c.comercio_id,
-      array['administrador', 'caja', 'marketing']::text[]
-    )
+    and public.chat_user_can_supervise(c.comercio_id, p_user_id)
     and c.status = 'human_handling'
   returning * into v_row;
 
@@ -212,6 +250,7 @@ comment on table public.chat_conversations is
 -- alter publication supabase_realtime drop table if exists public.chat_conversations;
 -- drop function if exists public.chat_return_to_assistant(uuid, uuid);
 -- drop function if exists public.chat_take_conversation(uuid, uuid);
+-- drop function if exists public.chat_user_can_supervise(uuid, uuid);
 -- drop table if exists public.chat_supervision_events;
 -- drop table if exists public.chat_messages;
 -- drop table if exists public.chat_conversations;

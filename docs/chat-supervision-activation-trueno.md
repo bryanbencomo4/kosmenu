@@ -16,8 +16,11 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 
 ## Orden seguro
 
-1. **Autorizar** migración en **preview** primero (`gsfxqzvmyzjjgpigrste`), no prod.
+**Nota (evidencia read-only):** el proyecto preview (`gsfxqzvmyzjjgpigrste`) **no** tiene `comercio_members` ni `is_comercio_member`. No es un entorno válido para este piloto hasta alinear el esquema. El piloto autorizado debe apuntar a **prod** (`qqhberaayhohxlbbhdyi`) con flags fail-closed solo Trueno.
+
+1. **Autorizar** explícitamente la migración en el entorno elegido (recomendado: prod + flags Trueno).
 2. Aplicar `supabase/migrations/20261123090000_chat_supervision_conversations.sql`.
+   - Los RPC `chat_take_conversation` / `chat_return_to_assistant` autorizan por `p_user_id` (`chat_user_can_supervise`) porque el panel Next llama con **service_role** (`auth.uid()` sería null).
 3. Publicar Realtime (si no está):
    ```sql
    alter publication supabase_realtime add table public.chat_conversations;
@@ -32,9 +35,9 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
    CHAT_SUPERVISION_SESSION_PEPPER=<pepper-no-commitear>
    # NO poner CHAT_SUPERVISION_MEMORY ni E2E_BEARER en staging/prod
    ```
-5. Smoke dual (consumidor + panel login real) en preview.
+5. Smoke dual (consumidor + panel login real).
 6. Confirmar **una** notificación WaSender al número de avisos (no historial completo).
-7. Solo entonces repetir en prod con la misma allowlist y flags.
+7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
 
 ## Rollback
 

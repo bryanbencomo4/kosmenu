@@ -175,4 +175,19 @@ describe('chat supervision memory store', () => {
     });
     expect(memoryGetBySession(COMERCIO, 'bob')).toBeNull();
   });
+
+  it('documents service-role takeover contract (p_user_id, not auth.uid)', () => {
+    // Panel APIs call RPCs with the service role. Membership must be checked
+    // via chat_user_can_supervise(comercio_id, p_user_id) — see migration.
+    const hash = hashConsumerSession(COMERCIO, 'svc');
+    const conv = memoryUpsertConversation({
+      comercio_id: COMERCIO,
+      consumer_session_id: 'svc',
+      consumer_session_hash: hash,
+      status: 'ai_handling',
+    });
+    const taken = memoryTakeConversation(conv.id, 'merchant-user-uuid');
+    expect(taken?.assigned_user_id).toBe('merchant-user-uuid');
+    expect(taken?.status).toBe('human_handling');
+  });
 });
