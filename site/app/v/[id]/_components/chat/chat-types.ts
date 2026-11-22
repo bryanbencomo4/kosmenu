@@ -150,6 +150,10 @@ export type ChatMessage = {
   catalogCategoryId?: string | null;
   /** Payment methods card (cómo pago / métodos de pago). */
   paymentMethods?: import('./chat-payments').ChatPaymentMethod[];
+  /** Weekly hours card (horario / ¿están abiertos?). */
+  hoursSchedule?: import('./chat-hours').ChatHoursSnapshot | null;
+  /** WhatsApp / human handoff card. */
+  contactCard?: import('./chat-contact').ChatContactCardData | null;
   /** Sticker sent as a message (id + accessible label). */
   sticker?: { id: string; label: string } | null;
 };

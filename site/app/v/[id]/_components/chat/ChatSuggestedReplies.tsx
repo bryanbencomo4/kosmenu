@@ -9,6 +9,8 @@ export type ChatSuggestedAction =
   | { type: 'cart' }
   | { type: 'payments' }
   | { type: 'location' }
+  | { type: 'hours' }
+  | { type: 'contact' }
   | { type: 'text'; text: string };
 
 export type ChatSuggestedChip = {
@@ -33,6 +35,10 @@ export function buildSuggestedReplies(input: {
   hasPaymentMethods?: boolean;
   /** When true, include a "Ubicación" chip. */
   hasBusinessLocation?: boolean;
+  /** When true, include a "Horario" chip. */
+  hasBusinessHours?: boolean;
+  /** When true, include a "WhatsApp" chip. */
+  hasWhatsApp?: boolean;
 }): ChatSuggestedChip[] {
   const {
     catalog,
@@ -40,6 +46,8 @@ export function buildSuggestedReplies(input: {
     activeCategoryId = null,
     hasPaymentMethods = false,
     hasBusinessLocation = false,
+    hasBusinessHours = false,
+    hasWhatsApp = false,
   } = input;
   const hasCart = cartCount > 0;
   const chips: ChatSuggestedChip[] = [];
@@ -58,12 +66,36 @@ export function buildSuggestedReplies(input: {
     label: 'Ubicación',
     action: { type: 'location' },
   };
+  const hoursChip: ChatSuggestedChip = {
+    id: 'hours',
+    label: 'Horario',
+    action: { type: 'hours' },
+  };
+  const contactChip: ChatSuggestedChip = {
+    id: 'contact',
+    label: 'WhatsApp',
+    action: { type: 'contact' },
+  };
   const recommendChip: ChatSuggestedChip = {
     id: 'recommend',
     label: 'Recomiéndame algo',
     action: { type: 'text', text: 'Recomiéndame algo' },
   };
 
+  const pushUtilityChips = () => {
+    if (hasBusinessHours) chips.push(hoursChip);
+    if (hasBusinessLocation) chips.push(locationChip);
+    if (hasPaymentMethods) chips.push(payChip);
+    if (hasWhatsApp) chips.push(contactChip);
+    if (hasCart) chips.push(cartChip);
+  };
+
+  const hasUtility =
+    hasCart ||
+    hasPaymentMethods ||
+    hasBusinessLocation ||
+    hasBusinessHours ||
+    hasWhatsApp;
   const categories = catalog?.categories ?? [];
   if (catalog && categories.length > 0) {
     const catChip = (c: { id: string; name: string }): ChatSuggestedChip => ({
@@ -84,27 +116,19 @@ export function buildSuggestedReplies(input: {
       chips.push(
         ...categories
           .filter((c) => c.id !== active.id)
-          .slice(0, hasPaymentMethods || hasBusinessLocation || hasCart ? 1 : 2)
+          .slice(0, hasUtility ? 1 : 2)
           .map(catChip),
       );
-      if (hasBusinessLocation) chips.push(locationChip);
-      if (hasPaymentMethods) chips.push(payChip);
-      if (hasCart) chips.push(cartChip);
+      pushUtilityChips();
       chips.push(recommendChip);
     } else {
-      chips.push(
-        ...categories
-          .slice(0, hasCart || hasPaymentMethods || hasBusinessLocation ? 2 : 3)
-          .map(catChip),
-      );
+      chips.push(...categories.slice(0, hasUtility ? 2 : 3).map(catChip));
       chips.push({
         id: 'menu',
         label: 'Ver menú',
         action: { type: 'catalog', categoryId: null },
       });
-      if (hasBusinessLocation) chips.push(locationChip);
-      if (hasPaymentMethods) chips.push(payChip);
-      if (hasCart) chips.push(cartChip);
+      pushUtilityChips();
       chips.push(recommendChip);
     }
     return chips.slice(0, MAX_CHIPS);
@@ -115,10 +139,8 @@ export function buildSuggestedReplies(input: {
     label: 'Ver menú',
     action: { type: 'text', text: 'Ver menú' },
   });
-  if (hasBusinessLocation) chips.push(locationChip);
-  if (hasPaymentMethods) chips.push(payChip);
+  pushUtilityChips();
   chips.push(recommendChip);
-  if (hasCart) chips.push(cartChip);
   return chips.slice(0, MAX_CHIPS);
 }
 

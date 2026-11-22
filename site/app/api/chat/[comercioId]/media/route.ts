@@ -256,8 +256,19 @@ export async function POST(
     }
 
     const prompt = isImage
-      ? 'Eres asistente de un restaurante. Describe brevemente (1-3 frases) qué muestra la imagen en relación con un pedido de comida. NO inventes precios ni productos que no se vean. Si no es comida/menú, dilo. Responde en español.'
-      : 'Eres asistente de un restaurante. Resume en 1-3 frases el contenido relevante del PDF para armar un pedido. NO inventes precios ni productos ausentes. Responde en español.';
+      ? [
+          'Eres asistente de un restaurante. Analiza la imagen del cliente y responde SOLO en español con este formato exacto:',
+          'TIPO: comprobante_pago | ubicacion_delivery | menu_comida | otro',
+          'RESUMEN: 1-2 frases claras',
+          'DETALLES: banco/monto/referencia si es comprobante; dirección/referencias si es ubicación; platos visibles si es comida. Si no se ve, escribe "no legible".',
+          'NO inventes montos, bancos, productos ni direcciones que no se vean. Si es captura de transferencia/pago móvil/recibo → comprobante_pago. Si es mapa, fachada con dirección o nota de entrega → ubicacion_delivery. Si es plato/menú → menu_comida.',
+        ].join('\n')
+      : [
+          'Eres asistente de un restaurante. Resume el PDF/archivo del cliente en español con este formato:',
+          'TIPO: comprobante_pago | ubicacion_delivery | menu_comida | otro',
+          'RESUMEN: 1-2 frases',
+          'DETALLES: datos legibles (montos, refs, direcciones). NO inventes.',
+        ].join('\n');
 
     const result = await runMediaGemini({
       apiKey: config.geminiApiKey,

@@ -39,6 +39,20 @@ import {
 } from './ChatSuggestedReplies';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
+  buildFulfillmentReplyText,
+  buildPlatformPitchText,
+  buildRestaurantContactCard,
+  matchContactIntent,
+  matchFulfillmentIntent,
+  matchPlatformIntent,
+  type ChatContactCardData,
+  type ChatFulfillmentOptions,
+} from './chat-contact';
+import {
+  matchHoursIntent,
+  type ChatHoursSnapshot,
+} from './chat-hours';
+import {
   matchLocationIntent,
   type ChatBusinessLocation,
 } from './chat-location';
@@ -112,6 +126,12 @@ type ChatAssistantViewProps = {
   paymentMethods?: ChatPaymentMethod[];
   /** Business GPS pin for "dónde están / cómo llego". */
   businessLocation?: ChatBusinessLocation | null;
+  /** Weekly hours for "horario / ¿están abiertos?". */
+  businessHours?: ChatHoursSnapshot | null;
+  /** Delivery / pickup / dine-in flags for fulfillment answers. */
+  fulfillmentOptions?: ChatFulfillmentOptions | null;
+  /** Display phone for WhatsApp contact card. */
+  whatsappDisplay?: string | null;
   cartCount: number;
   cartTotalLabel: string;
   /** Authoritative shared cart (same as PublicMenuPage). */
@@ -162,6 +182,8 @@ function createMessage(
     catalogProducts?: ChatProductCardData[];
     catalogCategoryId?: string | null;
     paymentMethods?: ChatPaymentMethod[];
+    hoursSchedule?: ChatHoursSnapshot | null;
+    contactCard?: ChatContactCardData | null;
     sticker?: ChatMessage['sticker'];
   },
 ): ChatMessage {
@@ -187,6 +209,8 @@ function createMessage(
     catalogProducts: options?.catalogProducts,
     catalogCategoryId: options?.catalogCategoryId,
     paymentMethods: options?.paymentMethods,
+    hoursSchedule: options?.hoursSchedule ?? undefined,
+    contactCard: options?.contactCard ?? undefined,
     sticker: options?.sticker ?? undefined,
   };
 }
@@ -288,6 +312,9 @@ export function ChatAssistantView({
   catalog = null,
   paymentMethods = [],
   businessLocation = null,
+  businessHours = null,
+  fulfillmentOptions = null,
+  whatsappDisplay = null,
   cartCount,
   cartTotalLabel,
   cartSnapshot = [],
@@ -690,6 +717,134 @@ export function ChatAssistantView({
     ],
   );
 
+  /** Deterministic "horario / ¿están abiertos?". */
+  const answerHoursIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchHoursIntent(text)) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      if (!businessHours) {
+        const empty = createMessage(
+          'assistant',
+          'Todavía no tengo el horario publicado. Puedes confirmar por WhatsApp con el local.',
+          whatsappUrl
+            ? {
+                contactCard: buildRestaurantContactCard({
+                  whatsappUrl,
+                  phoneDisplay: whatsappDisplay,
+                  businessName,
+                }),
+              }
+            : undefined,
+        );
+        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
+        playAssistantReceivedOnce(empty);
+        setIsTyping(false);
+        return true;
+      }
+      const caption = businessHours.status.caption.replace(/^[🟢🔴]\s*/, '');
+      const reply = createMessage('assistant', caption, {
+        hoursSchedule: businessHours,
+      });
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [
+      businessHours,
+      whatsappUrl,
+      whatsappDisplay,
+      businessName,
+      playAssistantReceivedOnce,
+    ],
+  );
+
+  /** Deterministic WhatsApp / "hablar con un humano". */
+  const answerContactIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchContactIntent(text)) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      const card = buildRestaurantContactCard({
+        whatsappUrl,
+        phoneDisplay: whatsappDisplay,
+        businessName,
+      });
+      if (!card) {
+        const empty = createMessage(
+          'assistant',
+          'Por ahora no tengo el WhatsApp del local publicado. Puedes usar el menú tradicional o volver a preguntar más tarde.',
+        );
+        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
+        playAssistantReceivedOnce(empty);
+        setIsTyping(false);
+        return true;
+      }
+      const reply = createMessage(
+        'assistant',
+        'Claro, aquí tienes el contacto del local para hablar con una persona:',
+        { contactCard: card },
+      );
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [whatsappUrl, whatsappDisplay, businessName, playAssistantReceivedOnce],
+  );
+
+  /** Deterministic "elmenuxfa / cómo creo un menú". */
+  const answerPlatformIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchPlatformIntent(text)) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      const reply = createMessage('assistant', buildPlatformPitchText());
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [playAssistantReceivedOnce],
+  );
+
+  /** Deterministic delivery / pickup explanation. */
+  const answerFulfillmentIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchFulfillmentIntent(text)) return false;
+      const options = fulfillmentOptions ?? {
+        delivery: false,
+        pickup: true,
+        dineIn: false,
+      };
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      const reply = createMessage(
+        'assistant',
+        buildFulfillmentReplyText(options),
+        options.delivery && onOpenCheckout
+          ? {
+              cartActions: [
+                {
+                  type: 'open_checkout',
+                  requires_confirmation: true,
+                  proposal_id: `checkout_ful_${Date.now().toString(36)}`,
+                  catalog_fingerprint: null,
+                  label: 'Pedir delivery',
+                },
+              ],
+            }
+          : undefined,
+      );
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [fulfillmentOptions, onOpenCheckout, playAssistantReceivedOnce],
+  );
+
   useEffect(() => {
     if (!incomingProposal) return;
     const msg = createMessage(
@@ -1053,9 +1208,13 @@ export function ChatAssistantView({
       });
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
-      // Local UX answers first (carousels / location pin / payment card), then Gemini.
+      // Local UX answers first (carousels / location / hours / contact / …), then Gemini.
       if (await answerCatalogIntent(text)) return;
       if (await answerLocationIntent(text)) return;
+      if (await answerHoursIntent(text)) return;
+      if (await answerContactIntent(text)) return;
+      if (await answerPlatformIntent(text)) return;
+      if (await answerFulfillmentIntent(text)) return;
       if (await answerPaymentIntent(text)) return;
       await runAssistantTurn(text, nextMessages);
     },
@@ -1066,6 +1225,10 @@ export function ChatAssistantView({
       runAssistantTurn,
       answerCatalogIntent,
       answerLocationIntent,
+      answerHoursIntent,
+      answerContactIntent,
+      answerPlatformIntent,
+      answerFulfillmentIntent,
       answerPaymentIntent,
     ],
   );
@@ -1096,6 +1259,12 @@ export function ChatAssistantView({
           break;
         case 'location':
           void sendText('Envíame la ubicación');
+          break;
+        case 'hours':
+          void sendText('¿Cuál es el horario?');
+          break;
+        case 'contact':
+          void sendText('Quiero el WhatsApp del local');
           break;
         case 'text':
           void sendText(action.text);
@@ -1225,6 +1394,22 @@ export function ChatAssistantView({
         setIsTyping(false);
         return;
       }
+      if (await answerHoursIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
+      if (await answerContactIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
+      if (await answerPlatformIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
+      if (await answerFulfillmentIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
       if (await answerPaymentIntent(transcript)) {
         setIsTyping(false);
         return;
@@ -1240,6 +1425,10 @@ export function ChatAssistantView({
       comercioId,
       answerCatalogIntent,
       answerLocationIntent,
+      answerHoursIntent,
+      answerContactIntent,
+      answerPlatformIntent,
+      answerFulfillmentIntent,
       answerPaymentIntent,
       playAssistantReceivedOnce,
     ],
@@ -1315,8 +1504,18 @@ export function ChatAssistantView({
         activeCategoryId: messages[messages.length - 1]?.catalogCategoryId ?? null,
         hasPaymentMethods: paymentMethods.length > 0,
         hasBusinessLocation: Boolean(businessLocation),
+        hasBusinessHours: Boolean(businessHours),
+        hasWhatsApp: Boolean(whatsappUrl),
       }),
-    [catalog, cartCount, messages, paymentMethods.length, businessLocation],
+    [
+      catalog,
+      cartCount,
+      messages,
+      paymentMethods.length,
+      businessLocation,
+      businessHours,
+      whatsappUrl,
+    ],
   );
 
   const shareLocation = useCallback(
@@ -1338,6 +1537,7 @@ export function ChatAssistantView({
             lat: location.lat,
             lng: location.lng,
             label,
+            kind: 'customer',
           },
         },
       );
@@ -1346,7 +1546,11 @@ export function ChatAssistantView({
       setMessages(nextMessages);
       saveChatHistory(comercioId, nextMessages);
       await runAssistantTurn(
-        `Quiero delivery en esta ubicación: lat ${location.lat}, lng ${location.lng}. Ayúdame a continuar al checkout.`,
+        [
+          'TIPO: ubicacion_delivery',
+          `RESUMEN: El cliente compartió su GPS para delivery (${location.lat}, ${location.lng}).`,
+          'DETALLES: Usar estas coordenadas en el checkout de delivery. Confirma, explica que también puede recoger en el local si aplica, y propone abrir checkout. No inventes tarifa.',
+        ].join('\n'),
         nextMessages,
       );
       // Open checkout after the turn so reply + receipts are saved while mounted.

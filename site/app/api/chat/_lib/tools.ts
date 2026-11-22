@@ -21,6 +21,11 @@ import {
   type ChatCartSnapshotLine,
   type ChatProductCard,
 } from './cart-proposals';
+import {
+  listBusinessScheduleDayRows,
+  resolveBusinessScheduleStatus,
+} from '../../_lib/business-hours';
+import { buildWhatsAppHref } from '../../../_lib/whatsapp-href';
 import { getDeliveryConditions } from './delivery-conditions';
 
 type ProductRow = {
@@ -473,6 +478,22 @@ export function executeChatTool(
       const mapsQuery = hasCoords
         ? `${lat},${lng}`
         : addressParts.join(', ') || String(c.nombre ?? '');
+      const hoursRaw = c.horarios ?? c.horario ?? null;
+      const scheduleStatus = resolveBusinessScheduleStatus(hoursRaw);
+      const hoursDays = scheduleStatus.configured
+        ? listBusinessScheduleDayRows(hoursRaw).map((d) => ({
+            day: d.label,
+            today: d.isToday,
+            hours: d.hoursLabel,
+            closed: d.closed,
+          }))
+        : [];
+      const whatsappRaw =
+        c.whatsapp ?? c.telefono ?? c.telefonos ?? c.celular ?? null;
+      const whatsappDigits = String(whatsappRaw ?? '').replace(/\D/g, '');
+      const whatsappUrl = whatsappDigits
+        ? buildWhatsAppHref(whatsappDigits)
+        : null;
       return {
         id: menu.resolvedComercioId,
         name: c.nombre ?? null,
@@ -488,11 +509,28 @@ export function executeChatTool(
           : null,
         currency: c.moneda ?? 'USD',
         online: c.en_linea === true,
-        hours: c.horarios ?? c.horario ?? null,
-        whatsapp: c.whatsapp ?? null,
-        note: hasCoords
-          ? 'La UI puede mostrar el pin GPS. Responde breve y comparte maps_url; NUNCA digas que no puedes enviar ubicación.'
-          : 'No hay coordenadas GPS publicadas; da la dirección textual si existe.',
+        hours: hoursRaw,
+        hours_status: {
+          configured: scheduleStatus.configured,
+          is_open: scheduleStatus.isOpen,
+          caption: scheduleStatus.caption,
+          next_open: scheduleStatus.nextOpenLabel,
+          closes_at: scheduleStatus.closesAtLabel,
+        },
+        hours_week: hoursDays,
+        whatsapp: whatsappRaw,
+        whatsapp_url: whatsappUrl,
+        note: [
+          hasCoords
+            ? 'La UI puede mostrar el pin GPS. Responde breve y comparte maps_url; NUNCA digas que no puedes enviar ubicación.'
+            : 'No hay coordenadas GPS publicadas; da la dirección textual si existe.',
+          scheduleStatus.configured
+            ? `Horario: usa hours_status.caption y hours_week (no inventes). Hoy: ${scheduleStatus.caption}.`
+            : 'Horario no configurado; dilo y ofrece WhatsApp.',
+          whatsappUrl
+            ? `Si piden humano/WhatsApp, comparte whatsapp_url: ${whatsappUrl}`
+            : 'No hay WhatsApp publicado; ofrece el menú tradicional.',
+        ].join(' '),
       };
     }
 

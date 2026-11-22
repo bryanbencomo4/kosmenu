@@ -12,6 +12,8 @@ import {
 
 import { ChatCartActionCard } from './ChatCartActionCard';
 import { ChatCategoryCarousel } from './ChatCategoryCarousel';
+import { ChatContactCard } from './ChatContactCard';
+import { ChatHoursCard } from './ChatHoursCard';
 import { ChatPaymentMethodsCard } from './ChatPaymentMethodsCard';
 import { ChatProductCard } from './ChatProductCard';
 import { ChatProductCarousel } from './ChatProductCarousel';
@@ -245,6 +247,8 @@ export function ChatMessageBubble({
   const timeLabel = formatChatTime(message.createdAt);
   const replyEnabled = Boolean(onReply) && !isSystem;
   const paymentMethods = message.paymentMethods || [];
+  const hoursSchedule = message.hoursSchedule || null;
+  const contactCard = message.contactCard || null;
   // Hooks must run before the system-message early return below.
   const replyGesture = useReplyGesture(replyEnabled, () => onReply?.(message));
 
@@ -588,6 +592,24 @@ export function ChatMessageBubble({
             methods={paymentMethods}
             onOpenCheckout={onOpenCheckout}
           />
+        </div>
+      ) : null}
+
+      {hoursSchedule ? (
+        <div
+          className={`mt-1.5 flex w-full max-w-[min(92%,22.5rem)] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+          data-chat-hours-block="1"
+        >
+          <ChatHoursCard hours={hoursSchedule} />
+        </div>
+      ) : null}
+
+      {contactCard ? (
+        <div
+          className={`mt-1.5 flex w-full max-w-[min(92%,22.5rem)] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+          data-chat-contact-block="1"
+        >
+          <ChatContactCard contact={contactCard} />
         </div>
       ) : null}
 

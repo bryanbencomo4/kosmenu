@@ -74,6 +74,7 @@ import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { ChatAssistantView } from './_components/chat/ChatAssistantView';
 import type { ChatCatalogSnapshot } from './_components/chat/chat-catalog';
+import { buildChatHoursSnapshot } from './_components/chat/chat-hours';
 import { buildBusinessLocation } from './_components/chat/chat-location';
 import { toChatPaymentMethods } from './_components/chat/chat-payments';
 import { ChatModeSwitcher } from './_components/chat/ChatModeSwitcher';
@@ -4125,6 +4126,18 @@ export default function PublicMenuPage() {
       }),
     [businessLat, businessLng, comercioNombre, comercioAddress],
   );
+  const chatBusinessHours = useMemo(
+    () => buildChatHoursSnapshot(menuData?.comercio?.horarios),
+    [menuData?.comercio?.horarios],
+  );
+  const chatFulfillmentOptions = useMemo(
+    () => ({
+      delivery: supportsDelivery && kioskHomeConfig.delivery !== false,
+      pickup: kioskHomeConfig.paraLlevar !== false,
+      dineIn: kioskHomeConfig.comerAqui !== false,
+    }),
+    [supportsDelivery, kioskHomeConfig.delivery, kioskHomeConfig.paraLlevar, kioskHomeConfig.comerAqui],
+  );
   const kioskProductsByCategory = useMemo(() => {
     const map: Record<string, Array<{
       id: string;
@@ -7200,6 +7213,8 @@ export default function PublicMenuPage() {
             catalog={chatCatalog}
             paymentMethods={chatPaymentMethods}
             businessLocation={chatBusinessLocation}
+            businessHours={chatBusinessHours}
+            fulfillmentOptions={chatFulfillmentOptions}
             cartCount={cartCount}
             cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
             cartSnapshot={cartItems.map((item) => ({
@@ -7212,6 +7227,12 @@ export default function PublicMenuPage() {
             probeServerAuth
             whatsappUrl={
               whatsappNumber ? buildWhatsAppHref(whatsappNumber) : null
+            }
+            whatsappDisplay={
+              whatsappNumber
+                ? parsePhoneNumber(`+${whatsappNumber}`)?.formatInternational() ||
+                  `+${whatsappNumber}`
+                : null
             }
             onOpenMenu={openTraditionalMenuFromChat}
             onOpenCart={openSharedCartFromChat}
