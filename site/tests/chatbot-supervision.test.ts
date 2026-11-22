@@ -5,6 +5,7 @@ import {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
   SUPERVISION_NOTIFY_MAX_ATTEMPTS,
 } from '../app/api/chat/_lib/supervision-shared';
@@ -102,6 +103,33 @@ describe('chat supervision helpers', () => {
         CHAT_SUPERVISION_HUMAN_TAKEOVER: '1',
       } as NodeJS.ProcessEnv).humanTakeover,
     ).toBe(true);
+  });
+
+  it('discards in-flight assistant replies after takeover', () => {
+    expect(
+      shouldDiscardInFlightAssistant({
+        humanTakeoverEnabled: true,
+        status: 'human_handling',
+        attentionVersionAtStart: 1,
+        attentionVersionNow: 2,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDiscardInFlightAssistant({
+        humanTakeoverEnabled: true,
+        status: 'ai_handling',
+        attentionVersionAtStart: 1,
+        attentionVersionNow: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDiscardInFlightAssistant({
+        humanTakeoverEnabled: false,
+        status: 'human_handling',
+        attentionVersionAtStart: 1,
+        attentionVersionNow: 2,
+      }),
+    ).toBe(false);
   });
 
   it('limits staff replies to assignee (admins may assist)', () => {

@@ -38,6 +38,7 @@ export {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
 } from './supervision-shared';
 

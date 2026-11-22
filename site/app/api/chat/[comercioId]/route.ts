@@ -44,6 +44,33 @@ function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
 }
 
+/**
+ * Re-check supervision after a (possibly long) Gemini/simulator turn.
+ * Takeover mid-flight must not deliver the automatic reply to the consumer.
+ */
+async function discardInFlightAssistantReply(input: {
+  commerceId: string;
+  sessionId: string;
+  attentionVersionAtStart: number | null;
+}): Promise<boolean> {
+  try {
+    const { shouldSkipGemini } = await import('../_lib/supervision');
+    const { shouldDiscardInFlightAssistant } = await import(
+      '../_lib/supervision-shared'
+    );
+    const { getChatSupervisionConfig } = await import('../_lib/supervision-config');
+    const gate = await shouldSkipGemini(input.commerceId, input.sessionId);
+    return shouldDiscardInFlightAssistant({
+      humanTakeoverEnabled: getChatSupervisionConfig().humanTakeover,
+      status: gate.conversation?.status,
+      attentionVersionAtStart: input.attentionVersionAtStart,
+      attentionVersionNow: gate.conversation?.attention_version ?? null,
+    });
+  } catch {
+    return false;
+  }
+}
+
 function publicError(
   status: number,
   code: string,
@@ -308,6 +335,39 @@ export async function POST(
           }
         : null,
     });
+    const discardedSim = await discardInFlightAssistantReply({
+      commerceId,
+      sessionId,
+      attentionVersionAtStart,
+    });
+    if (discardedSim) {
+      return json({
+        ok: true,
+        reply:
+          'Un miembro del restaurante está atendiendo esta conversación. Te responderán por aquí en breve 😊',
+        sessionId,
+        model: 'human_handoff',
+        commerceId,
+        requestId,
+        skipped_llm: true,
+        simulated: true,
+        supervision: {
+          mode: 'human_handling',
+          conversationId: supervisionConversationId,
+        },
+        usage: {
+          tokensInput: 0,
+          tokensOutput: 0,
+          toolCalls: 0,
+          geminiHttpCalls: 0,
+        },
+        cart_actions: [],
+        product_cards: [],
+        pending_configuration: null,
+        category_cards: [],
+        order_actions: [],
+      });
+    }
     void persistAssistantReply(simulated.text, {
       cart_actions: simulated.cartActions,
       product_cards: simulated.productCards,
@@ -482,6 +542,41 @@ export async function POST(
       tokensInput: result.tokensInput,
       tokensOutput: result.tokensOutput,
     });
+
+    const discardedLive = await discardInFlightAssistantReply({
+      commerceId,
+      sessionId,
+      attentionVersionAtStart,
+    });
+    if (discardedLive) {
+      return json({
+        ok: true,
+        reply:
+          'Un miembro del restaurante está atendiendo esta conversación. Te responderán por aquí en breve 😊',
+        sessionId,
+        model: 'human_handoff',
+        commerceId,
+        requestId,
+        skipped_llm: true,
+        supervision: {
+          mode: 'human_handling',
+          conversationId: supervisionConversationId,
+        },
+        usage: {
+          tokensInput: result.tokensInput,
+          tokensOutput: result.tokensOutput,
+          toolCalls: result.toolCalls,
+          geminiHttpCalls: result.geminiHttpCalls,
+        },
+        attribution: result.attribution,
+        live_budget: liveBudgetPublicSnapshot(),
+        cart_actions: [],
+        product_cards: [],
+        pending_configuration: null,
+        category_cards: [],
+        order_actions: [],
+      });
+    }
 
     void persistAssistantReply(result.text, {
       cart_actions: result.cartActions,

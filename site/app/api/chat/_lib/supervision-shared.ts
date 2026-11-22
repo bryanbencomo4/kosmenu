@@ -36,6 +36,29 @@ export function detectNeedsHuman(text: string) {
   return ESCALATION_RE.test(text);
 }
 
+/**
+ * After Gemini finishes, discard the reply if takeover/close bumped attention
+ * or moved the conversation to human handling while the model was running.
+ */
+export function shouldDiscardInFlightAssistant(input: {
+  humanTakeoverEnabled: boolean;
+  status: string | null | undefined;
+  attentionVersionAtStart: number | null | undefined;
+  attentionVersionNow: number | null | undefined;
+}): boolean {
+  if (!input.humanTakeoverEnabled) return false;
+  const status = String(input.status || '');
+  if (status === 'human_handling' || status === 'closed') return true;
+  if (
+    input.attentionVersionAtStart != null &&
+    input.attentionVersionNow != null &&
+    Number(input.attentionVersionNow) !== Number(input.attentionVersionAtStart)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** True when this turn newly marks the conversation as needing a human. */
 export function didEscalateToNeedsAttention(
   previousStatus: string | null | undefined,
