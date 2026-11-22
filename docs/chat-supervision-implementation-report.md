@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama `feature/chat-supervision-human`; evidencias locales verdes (dual **19/19**, Vitest **18**, tsc 0). Hardening P1: allowlist dedicada, feed HMAC, persist races, media honesty en human mode, Flutter send/disabled.  
+**Estado:** supervisión implementada en rama `feature/chat-supervision-human`; evidencias locales verdes (dual **19/19**, Vitest **19**, tsc 0). Hardening: allowlist dedicada, feed HMAC (token obligatorio fuera de MEMORY), no democión de `human_handling`, notify de atención en MEMORY, alt-contact versionado, purge solo cerradas.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  

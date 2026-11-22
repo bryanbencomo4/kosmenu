@@ -6,6 +6,7 @@ import {
   merchantConversationHref,
   mintSupervisionFeedToken,
   newConversationNotifyDedupeKey,
+  nextConversationStatusAfterConsumerMessage,
   nextSupervisionRetryAt,
   pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
@@ -50,6 +51,30 @@ describe('chat supervision helpers', () => {
     expect(
       didEscalateToNeedsAttention('human_handling', 'needs_attention', 'hablar con encargado'),
     ).toBe(false);
+  });
+
+  it('never demotes human_handling when consumer escalates', () => {
+    expect(
+      nextConversationStatusAfterConsumerMessage({
+        previousStatus: 'human_handling',
+        consumerText: 'Quiero hablar con el encargado, tengo un reclamo',
+        wasClosed: false,
+      }),
+    ).toBe('human_handling');
+    expect(
+      nextConversationStatusAfterConsumerMessage({
+        previousStatus: 'ai_handling',
+        consumerText: 'Quiero hablar con un humano',
+        wasClosed: false,
+      }),
+    ).toBe('needs_attention');
+    expect(
+      nextConversationStatusAfterConsumerMessage({
+        previousStatus: 'closed',
+        consumerText: 'Hola de nuevo',
+        wasClosed: true,
+      }),
+    ).toBe('ai_handling');
   });
 
   it('hashes consumer sessions stably per commerce', () => {

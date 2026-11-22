@@ -71,6 +71,31 @@ export function didEscalateToNeedsAttention(
   return prev !== 'needs_attention' && prev !== 'human_handling';
 }
 
+/**
+ * Status after a consumer message. Never demotes active human ownership
+ * (escalation phrases must not unpause Gemini while staff is handling).
+ */
+export function nextConversationStatusAfterConsumerMessage(input: {
+  previousStatus: string | null | undefined;
+  consumerText: string;
+  wasClosed: boolean;
+}): 'ai_handling' | 'needs_attention' | 'human_handling' {
+  const prev = String(input.previousStatus || '');
+  if (!input.wasClosed && prev === 'human_handling') {
+    return 'human_handling';
+  }
+  if (detectNeedsHuman(input.consumerText)) {
+    return 'needs_attention';
+  }
+  if (input.wasClosed || !prev) {
+    return 'ai_handling';
+  }
+  if (prev === 'needs_attention' || prev === 'ai_handling') {
+    return prev;
+  }
+  return 'ai_handling';
+}
+
 /** Max WaSender delivery attempts for a supervision notify event. */
 export const SUPERVISION_NOTIFY_MAX_ATTEMPTS = 3;
 

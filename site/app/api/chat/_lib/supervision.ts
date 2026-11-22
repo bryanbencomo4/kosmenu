@@ -18,6 +18,7 @@ import {
   didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
+  nextConversationStatusAfterConsumerMessage,
   nextSupervisionRetryAt,
   newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
@@ -31,6 +32,7 @@ import {
   memoryGetBySession,
   memoryGetConversation,
   memoryInsertEvent,
+  memoryListMessages,
   memoryUpdateConversation,
   memoryUpdateEvent,
   memoryUpsertConversation,
@@ -42,6 +44,7 @@ export {
   hashConsumerSession,
   merchantConversationHref,
   mintSupervisionFeedToken,
+  nextConversationStatusAfterConsumerMessage,
   nextSupervisionRetryAt,
   newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
@@ -200,11 +203,11 @@ export async function persistConsumerTurn(
           wasClosed || (lastAt > 0 && now.getTime() - lastAt > reopenMs);
         // Re-notify only after an explicit close (not mere idle), once per reopen.
         if (wasClosed) isNewConversation = true;
-        const nextStatus = detectNeedsHuman(input.text)
-          ? 'needs_attention'
-          : wasClosed
-            ? 'ai_handling'
-            : conversation.status;
+        const nextStatus = nextConversationStatusAfterConsumerMessage({
+          previousStatus: conversation.status,
+          consumerText: input.text,
+          wasClosed,
+        });
         conversation =
           memoryUpdateConversation(conversation.id, {
             status: nextStatus,
@@ -236,36 +239,34 @@ export async function persistConsumerTurn(
         client_message_id: clientMessageId,
         payload: input.payload || {},
       });
-      if (isNewConversation && cfg.wasenderNotify) {
-        void enqueueNewConversationNotify({
-          conversationId: conversation.id,
-          comercioId: input.comercioId,
-          commerceName: input.commerceName,
-          attentionVersion: conversation.attention_version,
-        }).catch(() => {});
-      } else if (
-        cfg.wasenderNotify &&
-        detectNeedsHuman(input.text) &&
-        conversation.status === 'needs_attention'
-      ) {
-        void enqueueNeedsAttentionNotify({
-          conversationId: conversation.id,
-          comercioId: input.comercioId,
-          commerceName: input.commerceName,
-        }).catch(() => {});
+      const escalated = didEscalateToNeedsAttention(
+        previousStatus,
+        conversation.status,
+        input.text,
+      );
+      if (cfg.wasenderNotify) {
+        if (escalated) {
+          void enqueueNeedsAttentionNotify({
+            conversationId: conversation.id,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+          }).catch(() => {});
+        } else if (isNewConversation) {
+          void enqueueNewConversationNotify({
+            conversationId: conversation.id,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+            attentionVersion: conversation.attention_version,
+          }).catch(() => {});
+        }
       }
-      if (
-        didEscalateToNeedsAttention(
-          previousStatus,
-          conversation.status,
-          input.text,
-        )
-      ) {
+      if (escalated) {
         await offerAlternateContactIfNeeded({
           conversationId: conversation.id,
           comercioId: input.comercioId,
           commerceName: input.commerceName,
           publicWhatsapp: input.publicWhatsapp,
+          attentionVersion: conversation.attention_version,
         }).catch(() => {});
       }
       return {
@@ -358,11 +359,11 @@ export async function persistConsumerTurn(
 
     const messageInserted = Boolean(msg.data?.id);
     if (messageInserted) {
-      const nextStatus = detectNeedsHuman(input.text)
-        ? 'needs_attention'
-        : wasClosed
-          ? 'ai_handling'
-          : String(conversation!.status);
+      const nextStatus = nextConversationStatusAfterConsumerMessage({
+        previousStatus: String(conversation!.status || ''),
+        consumerText: input.text,
+        wasClosed,
+      });
       const upd = await sb
         .from('chat_conversations')
         .update({
@@ -387,23 +388,26 @@ export async function persistConsumerTurn(
         .single();
       if (upd.data) conversation = upd.data as Record<string, unknown>;
 
-      if (isNewConversation && cfg.wasenderNotify) {
-        void enqueueNewConversationNotify({
-          conversationId,
-          comercioId: input.comercioId,
-          commerceName: input.commerceName,
-          attentionVersion: Number(conversation!.attention_version || 1),
-        }).catch(() => {});
-      } else if (
-        cfg.wasenderNotify &&
-        detectNeedsHuman(input.text) &&
-        String(conversation!.status) === 'needs_attention'
-      ) {
-        void enqueueNeedsAttentionNotify({
-          conversationId,
-          comercioId: input.comercioId,
-          commerceName: input.commerceName,
-        }).catch(() => {});
+      const escalated = didEscalateToNeedsAttention(
+        previousStatus,
+        String(conversation!.status),
+        input.text,
+      );
+      if (cfg.wasenderNotify) {
+        if (escalated) {
+          void enqueueNeedsAttentionNotify({
+            conversationId,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+          }).catch(() => {});
+        } else if (isNewConversation) {
+          void enqueueNewConversationNotify({
+            conversationId,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+            attentionVersion: Number(conversation!.attention_version || 1),
+          }).catch(() => {});
+        }
       }
 
       void publishConversationEvent(input.comercioId, conversationId, {
@@ -411,18 +415,13 @@ export async function persistConsumerTurn(
         role: 'consumer',
       }).catch(() => {});
 
-      if (
-        didEscalateToNeedsAttention(
-          previousStatus,
-          String(conversation!.status),
-          input.text,
-        )
-      ) {
+      if (escalated) {
         await offerAlternateContactIfNeeded({
           conversationId,
           comercioId: input.comercioId,
           commerceName: input.commerceName,
           publicWhatsapp: input.publicWhatsapp,
+          attentionVersion: Number(conversation!.attention_version || 1),
         }).catch(() => {});
       }
     }
@@ -478,6 +477,9 @@ export async function persistAssistantOrStaffMessage(input: {
       ) {
         return { ok: true, discarded: true };
       }
+      const beforeIds = new Set(
+        memoryListMessages(input.conversationId).map((m) => m.id),
+      );
       const msg = memoryAddMessage({
         conversation_id: input.conversationId,
         comercio_id: input.comercioId,
@@ -488,6 +490,8 @@ export async function persistAssistantOrStaffMessage(input: {
         payload: input.payload || {},
       });
       if (!msg) return { ok: false };
+      const inserted = !beforeIds.has(msg.id);
+      if (!inserted) return { ok: true, messageId: msg.id };
       memoryUpdateConversation(input.conversationId, {
         last_message_at: new Date().toISOString(),
         last_message_preview: previewText(input.text),
@@ -533,6 +537,10 @@ export async function persistAssistantOrStaffMessage(input: {
       .select('id')
       .maybeSingle();
     if (error) return { ok: false };
+    if (!data?.id) {
+      // Duplicate client_message_id — do not refresh preview/events.
+      return { ok: true };
+    }
 
     await sb
       .from('chat_conversations')
@@ -548,7 +556,7 @@ export async function persistAssistantOrStaffMessage(input: {
       role: input.role,
     }).catch(() => {});
 
-    return { ok: true, messageId: data?.id ? String(data.id) : undefined };
+    return { ok: true, messageId: String(data.id) };
   } catch {
     return { ok: false };
   }
@@ -563,6 +571,7 @@ async function offerAlternateContactIfNeeded(input: {
   comercioId: string;
   commerceName: string;
   publicWhatsapp?: string | null;
+  attentionVersion?: number;
 }) {
   // Consumer-facing alternate may use the public menu WhatsApp; merchant
   // notify numbers stay on dedicated config (resolveSupervisionWhatsapp).
@@ -579,12 +588,14 @@ async function offerAlternateContactIfNeeded(input: {
     ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${phone}. No prometemos una respuesta humana inmediata.`
     : `El personal de ${name} puede unirse a este chat cuando esté disponible. No prometemos una respuesta humana inmediata; si el local publica WhatsApp en el menú, úsalo para contacto directo.`;
 
+  const version = Math.max(1, Number(input.attentionVersion) || 1);
   await persistAssistantOrStaffMessage({
     conversationId: input.conversationId,
     comercioId: input.comercioId,
     role: 'system',
     text: body,
-    clientMessageId: `sys_alt_contact_${input.conversationId}`,
+    // Versioned so a later escalate-after-return can re-offer contact.
+    clientMessageId: `sys_alt_contact_${input.conversationId}_v${version}`,
   });
 }
 
@@ -726,26 +737,55 @@ async function enqueueNeedsAttentionNotify(input: {
   comercioId: string;
   commerceName: string;
 }) {
+  const cfg = getChatSupervisionConfig();
+  if (!cfg.wasenderNotify) return;
   const dedupeKey = `chat_supervision:attention:${input.conversationId}:${new Date()
     .toISOString()
     .slice(0, 13)}`; // at most hourly
+
+  if (isSupervisionMemoryEnabled()) {
+    const inserted = memoryInsertEvent({
+      conversation_id: input.conversationId,
+      comercio_id: input.comercioId,
+      event_type: 'needs_attention',
+      dedupe_key: dedupeKey,
+    });
+    if (!inserted.ok) return;
+    if ((process.env.CHAT_SUPERVISION_MEMORY_SEND_WASENDER || '').trim() !== '1') {
+      memoryUpdateEvent(dedupeKey, {
+        status: 'skipped',
+        last_error: 'memory_mode',
+      });
+      return;
+    }
+  }
+
   const sb = getServiceSupabaseClient();
-  const { error } = await sb.from('chat_supervision_events').insert({
-    conversation_id: input.conversationId,
-    comercio_id: input.comercioId,
-    event_type: 'needs_attention',
-    dedupe_key: dedupeKey,
-    channel: 'whatsapp',
-    status: 'queued',
-  });
-  if (error) return;
+  if (!isSupervisionMemoryEnabled()) {
+    const { error } = await sb.from('chat_supervision_events').insert({
+      conversation_id: input.conversationId,
+      comercio_id: input.comercioId,
+      event_type: 'needs_attention',
+      dedupe_key: dedupeKey,
+      channel: 'whatsapp',
+      status: 'queued',
+    });
+    if (error) return;
+  }
 
   const dest = await resolveSupervisionWhatsapp(input.comercioId);
   if (!dest) {
-    await sb
-      .from('chat_supervision_events')
-      .update({ status: 'skipped', last_error: 'no_supervision_whatsapp' })
-      .eq('dedupe_key', dedupeKey);
+    if (isSupervisionMemoryEnabled()) {
+      memoryUpdateEvent(dedupeKey, {
+        status: 'skipped',
+        last_error: 'no_supervision_whatsapp',
+      });
+    } else {
+      await sb
+        .from('chat_supervision_events')
+        .update({ status: 'skipped', last_error: 'no_supervision_whatsapp' })
+        .eq('dedupe_key', dedupeKey);
+    }
     return;
   }
   const link = merchantConversationHref(input.conversationId);
@@ -763,14 +803,18 @@ async function enqueueNeedsAttentionNotify(input: {
       dedupeKey,
       comercioId: input.comercioId,
     });
-    await sb
-      .from('chat_supervision_events')
-      .update({
-        status: 'sent',
-        meta: { attempts: 0, handed_to_wasender_queue: true },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('dedupe_key', dedupeKey);
+    if (isSupervisionMemoryEnabled()) {
+      memoryUpdateEvent(dedupeKey, { status: 'sent' });
+    } else {
+      await sb
+        .from('chat_supervision_events')
+        .update({
+          status: 'sent',
+          meta: { attempts: 0, handed_to_wasender_queue: true },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('dedupe_key', dedupeKey);
+    }
   } catch (err) {
     await markSupervisionNotifyFailed(
       dedupeKey,

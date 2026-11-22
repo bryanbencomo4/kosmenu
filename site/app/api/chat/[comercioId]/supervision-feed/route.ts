@@ -48,6 +48,11 @@ export async function GET(
   const headerToken = (
     request.headers.get('x-chat-supervision-feed-token') || ''
   ).trim();
+  const allowSessionQuery =
+    isSupervisionMemoryEnabled() ||
+    /^(1|true|yes)$/i.test(
+      (process.env.CHAT_SUPERVISION_FEED_ALLOW_SESSION_QUERY || '').trim(),
+    );
   let sessionId = '';
   if (headerToken) {
     const verified = verifySupervisionFeedToken(headerToken, commerceId);
@@ -61,9 +66,14 @@ export async function GET(
       );
     }
     sessionId = verified.sessionId;
-  } else {
-    // Legacy fallback — prefer header token from chat POST.
+  } else if (allowSessionQuery) {
+    // MEMORY / explicit test only — production requires HMAC feed token.
     sessionId = (url.searchParams.get('sessionId') || '').trim();
+  } else {
+    return NextResponse.json(
+      { error: 'missing_feed_token' },
+      { status: 401 },
+    );
   }
   if (!sessionId || sessionId.length > 80) {
     return NextResponse.json({ error: 'missing_session' }, { status: 400 });

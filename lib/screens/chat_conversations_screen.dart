@@ -428,7 +428,8 @@ class _ChatConversationDetailScreenState
   @override
   Widget build(BuildContext context) {
     final status = _detail?.conversation.status ?? '…';
-    final humanTakeover = _detail?.flags.humanTakeover ?? true;
+    // Fail closed: missing flags payload must not unlock takeover controls.
+    final humanTakeover = _detail?.flags.humanTakeover ?? false;
     final human = humanTakeover && status == 'human_handling';
     final assignee = _chatAssigneeLabel(_detail?.conversation.assignedUserId);
     return Scaffold(
