@@ -15,6 +15,13 @@ type ConversationRow = {
   assigned_user_id: string | null;
 };
 
+type ComercioOption = {
+  id: string;
+  nombre: string;
+  role: string;
+  supervision_enabled: boolean;
+};
+
 function statusLabel(status: string) {
   switch (status) {
     case 'human_handling':
@@ -35,6 +42,7 @@ function ConversationsInboxInner({
 }) {
   const { token, email, ready, signOut } = usePanelSession();
   const [comercioId, setComercioId] = useState('');
+  const [comercios, setComercios] = useState<ComercioOption[]>([]);
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,6 +64,38 @@ function ConversationsInboxInner({
       cancelled = true;
     };
   }, [searchParamsPromise]);
+
+  useEffect(() => {
+    if (!ready || !token) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch('/api/panel/conversaciones/me', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (cancelled) return;
+      if (!res.ok) {
+        setError(
+          res.status === 401
+            ? 'Sesión expirada. Vuelve a iniciar sesión.'
+            : String(data.error || 'No se pudieron cargar tus comercios'),
+        );
+        return;
+      }
+      const list = (data.comercios || []) as ComercioOption[];
+      setComercios(list);
+      setComercioId((prev) => {
+        if (prev.trim()) return prev;
+        if (list.length === 1) return list[0].id;
+        const preferred = list.find((c) => c.supervision_enabled);
+        return preferred?.id || prev;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, token]);
 
   const loadInbox = useCallback(async () => {
     if (!token || !comercioId.trim()) return;
@@ -91,7 +131,6 @@ function ConversationsInboxInner({
     if (ready && token && comercioId.trim()) void loadInbox();
   }, [ready, token, comercioId, loadInbox]);
 
-  // Inbox Realtime: light broadcast / conversation row updates via postgres_changes.
   useEffect(() => {
     if (!token || !comercioId.trim()) return;
     const sb = getBrowserSupabase();
@@ -120,14 +159,15 @@ function ConversationsInboxInner({
     return <p className="text-sm text-stone-500">Comprobando sesión…</p>;
   }
 
+  const selected = comercios.find((c) => c.id === comercioId);
+
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="text-sm text-stone-600">
-              Bandeja de conversaciones del asistente virtual. Autenticación del
-              panel (sin pegar tokens).
+              Bandeja de conversaciones del asistente virtual.
             </p>
             {email ? (
               <p className="mt-1 text-xs text-stone-500">{email}</p>
@@ -143,13 +183,30 @@ function ConversationsInboxInner({
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
           <label className="block text-sm">
-            <span className="font-medium">Comercio ID</span>
-            <input
-              className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
-              value={comercioId}
-              onChange={(e) => setComercioId(e.target.value)}
-              placeholder="UUID del comercio"
-            />
+            <span className="font-medium">Comercio</span>
+            {comercios.length > 0 ? (
+              <select
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
+                value={comercioId}
+                onChange={(e) => setComercioId(e.target.value)}
+                data-testid="comercio-select"
+              >
+                <option value="">Selecciona un comercio</option>
+                {comercios.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                    {c.supervision_enabled ? '' : ' (supervisión off)'}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
+                value={comercioId}
+                onChange={(e) => setComercioId(e.target.value)}
+                placeholder="UUID del comercio"
+              />
+            )}
           </label>
           <div className="flex items-end">
             <button
@@ -162,6 +219,11 @@ function ConversationsInboxInner({
             </button>
           </div>
         </div>
+        {selected && !selected.supervision_enabled ? (
+          <p className="mt-2 text-sm text-amber-800">
+            La supervisión no está activa para este comercio (feature flag).
+          </p>
+        ) : null}
         {error ? (
           <p className="mt-2 text-sm text-red-700" role="alert">
             {error}
