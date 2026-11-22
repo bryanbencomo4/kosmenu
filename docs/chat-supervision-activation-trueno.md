@@ -16,7 +16,8 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 
 ## Orden seguro
 
-**Nota (evidencia read-only):** preview **no** sirve (sin `comercio_members`). Piloto = **prod** + flags Trueno.
+**Nota (evidencia read-only 2026-11-22):** prod tiene `comercio_members` + WaSender RPC; `chat_*` = **null**. Preview **no** sirve (sin `comercio_members`). Piloto = **prod** + flags Trueno.  
+`elmenuxfa.com/api/panel/conversaciones` aún **404** hasta merge/deploy de esta rama.
 
 1. Autorizar en el chat la frase exacta: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`
 2. Aplicar (script gated — no corre sin la frase):
@@ -27,7 +28,7 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
    ```
    - Incluye tablas/RPC + publication Realtime.
    - RPC takeover usa `chat_user_can_supervise(p_user_id)` (compatible con service_role del panel).
-3. Variables de entorno app (solo Trueno), **sin** MEMORY/E2E:
+3. Autorizar **deploy** de la rama (o merge) + variables de entorno app (solo Trueno), **sin** MEMORY/E2E:
    ```env
    CHAT_SUPERVISION_ENABLED=1
    CHAT_SUPERVISION_WASENDER=1

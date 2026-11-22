@@ -28,7 +28,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 18 | Playwright dual | PARTIAL | 14/14 con `CHAT_SUPERVISION_MEMORY=1`; **no** contra tablas reales |
 | 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | `20261123090000_…sql`; script gated `apply-chat-supervision-migration.mjs` |
 | 20 | Sin deploy/push/merge sin auth | DONE | Sin push/merge/deploy en esta rama |
-| 21 | Criterio principal comerciante | BLOCKED | Requiere pasos 7–11 en entorno real |
+| 21 | Criterio principal comerciante | BLOCKED | Requiere migración + deploy rama + flags Trueno; prod API panel aún 404; chat_* null |
 
 ## Prerequisites prod (read-only OK)
 

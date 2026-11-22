@@ -116,6 +116,27 @@ if (!take.res.ok || take.json?.conversation?.status !== 'human_handling') {
 }
 ok('takeover');
 
+const whileHuman = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    sessionId,
+    messages: [{ role: 'user', text: '¿Sigue alguien ahí?' }],
+  }),
+});
+if (
+  !whileHuman.res.ok ||
+  whileHuman.json?.supervision?.mode !== 'human_handling' ||
+  whileHuman.json?.skipped_llm !== true
+) {
+  fail(
+    'gemini_paused_while_human',
+    whileHuman.text.slice(0, 240) || 'expected human_handling + skipped_llm',
+  );
+  process.exit(1);
+}
+ok('gemini_paused_while_human');
+
 const staff = await api(`/api/panel/conversaciones/${conversationId}`, {
   method: 'POST',
   headers: {
@@ -153,6 +174,41 @@ if (!ret.res.ok || ret.json?.conversation?.status !== 'ai_handling') {
   process.exit(1);
 }
 ok('return_assistant');
+
+const afterReturn = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    sessionId,
+    messages: [{ role: 'user', text: 'Ok, gracias, ¿qué pizzas hay?' }],
+  }),
+});
+if (
+  !afterReturn.res.ok ||
+  afterReturn.json?.skipped_llm === true ||
+  afterReturn.json?.supervision?.mode === 'human_handling'
+) {
+  fail(
+    'gemini_resumed',
+    afterReturn.text.slice(0, 240) || 'expected Gemini to answer again',
+  );
+  process.exit(1);
+}
+ok('gemini_resumed', afterReturn.json?.model || 'ok');
+
+const close = await api(`/api/panel/conversaciones/${conversationId}`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${BEARER}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ action: 'close' }),
+});
+if (!close.res.ok || close.json?.conversation?.status !== 'closed') {
+  fail('close_conversation', close.text.slice(0, 200));
+  process.exit(1);
+}
+ok('close_conversation');
 
 const failed = steps.filter((s) => !s.ok);
 console.log(`\npassed=${steps.length - failed.length} failed=${failed.length}`);
