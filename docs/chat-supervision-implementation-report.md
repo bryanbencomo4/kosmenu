@@ -42,6 +42,7 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 Destino: solo `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` (sin fallback a WhatsApp público del menú); bloquea soporte plataforma. Contacto alternativo al consumidor sí puede usar el WhatsApp público.  
 Enlace: `merchantConversationHref` → `publicSiteUrl` (`https://elmenuxfa.com/panel/conversaciones/{id}`) — mismo deploy que la API; Flutter inbox es entrada alternativa.  
 Si el enqueue falla: evento `failed` con backoff 1m/5m/15m (máx. 3) y `retryFailedSupervisionNotifies` en turnos posteriores; la cola `wasender_message_queue` reintenta la entrega una vez encolado.  
+Notify/broadcast/retry se programan con Next `after()` para no perderse al cerrar la función serverless.  
 En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).
 
 ## 4. Persistencia

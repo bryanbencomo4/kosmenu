@@ -6,6 +6,8 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 
+import { after } from 'next/server';
+
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import { sendWhatsappText } from '../../_lib/send-order-whatsapp';
 import { resolveMerchantContacts } from '../../_lib/notify-merchant-new-order';
@@ -52,6 +54,25 @@ export {
   shouldRetrySupervisionNotify,
   verifySupervisionFeedToken,
 } from './supervision-shared';
+
+/**
+ * Run work after the HTTP response is sent (Vercel/Next), so WaSender /
+ * broadcast jobs are not dropped when the function freezes. Falls back to
+ * fire-and-forget outside a request (tests / scripts).
+ */
+function scheduleAfterResponse(task: () => Promise<unknown>) {
+  try {
+    after(() => {
+      void Promise.resolve()
+        .then(task)
+        .catch(() => {});
+    });
+  } catch {
+    void Promise.resolve()
+      .then(task)
+      .catch(() => {});
+  }
+}
 
 export type ConversationStatus =
   | 'ai_handling'
@@ -246,18 +267,22 @@ export async function persistConsumerTurn(
       );
       if (cfg.wasenderNotify) {
         if (escalated) {
-          void enqueueNeedsAttentionNotify({
-            conversationId: conversation.id,
-            comercioId: input.comercioId,
-            commerceName: input.commerceName,
-          }).catch(() => {});
+          scheduleAfterResponse(() =>
+            enqueueNeedsAttentionNotify({
+              conversationId: conversation.id,
+              comercioId: input.comercioId,
+              commerceName: input.commerceName,
+            }),
+          );
         } else if (isNewConversation) {
-          void enqueueNewConversationNotify({
-            conversationId: conversation.id,
-            comercioId: input.comercioId,
-            commerceName: input.commerceName,
-            attentionVersion: conversation.attention_version,
-          }).catch(() => {});
+          scheduleAfterResponse(() =>
+            enqueueNewConversationNotify({
+              conversationId: conversation.id,
+              comercioId: input.comercioId,
+              commerceName: input.commerceName,
+              attentionVersion: conversation.attention_version,
+            }),
+          );
         }
       }
       if (escalated) {
@@ -435,25 +460,31 @@ export async function persistConsumerTurn(
       );
       if (cfg.wasenderNotify) {
         if (escalated) {
-          void enqueueNeedsAttentionNotify({
-            conversationId,
-            comercioId: input.comercioId,
-            commerceName: input.commerceName,
-          }).catch(() => {});
+          scheduleAfterResponse(() =>
+            enqueueNeedsAttentionNotify({
+              conversationId,
+              comercioId: input.comercioId,
+              commerceName: input.commerceName,
+            }),
+          );
         } else if (isNewConversation) {
-          void enqueueNewConversationNotify({
-            conversationId,
-            comercioId: input.comercioId,
-            commerceName: input.commerceName,
-            attentionVersion: Number(conversation!.attention_version || 1),
-          }).catch(() => {});
+          scheduleAfterResponse(() =>
+            enqueueNewConversationNotify({
+              conversationId,
+              comercioId: input.comercioId,
+              commerceName: input.commerceName,
+              attentionVersion: Number(conversation!.attention_version || 1),
+            }),
+          );
         }
       }
 
-      void publishConversationEvent(input.comercioId, conversationId, {
-        type: 'message_created',
-        role: 'consumer',
-      }).catch(() => {});
+      scheduleAfterResponse(() =>
+        publishConversationEvent(input.comercioId, conversationId, {
+          type: 'message_created',
+          role: 'consumer',
+        }),
+      );
 
       if (escalated) {
         await offerAlternateContactIfNeeded({
@@ -467,7 +498,9 @@ export async function persistConsumerTurn(
     }
 
     // Opportunistic retry of failed WaSender notifies (never blocks chat).
-    void retryFailedSupervisionNotifies(input.comercioId).catch(() => {});
+    scheduleAfterResponse(() =>
+      retryFailedSupervisionNotifies(input.comercioId),
+    );
 
     return {
       ok: true,
@@ -591,10 +624,12 @@ export async function persistAssistantOrStaffMessage(input: {
       })
       .eq('id', input.conversationId);
 
-    void publishConversationEvent(input.comercioId, input.conversationId, {
-      type: 'message_created',
-      role: input.role,
-    }).catch(() => {});
+    scheduleAfterResponse(() =>
+      publishConversationEvent(input.comercioId, input.conversationId, {
+        type: 'message_created',
+        role: input.role,
+      }),
+    );
 
     return { ok: true, messageId: String(data.id) };
   } catch {

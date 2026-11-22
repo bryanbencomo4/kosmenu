@@ -61,6 +61,7 @@ HEAD de trabajo: `feature/chat-supervision-human` (CI verde).
    ```
 5. Smoke dual UI (consumidor + panel login real) **sin** `CHAT_SUPERVISION_MEMORY`.
 6. Confirmar **una** notificación WaSender al número de avisos (`CHAT_SUPERVISION_WASENDER=1`).
+7. (Opcional staging) bench MEMORY previo: `node site/scripts/chat-supervision-memory-bench.mjs`.
 7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto:
    ```powershell
    $env:CHAT_SUPERVISION_WHATSAPP_CONFIRM='I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP'
