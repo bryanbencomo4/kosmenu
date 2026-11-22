@@ -261,8 +261,23 @@ export function ChatComposer({
             stop: () => void;
           };
         }).SpeechRecognition ||
-        (window as unknown as { webkitSpeechRecognition?: new () => any })
-          .webkitSpeechRecognition;
+        (
+          window as unknown as {
+            webkitSpeechRecognition?: new () => {
+              lang: string;
+              continuous: boolean;
+              interimResults: boolean;
+              onresult:
+                | ((ev: {
+                    results: ArrayLike<{ 0: { transcript: string } }>;
+                  }) => void)
+                | null;
+              onerror: (() => void) | null;
+              start: () => void;
+              stop: () => void;
+            };
+          }
+        ).webkitSpeechRecognition;
       if (SpeechRecognitionCtor) {
         try {
           const recognition = new SpeechRecognitionCtor();

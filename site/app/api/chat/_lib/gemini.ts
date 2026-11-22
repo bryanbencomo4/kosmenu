@@ -201,7 +201,19 @@ async function callGenerateContent(params: {
   }
 }
 
-function extractUsage(json: any): { in: number; out: number } {
+type GeminiResponseJson = {
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+  };
+  candidates?: Array<{
+    content?: {
+      parts?: GeminiPart[];
+    };
+  }>;
+};
+
+function extractUsage(json: GeminiResponseJson): { in: number; out: number } {
   const u = json?.usageMetadata ?? {};
   return {
     in: Number(u.promptTokenCount || 0) || 0,
@@ -209,7 +221,7 @@ function extractUsage(json: any): { in: number; out: number } {
   };
 }
 
-function extractModelText(json: any): string {
+function extractModelText(json: GeminiResponseJson): string {
   const parts = json?.candidates?.[0]?.content?.parts ?? [];
   return parts
     .map((p: GeminiPart) => p.text || '')
@@ -218,7 +230,9 @@ function extractModelText(json: any): string {
     .trim();
 }
 
-function extractFunctionCalls(json: any): Array<{ name: string; args: Record<string, unknown> }> {
+function extractFunctionCalls(
+  json: GeminiResponseJson,
+): Array<{ name: string; args: Record<string, unknown> }> {
   const parts = json?.candidates?.[0]?.content?.parts ?? [];
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   for (const p of parts) {
@@ -384,7 +398,7 @@ export async function runChatWithGemini(params: {
         );
       }
 
-      const json = await res.json();
+      const json = (await res.json()) as GeminiResponseJson;
       const usage = extractUsage(json);
       tokensInput += usage.in;
       tokensOutput += usage.out;

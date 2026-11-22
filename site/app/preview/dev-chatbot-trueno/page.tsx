@@ -40,21 +40,38 @@ export default async function DevChatbotTruenoPage() {
       businessName={String(comercio.nombre || 'Pizzas El Trueno')}
       currency={String(comercio.moneda || 'USD')}
       logoUrl={(comercio.logo_url || '').trim() || null}
-      products={(menu.productos || []).map((p: any) => ({
-        id: String(p.id),
-        nombre: String(p.nombre || ''),
-        descripcion: (p.descripcion || '').toString(),
-        precio: Number(p.precio) || 0,
-        disponible: p.disponible !== false,
-        opciones_menu: p.opciones_menu ?? null,
-        imagen_url: (p.imagen_url || '').toString() || null,
-        categoria_id: p.categoria_id ? String(p.categoria_id) : null,
-      }))}
-      categories={(menu.categorias || []).map((c: any) => ({
-        id: String(c.id),
-        nombre: String(c.nombre || ''),
-        opciones_menu: c.opciones_menu ?? null,
-      }))}
+      products={(menu.productos || []).map(
+        (p: {
+          id?: string | null;
+          nombre?: string | null;
+          descripcion?: string | null;
+          precio?: number | null;
+          disponible?: boolean | null;
+          opciones_menu?: unknown;
+          imagen_url?: string | null;
+          categoria_id?: string | null;
+        }) => ({
+          id: String(p.id),
+          nombre: String(p.nombre || ''),
+          descripcion: (p.descripcion || '').toString(),
+          precio: Number(p.precio) || 0,
+          disponible: p.disponible !== false,
+          opciones_menu: p.opciones_menu ?? null,
+          imagen_url: (p.imagen_url || '').toString() || null,
+          categoria_id: p.categoria_id ? String(p.categoria_id) : null,
+        }),
+      )}
+      categories={(menu.categorias || []).map(
+        (c: {
+          id?: string | null;
+          nombre?: string | null;
+          opciones_menu?: unknown;
+        }) => ({
+          id: String(c.id),
+          nombre: String(c.nombre || ''),
+          opciones_menu: c.opciones_menu ?? null,
+        }),
+      )}
     />
   );
 }

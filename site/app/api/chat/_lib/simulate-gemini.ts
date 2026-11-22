@@ -178,11 +178,12 @@ export function runSimulatedChat(params: {
       }
     }
     const names = (drinks.results || []).map((d) => d.name);
+    const catalogProducts = params.menu.productos as Array<{
+      id?: string | null;
+    }>;
     for (const d of drinks.results || []) {
-      const p = params.menu.productos.find(
-        (x: any) => x.id === d.id,
-      ) as any;
-      if (p) {
+      const p = catalogProducts.find((x) => x.id === d.id);
+      if (p?.id) {
         const card = prepareCartLineProposal(params.menu, params.commerceId, {
           product_id: p.id,
           quantity: 1,
