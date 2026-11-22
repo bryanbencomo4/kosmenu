@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 
-import { publicSiteUrl } from '../../_lib/public-site-url';
+import { appSiteUrl } from '../../_lib/public-site-url';
 
 export function sessionPepper(env: NodeJS.ProcessEnv = process.env) {
   return (
@@ -20,8 +20,9 @@ export function hashConsumerSession(
     .digest('hex');
 }
 
+/** WaSender deep link → Flutter merchant host (native inbox). */
 export function merchantConversationHref(conversationId: string) {
-  const base = publicSiteUrl.replace(/\/$/, '');
+  const base = appSiteUrl.replace(/\/$/, '');
   return `${base}/panel/conversaciones/${encodeURIComponent(conversationId)}`;
 }
 

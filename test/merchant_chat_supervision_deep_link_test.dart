@@ -19,7 +19,7 @@ void main() {
       '11111111-1111-4111-8111-111111111111',
     );
     final href = MerchantDeepLink.publicConversationUri();
-    expect(href?.toString(), contains('https://elmenuxfa.com/panel/conversaciones/'));
+    expect(href?.toString(), contains('https://app.elmenuxfa.com/panel/conversaciones/'));
     expect(href?.toString(), isNot(contains('service_role')));
     expect(href?.toString(), isNot(contains('Bearer')));
   });

@@ -8,8 +8,8 @@ class MerchantDeepLink {
     'orders',
   };
 
-  /// Public Next.js site that hosts `/panel/conversaciones` (not the Flutter host).
-  static const String publicSiteOrigin = 'https://elmenuxfa.com';
+  /// Flutter merchant host (native chat inbox). Next public site remains a fallback.
+  static const String publicSiteOrigin = 'https://app.elmenuxfa.com';
 
   static String? _orderId;
   static Uri? _fallbackUri;
