@@ -2,7 +2,8 @@
 
 **Rama:** `feature/chat-supervision-human`  
 **Estado:** supervisión implementada en rama; evidencias locales verdes.  
-**Veredicto:** **NO-GO** publicar. Migración no aplicada; WaSender real / piloto Trueno pendientes de tu autorización.
+**Veredicto:** **NO-GO** publicar. Migración no aplicada; WaSender real / piloto Trueno pendientes de tu autorización.  
+**Desbloqueo:** autorizar `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` → `site/scripts/apply-chat-supervision-migration.mjs` (prod). Matriz: `docs/chat-supervision-requirements-audit.md`.
 
 ## 1. Arquitectura existente (auditoría)
 

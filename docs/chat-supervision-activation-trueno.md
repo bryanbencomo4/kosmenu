@@ -16,28 +16,30 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 
 ## Orden seguro
 
-**Nota (evidencia read-only):** el proyecto preview (`gsfxqzvmyzjjgpigrste`) **no** tiene `comercio_members` ni `is_comercio_member`. No es un entorno válido para este piloto hasta alinear el esquema. El piloto autorizado debe apuntar a **prod** (`qqhberaayhohxlbbhdyi`) con flags fail-closed solo Trueno.
+**Nota (evidencia read-only):** preview **no** sirve (sin `comercio_members`). Piloto = **prod** + flags Trueno.
 
-1. **Autorizar** explícitamente la migración en el entorno elegido (recomendado: prod + flags Trueno).
-2. Aplicar `supabase/migrations/20261123090000_chat_supervision_conversations.sql`.
-   - Los RPC `chat_take_conversation` / `chat_return_to_assistant` autorizan por `p_user_id` (`chat_user_can_supervise`) porque el panel Next llama con **service_role** (`auth.uid()` sería null).
-3. Publicar Realtime (si no está):
-   ```sql
-   alter publication supabase_realtime add table public.chat_conversations;
-   alter publication supabase_realtime add table public.chat_messages;
+1. Autorizar en el chat la frase exacta: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`
+2. Aplicar (script gated — no corre sin la frase):
+   ```powershell
+   $env:CHAT_SUPERVISION_MIGRATE_CONFIRM='I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION'
+   $env:CHAT_SUPERVISION_MIGRATE_TARGET='prod'
+   node site/scripts/apply-chat-supervision-migration.mjs
    ```
-4. Variables de entorno (solo Trueno):
+   - Incluye tablas/RPC + publication Realtime.
+   - RPC takeover usa `chat_user_can_supervise(p_user_id)` (compatible con service_role del panel).
+3. Variables de entorno app (solo Trueno), **sin** MEMORY/E2E:
    ```env
    CHAT_SUPERVISION_ENABLED=1
    CHAT_SUPERVISION_WASENDER=1
    CHAT_SUPERVISION_HUMAN_TAKEOVER=1
    CHAT_SUPERVISION_COMMERCE_IDS=0aa8c53b-07f1-446e-8b88-66c2b7ae89ea
    CHAT_SUPERVISION_SESSION_PEPPER=<pepper-no-commitear>
-   # NO poner CHAT_SUPERVISION_MEMORY ni E2E_BEARER en staging/prod
    ```
-5. Smoke dual (consumidor + panel login real).
-6. Confirmar **una** notificación WaSender al número de avisos (no historial completo).
-7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
+4. Smoke dual (consumidor + panel login real) **sin** `CHAT_SUPERVISION_MEMORY`.
+5. Confirmar **una** notificación WaSender al número de avisos.
+6. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
+
+Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.
 
 ## Rollback
 
