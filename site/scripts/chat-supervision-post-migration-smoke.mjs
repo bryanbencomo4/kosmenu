@@ -185,7 +185,7 @@ const afterReturn = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
 });
 if (
   !afterReturn.res.ok ||
-  afterReturn.json?.skipped_llm === true ||
+  afterReturn.json?.model === 'human_handoff' ||
   afterReturn.json?.supervision?.mode === 'human_handling'
 ) {
   fail(

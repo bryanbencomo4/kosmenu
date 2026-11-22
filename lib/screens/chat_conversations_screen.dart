@@ -473,31 +473,44 @@ class _ChatConversationDetailScreenState
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _draft,
-                      enabled: human && !_busy,
-                      decoration: InputDecoration(
-                        hintText: human
-                            ? 'Escribe al cliente…'
-                            : 'Toma la conversación para escribir',
-                        border: const OutlineInputBorder(),
-                        isDense: true,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _draft,
+                          enabled: human && !_busy,
+                          decoration: InputDecoration(
+                            hintText: human
+                                ? 'Escribe al cliente…'
+                                : 'Toma la conversación para escribir',
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: !human ||
+                                _busy ||
+                                _draft.text.trim().isEmpty
+                            ? null
+                            : () => unawaited(
+                                  _act('message', text: _draft.text.trim()),
+                                ),
+                        child: const Text('Enviar'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: !human ||
-                            _busy ||
-                            _draft.text.trim().isEmpty
-                        ? null
-                        : () => unawaited(
-                              _act('message', text: _draft.text.trim()),
-                            ),
-                    child: const Text('Enviar'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Solo texto por ahora: notas de voz y adjuntos aún no '
+                    'están disponibles desde el panel.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF6B7280),
+                        ),
                   ),
                 ],
               ),

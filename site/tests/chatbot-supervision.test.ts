@@ -3,6 +3,9 @@ import {
   detectNeedsHuman,
   hashConsumerSession,
   merchantConversationHref,
+  nextSupervisionRetryAt,
+  shouldRetrySupervisionNotify,
+  SUPERVISION_NOTIFY_MAX_ATTEMPTS,
 } from '../app/api/chat/_lib/supervision-shared';
 import {
   getChatSupervisionConfig,
@@ -73,6 +76,26 @@ describe('chat supervision helpers', () => {
     const w = buildChatbotWelcomeMessage('Pizzas El Trueno');
     expect(w).toMatch(/personal autorizado/i);
     expect(w).toMatch(/procesada por IA/i);
+  });
+
+  it('limits WaSender notify retries with backoff', () => {
+    const t0 = Date.parse('2026-11-22T12:00:00.000Z');
+    expect(nextSupervisionRetryAt(1, t0)).toBe('2026-11-22T12:01:00.000Z');
+    expect(nextSupervisionRetryAt(2, t0)).toBe('2026-11-22T12:05:00.000Z');
+    expect(nextSupervisionRetryAt(SUPERVISION_NOTIFY_MAX_ATTEMPTS, t0)).toBeNull();
+    expect(
+      shouldRetrySupervisionNotify(
+        { attempts: 1, next_retry_at: '2026-11-22T11:59:00.000Z' },
+        t0,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRetrySupervisionNotify(
+        { attempts: 1, next_retry_at: '2026-11-22T12:05:00.000Z' },
+        t0,
+      ),
+    ).toBe(false);
+    expect(shouldRetrySupervisionNotify({ attempts: 3 }, t0)).toBe(false);
   });
 });
 

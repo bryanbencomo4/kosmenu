@@ -300,9 +300,9 @@ function ConversationDetailInner({
           </button>
         </div>
         <p className="mt-2 text-[11px] text-stone-500">
-          Mensajes nuevos llegan por Realtime (postgres_changes). Si se pierde
-          la conexión, se recuperan desde la base de datos al volver a la
-          pestaña.
+          Solo texto por ahora: notas de voz y adjuntos aún no están disponibles
+          desde el panel. Mensajes nuevos llegan por Realtime; si se pierde la
+          conexión, se recuperan desde la base al volver a la pestaña.
         </p>
       </div>
     </div>

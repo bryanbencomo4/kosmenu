@@ -37,6 +37,7 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 `sendWhatsappText` + cola existente + `dedupe_key` en `chat_supervision_events`.  
 Destino preferido: `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` → fallback contactos comercio; bloquea soporte plataforma.  
 Enlace: `merchantConversationHref` → `appSiteUrl` (`https://app.elmenuxfa.com/panel/conversaciones/{id}`).  
+Si el enqueue falla: evento `failed` con backoff 1m/5m/15m (máx. 3) y `retryFailedSupervisionNotifies` en turnos posteriores; la cola `wasender_message_queue` reintenta la entrega una vez encolado.  
 En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).
 
 ## 4. Persistencia
@@ -99,8 +100,7 @@ Objetivo 1–2s en red controlada tras Realtime publicado. Medición de carga ag
 
 ## 16. Vitest
 
-Suite completa site: **116 files / 827 passed / 4 skipped**.  
-Supervisión: helpers + memoria + privacy welcome.
+Supervisión: **10 passed** (helpers, memoria, privacy, backoff notify).
 
 ## 17. TypeScript
 

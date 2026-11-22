@@ -32,3 +32,44 @@ export const ESCALATION_RE =
 export function detectNeedsHuman(text: string) {
   return ESCALATION_RE.test(text);
 }
+
+/** Max WaSender delivery attempts for a supervision notify event. */
+export const SUPERVISION_NOTIFY_MAX_ATTEMPTS = 3;
+
+const SUPERVISION_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+
+/**
+ * After `failedAttempts` recorded failures, when to try again.
+ * `failedAttempts=1` → 1m, `2` → 5m; at max attempts returns null (stop).
+ */
+export function nextSupervisionRetryAt(
+  failedAttempts: number,
+  nowMs = Date.now(),
+): string | null {
+  if (
+    !Number.isFinite(failedAttempts) ||
+    failedAttempts < 1 ||
+    failedAttempts >= SUPERVISION_NOTIFY_MAX_ATTEMPTS
+  ) {
+    return null;
+  }
+  const delay =
+    SUPERVISION_RETRY_DELAYS_MS[
+      Math.min(failedAttempts - 1, SUPERVISION_RETRY_DELAYS_MS.length - 1)
+    ];
+  return new Date(nowMs + delay).toISOString();
+}
+
+export function shouldRetrySupervisionNotify(
+  meta: { attempts?: unknown; next_retry_at?: unknown } | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  const attempts = Number(meta?.attempts || 0);
+  if (!Number.isFinite(attempts) || attempts >= SUPERVISION_NOTIFY_MAX_ATTEMPTS) {
+    return false;
+  }
+  const next = meta?.next_retry_at;
+  if (next == null || String(next).trim() === '') return true;
+  const at = Date.parse(String(next));
+  return Number.isFinite(at) && at <= nowMs;
+}

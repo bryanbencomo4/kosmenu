@@ -17,6 +17,8 @@ import {
   detectNeedsHuman,
   hashConsumerSession,
   merchantConversationHref,
+  nextSupervisionRetryAt,
+  shouldRetrySupervisionNotify,
 } from './supervision-shared';
 import {
   isSupervisionMemoryEnabled,
@@ -33,6 +35,8 @@ export {
   detectNeedsHuman,
   hashConsumerSession,
   merchantConversationHref,
+  nextSupervisionRetryAt,
+  shouldRetrySupervisionNotify,
 } from './supervision-shared';
 
 export type ConversationStatus =
@@ -357,6 +361,9 @@ export async function persistConsumerTurn(
       role: 'consumer',
     }).catch(() => {});
 
+    // Opportunistic retry of failed WaSender notifies (never blocks chat).
+    void retryFailedSupervisionNotifies(input.comercioId).catch(() => {});
+
     return {
       ok: true,
       conversationId,
@@ -580,17 +587,17 @@ async function enqueueNewConversationNotify(input: {
     });
     await sb
       .from('chat_supervision_events')
-      .update({ status: 'sent', updated_at: new Date().toISOString() })
-      .eq('dedupe_key', dedupeKey);
-  } catch (err) {
-    await sb
-      .from('chat_supervision_events')
       .update({
-        status: 'failed',
-        last_error: err instanceof Error ? err.message.slice(0, 300) : 'send_failed',
+        status: 'sent',
+        meta: { attempts: 0, handed_to_wasender_queue: true },
         updated_at: new Date().toISOString(),
       })
       .eq('dedupe_key', dedupeKey);
+  } catch (err) {
+    await markSupervisionNotifyFailed(
+      dedupeKey,
+      err instanceof Error ? err.message.slice(0, 300) : 'send_failed',
+    );
   }
 }
 
@@ -638,16 +645,133 @@ async function enqueueNeedsAttentionNotify(input: {
     });
     await sb
       .from('chat_supervision_events')
-      .update({ status: 'sent' })
-      .eq('dedupe_key', dedupeKey);
-  } catch (err) {
-    await sb
-      .from('chat_supervision_events')
       .update({
-        status: 'failed',
-        last_error: err instanceof Error ? err.message.slice(0, 300) : 'send_failed',
+        status: 'sent',
+        meta: { attempts: 0, handed_to_wasender_queue: true },
+        updated_at: new Date().toISOString(),
       })
       .eq('dedupe_key', dedupeKey);
+  } catch (err) {
+    await markSupervisionNotifyFailed(
+      dedupeKey,
+      err instanceof Error ? err.message.slice(0, 300) : 'send_failed',
+    );
+  }
+}
+
+async function markSupervisionNotifyFailed(dedupeKey: string, lastError: string) {
+  const sb = getServiceSupabaseClient();
+  const { data } = await sb
+    .from('chat_supervision_events')
+    .select('meta')
+    .eq('dedupe_key', dedupeKey)
+    .maybeSingle();
+  const prev = (data?.meta as { attempts?: number } | null) || {};
+  const attempts = Number(prev.attempts || 0) + 1;
+  const nextRetry = nextSupervisionRetryAt(attempts);
+  await sb
+    .from('chat_supervision_events')
+    .update({
+      status: 'failed',
+      last_error: lastError,
+      meta: {
+        ...prev,
+        attempts,
+        next_retry_at: nextRetry,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('dedupe_key', dedupeKey);
+}
+
+/**
+ * Re-queue failed supervision WhatsApp notifies with limited backoff.
+ * Relies on wasender_message_queue for delivery retries once enqueue succeeds.
+ */
+export async function retryFailedSupervisionNotifies(comercioId: string) {
+  if (!isSupervisionEnabledForCommerce(comercioId)) return;
+  if (isSupervisionMemoryEnabled()) return;
+  const cfg = getChatSupervisionConfig();
+  if (!cfg.wasenderNotify) return;
+
+  const sb = getServiceSupabaseClient();
+  const { data: rows } = await sb
+    .from('chat_supervision_events')
+    .select('id,dedupe_key,event_type,conversation_id,meta,last_error')
+    .eq('comercio_id', comercioId)
+    .eq('status', 'failed')
+    .in('event_type', ['new_conversation', 'needs_attention'])
+    .order('updated_at', { ascending: true })
+    .limit(5);
+
+  for (const row of rows || []) {
+    const meta = (row.meta as { attempts?: number; next_retry_at?: string }) || {};
+    if (!shouldRetrySupervisionNotify(meta)) continue;
+
+    const dest = await resolveSupervisionWhatsapp(comercioId);
+    if (!dest) {
+      await sb
+        .from('chat_supervision_events')
+        .update({
+          status: 'skipped',
+          last_error: 'no_supervision_whatsapp',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('dedupe_key', row.dedupe_key);
+      continue;
+    }
+
+    const link = merchantConversationHref(String(row.conversation_id));
+    const text =
+      row.event_type === 'needs_attention'
+        ? [
+            '🟠 *Conversación requiere atención*',
+            '',
+            `Un cliente pidió ayuda humana en *${dest.nombre}*.`,
+            '',
+            'Ver conversación:',
+            link,
+          ].join('\n')
+        : [
+            '🔔 *Nueva conversación en El Menú XFA*',
+            '',
+            `Un cliente ha iniciado una conversación con el asistente virtual de *${dest.nombre}*.`,
+            '',
+            'El asistente ya está atendiendo automáticamente.',
+            'Puedes revisar los mensajes en tiempo real e intervenir cuando quieras.',
+            '',
+            'Ver conversación:',
+            link,
+          ].join('\n');
+
+    try {
+      await sendWhatsappText(dest.phone, text, {
+        source:
+          row.event_type === 'needs_attention'
+            ? 'chat-supervision-attention-retry'
+            : 'chat-supervision-retry',
+        dedupeKey: String(row.dedupe_key),
+        comercioId,
+      });
+      await sb
+        .from('chat_supervision_events')
+        .update({
+          status: 'sent',
+          last_error: null,
+          meta: {
+            ...meta,
+            handed_to_wasender_queue: true,
+            retried_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('dedupe_key', row.dedupe_key);
+    } catch (err) {
+      await markSupervisionNotifyFailed(
+        String(row.dedupe_key),
+        err instanceof Error ? err.message.slice(0, 300) : 'retry_failed',
+      );
+    }
   }
 }
 
