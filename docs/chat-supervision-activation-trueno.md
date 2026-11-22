@@ -35,9 +35,16 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
    CHAT_SUPERVISION_COMMERCE_IDS=0aa8c53b-07f1-446e-8b88-66c2b7ae89ea
    CHAT_SUPERVISION_SESSION_PEPPER=<pepper-no-commitear>
    ```
-4. Smoke dual (consumidor + panel login real) **sin** `CHAT_SUPERVISION_MEMORY`.
-5. Confirmar **una** notificación WaSender al número de avisos.
-6. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
+4. Smoke API contra tablas reales (gated):
+   ```powershell
+   $env:CHAT_SUPERVISION_SMOKE_CONFIRM='I_AUTHORIZE_CHAT_SUPERVISION_SMOKE'
+   $env:BASE_URL='https://<app-with-flags>'
+   $env:CHAT_SUPERVISION_SMOKE_BEARER='<merchant-jwt>'
+   node site/scripts/chat-supervision-post-migration-smoke.mjs
+   ```
+5. Smoke dual UI (consumidor + panel login real) **sin** `CHAT_SUPERVISION_MEMORY`.
+6. Confirmar **una** notificación WaSender al número de avisos (`CHAT_SUPERVISION_WASENDER=1`).
+7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
 
 Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.
 
