@@ -70,11 +70,12 @@ describe('chat sound assets + manager', () => {
     expect(CHAT_SOUND_DEFAULT_GAIN).toBeCloseTo(0.2, 5);
   });
 
-  it('stays silent when sound assets are not licensed', () => {
+  it('stays enabled with original synth when MP3s are not licensed', () => {
     vi.stubEnv('NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED', '0');
+    stubLocalStorage(new Map());
     __resetChatSoundManagerForTests();
     expect(areChatSoundsLicensed()).toBe(false);
-    expect(isChatSoundsEnabled()).toBe(false);
+    expect(isChatSoundsEnabled()).toBe(true);
   });
 
   it('persists mute preference (default on)', () => {
@@ -91,6 +92,46 @@ describe('chat sound assets + manager', () => {
     stubLocalStorage(new Map([['elmenuxfa:chat-sounds-v1', '0']]));
     __resetChatSoundManagerForTests();
     await expect(playChatSoundAsync('messageSent')).resolves.toBe(0);
+  });
+
+  it('playChatSoundAsync uses synth when unlicensed (no throw)', async () => {
+    vi.stubEnv('NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED', '0');
+    stubLocalStorage(new Map());
+    const ctx = {
+      state: 'running',
+      currentTime: 0,
+      resume: async () => {},
+      createGain: () => ({
+        gain: {
+          value: 1,
+          setValueAtTime() {},
+          exponentialRampToValueAtTime() {},
+        },
+        connect() {},
+      }),
+      createOscillator: () => ({
+        type: 'sine',
+        frequency: { value: 440 },
+        connect() {},
+        start() {},
+        stop() {},
+      }),
+      destination: {},
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: () => null,
+          setItem: () => {},
+        },
+        AudioContext: function AudioContext() {
+          return ctx;
+        },
+      },
+    });
+    __resetChatSoundManagerForTests();
+    await expect(playChatSoundAsync('messageSent')).resolves.toBeGreaterThan(0);
   });
 
   it('playChatSound tolerates missing AudioContext (autoplay blocked)', () => {

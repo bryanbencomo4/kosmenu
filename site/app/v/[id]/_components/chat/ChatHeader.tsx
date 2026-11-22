@@ -88,7 +88,7 @@ export function ChatHeader({
 
   return (
     <header
-      className="relative z-20 flex h-14 shrink-0 items-center gap-1 border-b px-1.5 sm:h-16 sm:px-2"
+      className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-1 border-b px-1.5 sm:h-16 sm:px-2"
       style={{
         backgroundColor: 'var(--chat-header)',
         borderColor: 'var(--chat-header-border)',

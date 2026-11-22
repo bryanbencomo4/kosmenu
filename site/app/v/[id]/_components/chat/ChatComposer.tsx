@@ -137,6 +137,7 @@ export function ChatComposer({
       unlockChatSounds();
       playChatSound('messageSent');
       onSend();
+      keepComposerFocused();
     }
   }
 
@@ -170,15 +171,52 @@ export function ChatComposer({
     recognitionRef.current = null;
   }
 
+  function micErrorMessage(err: unknown): string {
+    const name =
+      err && typeof err === 'object' && 'name' in err
+        ? String((err as { name?: string }).name || '')
+        : '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return 'Permiso de micrófono denegado. Actívalo en el candado del navegador y vuelve a intentar.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'No encontramos un micrófono en este dispositivo.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'El micrófono está en uso por otra app. Ciérrala e inténtalo de nuevo.';
+    }
+    if (name === 'SecurityError') {
+      return 'Este sitio no puede usar el micrófono (contexto no seguro o política del navegador).';
+    }
+    return 'No pudimos acceder al micrófono. Revisa el permiso e inténtalo de nuevo.';
+  }
+
   async function startRecording() {
     setVoiceError(null);
     if (disabled || !onSendVoice || voiceDraft) return;
+    if (!window.isSecureContext) {
+      setVoiceError('El micrófono requiere HTTPS.');
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setVoiceError('Tu navegador no permite grabar audio aquí.');
       return;
     }
     unlockChatSounds();
-    // Prefetch voice cues so start/stop never race a cold decode into the take.
+    // Request mic first (same user-gesture turn) so the browser can show the prompt.
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+    } catch (err) {
+      setVoiceError(micErrorMessage(err));
+      return;
+    }
+    streamRef.current = stream;
     prefetchChatSounds([
       'recordingStart',
       'recordingStop',
@@ -186,8 +224,6 @@ export function ChatComposer({
       'voiceSent',
     ]);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
       // Play start cue fully BEFORE MediaRecorder so it is not captured and the
       // user can start speaking as soon as recording UI appears.
       const cueMs = await playChatSoundAsync('recordingStart');
@@ -305,9 +341,27 @@ export function ChatComposer({
       timerRef.current = window.setInterval(() => {
         setRecordMs(Date.now() - startedAtRef.current);
       }, 200);
-    } catch {
-      setVoiceError('No pudimos acceder al micrófono.');
+    } catch (err) {
+      stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      setVoiceError(micErrorMessage(err));
     }
+  }
+
+  function keepComposerFocused() {
+    // Keep soft-keyboard open: readOnly still accepts focus (disabled does not).
+    const focus = () => {
+      const node = textareaRef.current;
+      if (!node) return;
+      try {
+        node.focus({ preventScroll: true });
+      } catch {
+        node.focus();
+      }
+    };
+    focus();
+    window.requestAnimationFrame(focus);
+    window.setTimeout(focus, 0);
   }
 
   function stopRecording() {
@@ -414,6 +468,7 @@ export function ChatComposer({
         unlockChatSounds();
         playChatSound('messageSent');
         onSend();
+        keepComposerFocused();
       }}
     >
       <input
@@ -606,7 +661,9 @@ export function ChatComposer({
                 ref={textareaRef}
                 rows={1}
                 value={value}
-                disabled={disabled || Boolean(voiceDraft)}
+                // readOnly (not disabled) while sending keeps focus / mobile keyboard open
+                readOnly={disabled || Boolean(voiceDraft)}
+                aria-disabled={disabled || Boolean(voiceDraft)}
                 onChange={(event) => onChange(event.target.value)}
                 onKeyDown={handleKeyDown}
                 onFocus={() => {
@@ -614,7 +671,7 @@ export function ChatComposer({
                   setAttachOpen(false);
                 }}
                 placeholder="Escribe un mensaje"
-                className="max-h-[7.5rem] min-h-[28px] w-full resize-none bg-transparent py-2 text-[15.5px] leading-[1.35] text-[var(--chat-text)] outline-none placeholder:text-[var(--chat-text-muted)] disabled:opacity-60"
+                className="max-h-[7.5rem] min-h-[28px] w-full resize-none bg-transparent py-2 text-[15.5px] leading-[1.35] text-[var(--chat-text)] outline-none placeholder:text-[var(--chat-text-muted)] read-only:opacity-60"
                 enterKeyHint="send"
                 autoComplete="off"
               />

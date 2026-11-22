@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
@@ -225,9 +226,46 @@ export function ChatAssistantView({
   /** One receive cue per completed assistant turn (tools may take many rounds). */
   const receiveTurnLockRef = useRef(false);
   const regionId = useId();
+  const frameRef = useRef<HTMLElement | null>(null);
+  const [frameStyle, setFrameStyle] = useState<CSSProperties>({});
 
   useEffect(() => {
     setSoundsEnabled(isChatSoundsEnabled());
+  }, []);
+
+  // Mobile keyboard: size the chat frame to visualViewport so the header stays
+  // visible and the composer sits above the keyboard (100dvh alone often fails).
+  useEffect(() => {
+    const sync = () => {
+      const vv = window.visualViewport;
+      if (!vv) {
+        setFrameStyle({
+          position: 'fixed',
+          inset: 0,
+          height: '100dvh',
+          maxHeight: '100dvh',
+        });
+        return;
+      }
+      setFrameStyle({
+        position: 'fixed',
+        left: 0,
+        width: '100%',
+        top: `${vv.offsetTop}px`,
+        height: `${vv.height}px`,
+        maxHeight: `${vv.height}px`,
+      });
+    };
+    sync();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', sync);
+    vv?.addEventListener('scroll', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      vv?.removeEventListener('resize', sync);
+      vv?.removeEventListener('scroll', sync);
+      window.removeEventListener('orientationchange', sync);
+    };
   }, []);
 
   // Mark history as already "heard" so remount / menu↔chat never replays cues.
@@ -674,9 +712,10 @@ export function ChatAssistantView({
 
   return (
     <section
-      className="relative mx-auto flex h-[100svh] h-[100dvh] max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden shadow-sm sm:max-w-3xl"
+      ref={frameRef}
+      className="z-[55] mx-auto flex w-full max-w-3xl flex-col overflow-hidden shadow-sm sm:max-w-3xl"
       style={{
-        minHeight: '-webkit-fill-available',
+        ...frameStyle,
         ...themeStyle,
         backgroundColor: 'var(--chat-bg)',
         color: 'var(--chat-text)',

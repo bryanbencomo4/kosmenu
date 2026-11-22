@@ -1,6 +1,7 @@
 /**
- * Centralized chat UI sounds (Web Audio). Single AudioContext, lazy decode,
- * cached AudioBuffers. Failures never break chat.
+ * Centralized chat UI sounds (Web Audio). Single AudioContext.
+ * Default: original synthesized cues (no third-party samples).
+ * Optional MP3s only when NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED=1.
  */
 
 export type ChatSoundEvent =
@@ -18,6 +19,19 @@ const SOUND_URLS: Record<ChatSoundEvent, string> = {
   recordingStop: '/sounds/chat/recording-stop.mp3',
   voiceSent: '/sounds/chat/voice-sent.mp3',
   recordingCancel: '/sounds/chat/recording-cancel.mp3',
+};
+
+/** Original short tones — not WhatsApp assets. */
+const SYNTH_CUES: Record<
+  ChatSoundEvent,
+  { freqs: number[]; durationsMs: number[]; type?: OscillatorType }
+> = {
+  messageSent: { freqs: [880, 1175], durationsMs: [45, 55], type: 'sine' },
+  messageReceived: { freqs: [660, 880], durationsMs: [55, 70], type: 'triangle' },
+  recordingStart: { freqs: [520], durationsMs: [70], type: 'sine' },
+  recordingStop: { freqs: [420], durationsMs: [55], type: 'square' },
+  voiceSent: { freqs: [740, 990, 1180], durationsMs: [40, 45, 60], type: 'sine' },
+  recordingCancel: { freqs: [300, 220], durationsMs: [70, 90], type: 'triangle' },
 };
 
 const STORAGE_KEY = 'elmenuxfa:chat-sounds-v1';
@@ -41,7 +55,7 @@ const inflight = new Map<ChatSoundEvent, Promise<AudioBuffer | null>>();
 let unlockBound = false;
 let enabledCache: boolean | null = null;
 
-/** True only when sounds are explicitly licensed for distribution. */
+/** True when optional third-party MP3 samples may be loaded. */
 export function areChatSoundsLicensed(): boolean {
   return (
     (process.env.NEXT_PUBLIC_CHATBOT_SOUNDS_LICENSED || '').trim() === '1'
@@ -49,8 +63,6 @@ export function areChatSoundsLicensed(): boolean {
 }
 
 export function isChatSoundsEnabled(): boolean {
-  // Unlicensed WhatsApp-derived cues stay silent in public builds.
-  if (!areChatSoundsLicensed()) return false;
   if (typeof window === 'undefined') return true;
   if (enabledCache !== null) return enabledCache;
   try {
@@ -96,7 +108,38 @@ export function unlockChatSounds(): void {
   }
 }
 
+function playSynthCue(
+  ctx: AudioContext,
+  event: ChatSoundEvent,
+): number {
+  const cue = SYNTH_CUES[event];
+  const master = ctx.createGain();
+  master.gain.value = CHAT_SOUND_DEFAULT_GAIN;
+  master.connect(ctx.destination);
+
+  let t = ctx.currentTime;
+  let totalMs = 0;
+  for (let i = 0; i < cue.freqs.length; i++) {
+    const dur = Math.max(0.02, (cue.durationsMs[i] || 50) / 1000);
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = cue.type || 'sine';
+    osc.frequency.value = cue.freqs[i]!;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g);
+    g.connect(master);
+    osc.start(t);
+    osc.stop(t + dur + 0.01);
+    t += dur * 0.92;
+    totalMs += cue.durationsMs[i] || 50;
+  }
+  return Math.max(1, totalMs);
+}
+
 async function loadBuffer(event: ChatSoundEvent): Promise<AudioBuffer | null> {
+  if (!areChatSoundsLicensed()) return null;
   const cached = buffers.get(event);
   if (cached) return cached;
   const pending = inflight.get(event);
@@ -139,6 +182,7 @@ function startBuffer(ctx: AudioContext, buf: AudioBuffer): void {
 /** Prefetch without blocking UI. Safe to call anytime after unlock. */
 export function prefetchChatSounds(events?: ChatSoundEvent[]): void {
   if (typeof window === 'undefined' || !isChatSoundsEnabled()) return;
+  if (!areChatSoundsLicensed()) return;
   const list = events || (Object.keys(SOUND_URLS) as ChatSoundEvent[]);
   for (const ev of list) {
     void loadBuffer(ev);
@@ -178,10 +222,19 @@ export async function playChatSoundAsync(
   try {
     const ctx = getCtx();
     if (!ctx) return 0;
-    const buf = await loadBuffer(event);
-    if (!buf) return 0;
-    startBuffer(ctx, buf);
-    return Math.max(1, Math.round(buf.duration * 1000));
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
+
+    if (areChatSoundsLicensed()) {
+      const buf = await loadBuffer(event);
+      if (buf) {
+        startBuffer(ctx, buf);
+        return Math.max(1, Math.round(buf.duration * 1000));
+      }
+    }
+
+    return playSynthCue(ctx, event);
   } catch {
     return 0;
   }
