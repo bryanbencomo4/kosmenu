@@ -174,6 +174,8 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
+            final err = snapshot.error.toString();
+            final disabled = err.contains('supervision_disabled');
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
@@ -181,14 +183,18 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      snapshot.error.toString(),
+                      disabled
+                          ? 'La supervisión no está activa para este comercio.'
+                          : err,
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: () => unawaited(_reload()),
-                      child: const Text('Reintentar'),
-                    ),
+                    if (!disabled) ...[
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: () => unawaited(_reload()),
+                        child: const Text('Reintentar'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -291,6 +297,9 @@ class _ChatConversationDetailScreenState
   @override
   void initState() {
     super.initState();
+    _draft.addListener(() {
+      if (mounted) setState(() {});
+    });
     unawaited(_load());
     _recoveryTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted) return;

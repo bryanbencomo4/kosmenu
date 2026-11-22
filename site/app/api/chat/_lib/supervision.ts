@@ -22,6 +22,7 @@ import {
   newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
+  shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
 } from './supervision-shared';
 import {
@@ -40,11 +41,13 @@ export {
   didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
+  mintSupervisionFeedToken,
   nextSupervisionRetryAt,
   newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
+  verifySupervisionFeedToken,
 } from './supervision-shared';
 
 export type ConversationStatus =
@@ -136,6 +139,8 @@ type PersistConsumerTurnInput = {
   text: string;
   clientMessageId?: string | null;
   payload?: Record<string, unknown>;
+  /** Public menu WhatsApp for consumer alternate-contact (MEMORY-safe). */
+  publicWhatsapp?: string | null;
 };
 
 export type PersistConsumerTurnResult = {
@@ -256,10 +261,11 @@ export async function persistConsumerTurn(
           input.text,
         )
       ) {
-        void offerAlternateContactIfNeeded({
+        await offerAlternateContactIfNeeded({
           conversationId: conversation.id,
           comercioId: input.comercioId,
           commerceName: input.commerceName,
+          publicWhatsapp: input.publicWhatsapp,
         }).catch(() => {});
       }
       return {
@@ -301,53 +307,31 @@ export async function persistConsumerTurn(
           first_consumer_message_at: now.toISOString(),
           last_message_at: now.toISOString(),
           last_message_preview: previewText(input.text),
-          unread_merchant_count: 1,
+          unread_merchant_count: 0,
         })
         .select('*')
         .single();
       if (insert.error || !insert.data) {
-        return { ok: false, error: insert.error?.message || 'insert_failed' };
+        // Concurrent first-message race: unique on session hash — re-read winner.
+        const again = await sb
+          .from('chat_conversations')
+          .select('*')
+          .eq('comercio_id', input.comercioId)
+          .eq('consumer_session_hash', hash)
+          .maybeSingle();
+        if (!again.data) {
+          return { ok: false, error: insert.error?.message || 'insert_failed' };
+        }
+        conversation = again.data as Record<string, unknown>;
+        isNewConversation = false;
+      } else {
+        conversation = insert.data as Record<string, unknown>;
       }
-      conversation = insert.data as Record<string, unknown>;
-    } else {
-      const lastAt = conversation.last_message_at
-        ? new Date(String(conversation.last_message_at)).getTime()
-        : 0;
-      const wasClosed = conversation.status === 'closed';
-      const idleReopen =
-        wasClosed || (lastAt > 0 && now.getTime() - lastAt > reopenMs);
-      if (idleReopen && wasClosed) {
-        isNewConversation = true;
-      }
-      const nextStatus = detectNeedsHuman(input.text)
-        ? 'needs_attention'
-        : wasClosed
-          ? 'ai_handling'
-          : String(conversation.status);
+    }
 
-      const upd = await sb
-        .from('chat_conversations')
-        .update({
-          status: nextStatus,
-          last_message_at: now.toISOString(),
-          last_message_preview: previewText(input.text),
-          unread_merchant_count:
-            Number(conversation.unread_merchant_count || 0) + 1,
-          closed_at: wasClosed ? null : conversation.closed_at,
-          updated_at: now.toISOString(),
-          ...(wasClosed
-            ? {
-                assigned_user_id: null,
-                assigned_at: null,
-                attention_version:
-                  Number(conversation.attention_version || 1) + 1,
-              }
-            : {}),
-        })
-        .eq('id', conversation.id)
-        .select('*')
-        .single();
-      if (upd.data) conversation = upd.data as Record<string, unknown>;
+    const wasClosed = String(conversation!.status) === 'closed';
+    if (!isNewConversation && wasClosed) {
+      isNewConversation = true;
     }
 
     const conversationId = String(conversation!.id);
@@ -355,6 +339,7 @@ export async function persistConsumerTurn(
       (input.clientMessageId || '').trim() ||
       `c_${createHash('sha256').update(`${conversationId}:${input.text}:${now.toISOString()}`).digest('hex').slice(0, 24)}`;
 
+    // Persist message first; only then bump unread / notify (idempotent retries safe).
     const msg = await sb
       .from('chat_messages')
       .upsert(
@@ -371,42 +356,75 @@ export async function persistConsumerTurn(
       .select('id')
       .maybeSingle();
 
-    if (isNewConversation && cfg.wasenderNotify) {
-      void enqueueNewConversationNotify({
-        conversationId,
-        comercioId: input.comercioId,
-        commerceName: input.commerceName,
-        attentionVersion: Number(conversation!.attention_version || 1),
-      }).catch(() => {});
-    } else if (
-      cfg.wasenderNotify &&
-      detectNeedsHuman(input.text) &&
-      String(conversation!.status) === 'needs_attention'
-    ) {
-      void enqueueNeedsAttentionNotify({
-        conversationId,
-        comercioId: input.comercioId,
-        commerceName: input.commerceName,
-      }).catch(() => {});
-    }
+    const messageInserted = Boolean(msg.data?.id);
+    if (messageInserted) {
+      const nextStatus = detectNeedsHuman(input.text)
+        ? 'needs_attention'
+        : wasClosed
+          ? 'ai_handling'
+          : String(conversation!.status);
+      const upd = await sb
+        .from('chat_conversations')
+        .update({
+          status: nextStatus,
+          last_message_at: now.toISOString(),
+          last_message_preview: previewText(input.text),
+          unread_merchant_count:
+            Number(conversation!.unread_merchant_count || 0) + 1,
+          closed_at: wasClosed ? null : conversation!.closed_at,
+          updated_at: now.toISOString(),
+          ...(wasClosed
+            ? {
+                assigned_user_id: null,
+                assigned_at: null,
+                attention_version:
+                  Number(conversation!.attention_version || 1) + 1,
+              }
+            : {}),
+        })
+        .eq('id', conversationId)
+        .select('*')
+        .single();
+      if (upd.data) conversation = upd.data as Record<string, unknown>;
 
-    void publishConversationEvent(input.comercioId, conversationId, {
-      type: 'message_created',
-      role: 'consumer',
-    }).catch(() => {});
+      if (isNewConversation && cfg.wasenderNotify) {
+        void enqueueNewConversationNotify({
+          conversationId,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+          attentionVersion: Number(conversation!.attention_version || 1),
+        }).catch(() => {});
+      } else if (
+        cfg.wasenderNotify &&
+        detectNeedsHuman(input.text) &&
+        String(conversation!.status) === 'needs_attention'
+      ) {
+        void enqueueNeedsAttentionNotify({
+          conversationId,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+        }).catch(() => {});
+      }
 
-    if (
-      didEscalateToNeedsAttention(
-        previousStatus,
-        String(conversation!.status),
-        input.text,
-      )
-    ) {
-      void offerAlternateContactIfNeeded({
-        conversationId,
-        comercioId: input.comercioId,
-        commerceName: input.commerceName,
+      void publishConversationEvent(input.comercioId, conversationId, {
+        type: 'message_created',
+        role: 'consumer',
       }).catch(() => {});
+
+      if (
+        didEscalateToNeedsAttention(
+          previousStatus,
+          String(conversation!.status),
+          input.text,
+        )
+      ) {
+        await offerAlternateContactIfNeeded({
+          conversationId,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+          publicWhatsapp: input.publicWhatsapp,
+        }).catch(() => {});
+      }
     }
 
     // Opportunistic retry of failed WaSender notifies (never blocks chat).
@@ -447,13 +465,16 @@ export async function persistAssistantOrStaffMessage(input: {
 
     if (isSupervisionMemoryEnabled()) {
       const live = memoryGetConversation(input.conversationId);
+      const cfg = getChatSupervisionConfig();
       if (
         input.role === 'assistant' &&
-        input.attentionVersionAtStart != null &&
         live &&
-        (live.status === 'human_handling' ||
-          live.status === 'closed' ||
-          live.attention_version !== Number(input.attentionVersionAtStart))
+        shouldDiscardInFlightAssistant({
+          humanTakeoverEnabled: cfg.humanTakeover,
+          status: live.status,
+          attentionVersionAtStart: input.attentionVersionAtStart,
+          attentionVersionNow: live.attention_version,
+        })
       ) {
         return { ok: true, discarded: true };
       }
@@ -475,10 +496,8 @@ export async function persistAssistantOrStaffMessage(input: {
     }
 
     const sb = getServiceSupabaseClient();
-    if (
-      input.role === 'assistant' &&
-      input.attentionVersionAtStart != null
-    ) {
+    if (input.role === 'assistant') {
+      const cfg = getChatSupervisionConfig();
       const { data: live } = await sb
         .from('chat_conversations')
         .select('status,attention_version')
@@ -486,10 +505,12 @@ export async function persistAssistantOrStaffMessage(input: {
         .maybeSingle();
       if (
         live &&
-        (live.status === 'human_handling' ||
-          live.status === 'closed' ||
-          Number(live.attention_version) !==
-            Number(input.attentionVersionAtStart))
+        shouldDiscardInFlightAssistant({
+          humanTakeoverEnabled: cfg.humanTakeover,
+          status: String(live.status || ''),
+          attentionVersionAtStart: input.attentionVersionAtStart,
+          attentionVersionNow: Number(live.attention_version),
+        })
       ) {
         return { ok: true, discarded: true };
       }
@@ -541,15 +562,21 @@ async function offerAlternateContactIfNeeded(input: {
   conversationId: string;
   comercioId: string;
   commerceName: string;
+  publicWhatsapp?: string | null;
 }) {
   // Consumer-facing alternate may use the public menu WhatsApp; merchant
   // notify numbers stay on dedicated config (resolveSupervisionWhatsapp).
-  const publicContact = isSupervisionMemoryEnabled()
-    ? null
-    : await resolvePublicMenuWhatsapp(input.comercioId);
-  const name = publicContact?.nombre || input.commerceName || 'el restaurante';
-  const body = publicContact?.phone
-    ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${publicContact.phone}. No prometemos una respuesta humana inmediata.`
+  let phone = String(input.publicWhatsapp || '').trim();
+  let name = input.commerceName || 'el restaurante';
+  if (!phone && !isSupervisionMemoryEnabled()) {
+    const publicContact = await resolvePublicMenuWhatsapp(input.comercioId);
+    phone = publicContact?.phone || '';
+    name = publicContact?.nombre || name;
+  }
+  const digits = phone.replace(/\D/g, '');
+  if (digits === PLATFORM_SUPPORT_WHATSAPP_DIGITS) phone = '';
+  const body = phone
+    ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${phone}. No prometemos una respuesta humana inmediata.`
     : `El personal de ${name} puede unirse a este chat cuando esté disponible. No prometemos una respuesta humana inmediata; si el local publica WhatsApp en el menú, úsalo para contacto directo.`;
 
   await persistAssistantOrStaffMessage({

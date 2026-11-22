@@ -3,7 +3,10 @@ import { NextResponse } from 'next/server';
 import { loadPublicMenuByIdentifier } from '../../../menu/_lib/load-public-menu';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
-import { hashConsumerSession } from '../../_lib/supervision';
+import {
+  hashConsumerSession,
+  verifySupervisionFeedToken,
+} from '../../_lib/supervision';
 import { isSupervisionEnabledForCommerce } from '../../_lib/supervision-config';
 import {
   isSupervisionMemoryEnabled,
@@ -15,7 +18,8 @@ export const runtime = 'nodejs';
 
 /**
  * Consumer-scoped feed of new messages for an active supervised conversation.
- * Auth: knowledge of sessionId (HMAC-hashed); never lists other sessions.
+ * Prefer X-Chat-Supervision-Feed-Token (HMAC, commerce+session+exp).
+ * Legacy sessionId query still accepted for same-turn recovery only.
  */
 export async function GET(
   request: Request,
@@ -30,11 +34,7 @@ export async function GET(
   const { comercioId: raw } = await context.params;
   const pathId = decodeURIComponent(raw || '').trim();
   const url = new URL(request.url);
-  const sessionId = (url.searchParams.get('sessionId') || '').trim();
   const afterSeq = Number(url.searchParams.get('afterSeq') || 0);
-  if (!sessionId || sessionId.length > 80) {
-    return NextResponse.json({ error: 'missing_session' }, { status: 400 });
-  }
 
   const menu = await loadPublicMenuByIdentifier(pathId);
   if (!menu) {
@@ -43,6 +43,30 @@ export async function GET(
   const commerceId = menu.resolvedComercioId;
   if (!isSupervisionEnabledForCommerce(commerceId)) {
     return NextResponse.json({ ok: true, enabled: false, messages: [] });
+  }
+
+  const headerToken = (
+    request.headers.get('x-chat-supervision-feed-token') || ''
+  ).trim();
+  let sessionId = '';
+  if (headerToken) {
+    const verified = verifySupervisionFeedToken(headerToken, commerceId);
+    if (!verified.ok) {
+      return NextResponse.json(
+        {
+          error: 'invalid_feed_token',
+          detail: 'error' in verified ? verified.error : 'invalid',
+        },
+        { status: 401 },
+      );
+    }
+    sessionId = verified.sessionId;
+  } else {
+    // Legacy fallback — prefer header token from chat POST.
+    sessionId = (url.searchParams.get('sessionId') || '').trim();
+  }
+  if (!sessionId || sessionId.length > 80) {
+    return NextResponse.json({ error: 'missing_session' }, { status: 400 });
   }
 
   if (isSupervisionMemoryEnabled()) {

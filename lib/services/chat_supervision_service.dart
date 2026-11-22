@@ -144,7 +144,7 @@ class ChatSupervisionService {
     final body = jsonDecode(res.body.isEmpty ? '{}' : res.body);
     if (res.statusCode == 403 &&
         (body is Map && body['error'] == 'supervision_disabled')) {
-      return const [];
+      throw StateError('supervision_disabled');
     }
     if (res.statusCode != 200) {
       throw StateError(

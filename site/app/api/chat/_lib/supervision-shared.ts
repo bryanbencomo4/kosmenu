@@ -145,3 +145,59 @@ export function pickSupervisionNotifyPhone(
   if (!digits || digits === PLATFORM_SUPPORT_WHATSAPP_DIGITS) return null;
   return preferred;
 }
+
+const FEED_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Short-lived, commerce+session bound token for the consumer supervision feed.
+ * Prefer sending via header — avoid putting raw sessionId in query strings.
+ */
+export function mintSupervisionFeedToken(
+  comercioId: string,
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  nowMs = Date.now(),
+): string {
+  const exp = nowMs + FEED_TOKEN_TTL_MS;
+  const payload = `${comercioId.trim()}:${sessionId.trim()}:${exp}`;
+  const sig = createHmac('sha256', sessionPepper(env))
+    .update(payload)
+    .digest('hex');
+  return Buffer.from(`${payload}:${sig}`, 'utf8').toString('base64url');
+}
+
+export function verifySupervisionFeedToken(
+  token: string,
+  expectedComercioId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  nowMs = Date.now(),
+): { ok: true; sessionId: string } | { ok: false; error: string } {
+  try {
+    const raw = Buffer.from(token.trim(), 'base64url').toString('utf8');
+    const parts = raw.split(':');
+    if (parts.length < 4) return { ok: false, error: 'malformed' };
+    const sig = parts.pop()!;
+    const expStr = parts.pop()!;
+    const sessionId = parts.pop()!;
+    const comercioId = parts.join(':');
+    if (!comercioId || !sessionId || !expStr || !sig) {
+      return { ok: false, error: 'malformed' };
+    }
+    if (comercioId.trim().toLowerCase() !== expectedComercioId.trim().toLowerCase()) {
+      return { ok: false, error: 'commerce_mismatch' };
+    }
+    const exp = Number(expStr);
+    if (!Number.isFinite(exp) || exp < nowMs) {
+      return { ok: false, error: 'expired' };
+    }
+    const payload = `${comercioId}:${sessionId}:${expStr}`;
+    const expected = createHmac('sha256', sessionPepper(env))
+      .update(payload)
+      .digest('hex');
+    if (expected !== sig) return { ok: false, error: 'bad_signature' };
+    if (sessionId.length > 80) return { ok: false, error: 'session_too_long' };
+    return { ok: true, sessionId };
+  } catch {
+    return { ok: false, error: 'invalid' };
+  }
+}

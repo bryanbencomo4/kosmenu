@@ -474,6 +474,7 @@ export function ChatAssistantView({
   const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
   const supervisionAfterSeqRef = useRef(0);
   const supervisionSeenIdsRef = useRef<Set<string>>(new Set());
+  const supervisionFeedTokenRef = useRef<string | null>(null);
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -699,9 +700,20 @@ export function ChatAssistantView({
     const tick = async () => {
       try {
         const sid = ensureChatSessionId(comercioId);
+        const token = supervisionFeedTokenRef.current;
+        const qs = new URLSearchParams({
+          afterSeq: String(supervisionAfterSeqRef.current),
+        });
+        // Prefer HMAC feed token in header; sessionId query is legacy fallback.
+        if (!token) qs.set('sessionId', sid);
         const res = await fetch(
-          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?sessionId=${encodeURIComponent(sid)}&afterSeq=${supervisionAfterSeqRef.current}`,
-          { cache: 'no-store' },
+          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?${qs}`,
+          {
+            cache: 'no-store',
+            headers: token
+              ? { 'X-Chat-Supervision-Feed-Token': token }
+              : undefined,
+          },
         );
         const data = (await res.json().catch(() => null)) as {
           conversation?: { status?: string } | null;
@@ -766,6 +778,7 @@ export function ChatAssistantView({
     setSupervisionWatchActive(false);
     supervisionAfterSeqRef.current = 0;
     supervisionSeenIdsRef.current = new Set();
+    supervisionFeedTokenRef.current = null;
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -1444,12 +1457,19 @@ export function ChatAssistantView({
           product_cards?: ChatProductCardData[];
           category_cards?: ChatCatalogCategory[];
           pending_configuration?: PendingChatConfiguration | null;
-          supervision?: { mode?: string; conversationId?: string | null };
+          supervision?: {
+            mode?: string;
+            conversationId?: string | null;
+            feedToken?: string | null;
+          };
           model?: string;
         } | null;
 
         if (data?.sessionId) {
           saveChatSessionId(comercioId, data.sessionId);
+        }
+        if (data?.supervision?.feedToken) {
+          supervisionFeedTokenRef.current = data.supervision.feedToken;
         }
         if (data?.supervision?.conversationId) {
           setSupervisionWatchActive(true);
@@ -1698,6 +1718,12 @@ export function ChatAssistantView({
   const sendVoice = useCallback(
     async (payload: ChatVoicePayload) => {
       if (isTyping) return;
+      if (humanSupervisionActive) {
+        setErrorText(
+          'Mientras el restaurante atiende, envía solo texto. Las notas de voz no llegan al personal.',
+        );
+        return;
+      }
       setErrorText(null);
       const secs = Math.max(1, Math.round(payload.durationMs / 1000));
       const placeholder = `🎤 Nota de voz (${secs}s)`;
@@ -1840,6 +1866,7 @@ export function ChatAssistantView({
     },
     [
       isTyping,
+      humanSupervisionActive,
       messages,
       live,
       runAssistantTurn,
@@ -1857,6 +1884,12 @@ export function ChatAssistantView({
 
   const sendFile = useCallback(
     async (payload: ChatFilePayload) => {
+      if (humanSupervisionActive) {
+        setErrorText(
+          'Mientras el restaurante atiende, envía solo texto. Los archivos no llegan al personal.',
+        );
+        return;
+      }
       if (isTyping) return;
       setErrorText(null);
 
@@ -1967,6 +2000,7 @@ export function ChatAssistantView({
     },
     [
       isTyping,
+      humanSupervisionActive,
       messages,
       comercioId,
       cartCount,
@@ -2221,6 +2255,19 @@ export function ChatAssistantView({
         onPick={onPickSuggestion}
       />
 
+      {humanSupervisionActive ? (
+        <div
+          className="shrink-0 border-t px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
+          style={{
+            backgroundColor: 'var(--chat-header)',
+            borderColor: 'var(--chat-header-border)',
+          }}
+        >
+          El restaurante está atendiendo. Por ahora solo texto — voz y archivos
+          no llegan al personal.
+        </div>
+      ) : null}
+
       <ChatComposer
         onRecordingChange={setRecording}
         value={draft}
@@ -2231,12 +2278,20 @@ export function ChatAssistantView({
         onSend={() => {
           void sendMessage();
         }}
-        onSendVoice={(payload) => {
-          void sendVoice(payload);
-        }}
-        onSendFile={(payload) => {
-          void sendFile(payload);
-        }}
+        onSendVoice={
+          humanSupervisionActive
+            ? undefined
+            : (payload) => {
+                void sendVoice(payload);
+              }
+        }
+        onSendFile={
+          humanSupervisionActive
+            ? undefined
+            : (payload) => {
+                void sendFile(payload);
+              }
+        }
         onShareLocation={(location) => {
           void shareLocation(location);
         }}

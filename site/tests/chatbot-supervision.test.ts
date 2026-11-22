@@ -4,6 +4,7 @@ import {
   didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
+  mintSupervisionFeedToken,
   newConversationNotifyDedupeKey,
   nextSupervisionRetryAt,
   pickSupervisionNotifyPhone,
@@ -11,6 +12,7 @@ import {
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
   SUPERVISION_NOTIFY_MAX_ATTEMPTS,
+  verifySupervisionFeedToken,
 } from '../app/api/chat/_lib/supervision-shared';
 import {
   getChatSupervisionConfig,
@@ -89,6 +91,43 @@ describe('chat supervision helpers', () => {
         CHAT_SUPERVISION_COMMERCE_IDS: '0aa8c53b-07f1-446e-8b88-66c2b7ae89ea',
         NODE_ENV: 'production',
       }),
+    ).toBe(false);
+  });
+
+  it('does not inherit CHATBOT_ALLOWED_COMMERCE_IDS for supervision pilot', () => {
+    const trueno = '0aa8c53b-07f1-446e-8b88-66c2b7ae89ea';
+    expect(
+      isSupervisionEnabledForCommerce(trueno, {
+        CHAT_SUPERVISION_ENABLED: '1',
+        CHATBOT_ALLOWED_COMMERCE_IDS: trueno,
+        CHAT_SUPERVISION_COMMERCE_IDS: '',
+        NODE_ENV: 'production',
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      getChatSupervisionConfig({
+        CHAT_SUPERVISION_ENABLED: '1',
+        CHATBOT_ALLOWED_COMMERCE_IDS: trueno,
+        NODE_ENV: 'production',
+      } as NodeJS.ProcessEnv).allowedCommerceIds.size,
+    ).toBe(0);
+  });
+
+  it('mints and verifies commerce-bound feed tokens', () => {
+    const env = {
+      NODE_ENV: 'test',
+      CHAT_SUPERVISION_SESSION_PEPPER: 'test-pepper-feed-token',
+    } as unknown as NodeJS.ProcessEnv;
+    const token = mintSupervisionFeedToken(COMERCIO, 'sess_abc', env, 1_000);
+    const ok = verifySupervisionFeedToken(token, COMERCIO, env, 1_500);
+    expect(ok).toEqual({ ok: true, sessionId: 'sess_abc' });
+    expect(
+      verifySupervisionFeedToken(token, '00000000-0000-4000-8000-000000000099', env, 1_500)
+        .ok,
+    ).toBe(false);
+    expect(
+      verifySupervisionFeedToken(token, COMERCIO, env, 1_000 + 13 * 60 * 60 * 1000)
+        .ok,
     ).toBe(false);
   });
 

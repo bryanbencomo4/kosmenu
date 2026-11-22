@@ -194,6 +194,7 @@ export async function POST(
     nombre?: string;
     moneda?: string;
     en_linea?: boolean;
+    whatsapp?: string | null;
   };
 
   const isOnline = comercio.en_linea === true || menu.isOnline === true;
@@ -243,15 +244,19 @@ export async function POST(
   let supervisionConversationId: string | null = null;
   let attentionVersionAtStart: number | null = null;
   let skipGeminiForHuman = false;
+  let supervisionFeedToken: string | null = null;
   try {
-    const { persistConsumerTurn, shouldSkipGemini } = await import(
-      '../_lib/supervision'
-    );
+    const {
+      persistConsumerTurn,
+      shouldSkipGemini,
+      mintSupervisionFeedToken,
+    } = await import('../_lib/supervision');
     const persisted = await persistConsumerTurn({
       comercioId: commerceId,
       commerceName: String(comercio.nombre || ''),
       sessionId,
       text: last.text,
+      publicWhatsapp: comercio.whatsapp || null,
     });
     if (persisted.ok && persisted.conversationId) {
       supervisionConversationId = persisted.conversationId;
@@ -263,9 +268,21 @@ export async function POST(
       supervisionConversationId = humanGate.conversation.id;
       attentionVersionAtStart = humanGate.conversation.attention_version;
     }
+    if (supervisionConversationId) {
+      supervisionFeedToken = mintSupervisionFeedToken(commerceId, sessionId);
+    }
   } catch {
     /* supervision optional */
   }
+
+  const supervisionPayload = (mode: string) =>
+    supervisionConversationId
+      ? {
+          mode,
+          conversationId: supervisionConversationId,
+          ...(supervisionFeedToken ? { feedToken: supervisionFeedToken } : {}),
+        }
+      : undefined;
 
   if (skipGeminiForHuman) {
     return json({
@@ -277,10 +294,7 @@ export async function POST(
       commerceId,
       requestId,
       skipped_llm: true,
-      supervision: {
-        mode: 'human_handling',
-        conversationId: supervisionConversationId,
-      },
+      supervision: supervisionPayload('human_handling'),
       usage: {
         tokensInput: 0,
         tokensOutput: 0,
@@ -351,10 +365,7 @@ export async function POST(
         requestId,
         skipped_llm: true,
         simulated: true,
-        supervision: {
-          mode: 'human_handling',
-          conversationId: supervisionConversationId,
-        },
+        supervision: supervisionPayload('human_handling'),
         usage: {
           tokensInput: 0,
           tokensOutput: 0,
@@ -381,13 +392,8 @@ export async function POST(
       requestId,
       skipped_llm: true,
       simulated: true,
-      ...(supervisionConversationId
-        ? {
-            supervision: {
-              mode: 'ai_handling',
-              conversationId: supervisionConversationId,
-            },
-          }
+      ...(supervisionPayload('ai_handling')
+        ? { supervision: supervisionPayload('ai_handling') }
         : {}),
       usage: {
         tokensInput: 0,
@@ -435,17 +441,25 @@ export async function POST(
             ? [result.product_card]
             : []
           : [];
+    const detReply =
+      result.status === 'ready'
+        ? result.message
+        : result.message || 'Necesito un dato más para armar la combinación.';
+    void persistAssistantReply(detReply, {
+      cart_actions: cartActions,
+      product_cards: productCards,
+    });
     return json({
       ok: true,
-      reply:
-        result.status === 'ready'
-          ? result.message
-          : result.message || 'Necesito un dato más para armar la combinación.',
+      reply: detReply,
       sessionId,
       model: 'deterministic',
       commerceId,
       requestId,
       skipped_llm: true,
+      ...(supervisionPayload('ai_handling')
+        ? { supervision: supervisionPayload('ai_handling') }
+        : {}),
       usage: {
         tokensInput: 0,
         tokensOutput: 0,
@@ -464,6 +478,10 @@ export async function POST(
   }
   if (body.deterministic_action === 'summarize_cart') {
     const result = runDeterministicCartSummary({ toolCtx, requestId });
+    void persistAssistantReply(result.text, {
+      cart_actions: result.cartActions,
+      product_cards: result.productCards,
+    });
     return json({
       ok: true,
       reply: result.text,
@@ -472,6 +490,9 @@ export async function POST(
       commerceId,
       requestId,
       skipped_llm: true,
+      ...(supervisionPayload('ai_handling')
+        ? { supervision: supervisionPayload('ai_handling') }
+        : {}),
       usage: {
         tokensInput: 0,
         tokensOutput: 0,
@@ -487,6 +508,7 @@ export async function POST(
   }
   if (body.deterministic_action === 'delivery_info') {
     const result = runDeterministicDeliveryInfo({ toolCtx, requestId });
+    void persistAssistantReply(result.text);
     return json({
       ok: true,
       reply: result.text,
@@ -495,6 +517,9 @@ export async function POST(
       commerceId,
       requestId,
       skipped_llm: true,
+      ...(supervisionPayload('ai_handling')
+        ? { supervision: supervisionPayload('ai_handling') }
+        : {}),
       usage: {
         tokensInput: 0,
         tokensOutput: 0,
@@ -558,10 +583,7 @@ export async function POST(
         commerceId,
         requestId,
         skipped_llm: true,
-        supervision: {
-          mode: 'human_handling',
-          conversationId: supervisionConversationId,
-        },
+        supervision: supervisionPayload('human_handling'),
         usage: {
           tokensInput: result.tokensInput,
           tokensOutput: result.tokensOutput,
@@ -590,13 +612,8 @@ export async function POST(
       model: result.model,
       commerceId,
       requestId,
-      ...(supervisionConversationId
-        ? {
-            supervision: {
-              mode: 'ai_handling',
-              conversationId: supervisionConversationId,
-            },
-          }
+      ...(supervisionPayload('ai_handling')
+        ? { supervision: supervisionPayload('ai_handling') }
         : {}),
       usage: {
         tokensInput: result.tokensInput,

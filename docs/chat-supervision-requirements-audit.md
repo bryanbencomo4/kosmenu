@@ -21,8 +21,8 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 11 | Devolver a Gemini | PARTIAL | Igual que 9–10 |
 | 12 | Escalamiento “necesita humano” | DONE | `detectNeedsHuman` + `needs_attention` + notify hourly + contacto WhatsApp local sin prometer respuesta inmediata |
 | 13 | Privacidad discreta | DONE | Welcome v6 + Vitest |
-| 14 | Feature flags independientes | DONE | `CHAT_SUPERVISION_{ENABLED,WASENDER,HUMAN_TAKEOVER,COMMERCE_IDS}` |
-| 15 | Piloto solo Trueno | PARTIAL | Allowlist en código/docs; **flags no activados en prod** |
+| 14 | Feature flags independientes | DONE | `CHAT_SUPERVISION_{ENABLED,WASENDER,HUMAN_TAKEOVER,COMMERCE_IDS}` (no hereda `CHATBOT_ALLOWED_*`) |
+| 15 | Piloto solo Trueno | PARTIAL | Allowlist dedicada en código/docs; **flags no activados en prod** |
 | 16 | Outbox / no bloquear chat si WaSender cae | DONE | cola wasender + retry backoff 1m/5m/15m; chat try/catch |
 | 17 | Vitest | DONE | supervisión (flags, notify phone, backoff, memoria, privacy) |
 | 18 | Playwright dual | PARTIAL | MEMORY local **19/19** (gemini_resumed, staff UI, reopen, takeover 409); **no** contra tablas reales |

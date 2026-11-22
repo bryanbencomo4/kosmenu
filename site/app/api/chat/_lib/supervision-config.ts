@@ -31,8 +31,10 @@ export function getChatSupervisionConfig(
     enabled: envBool('CHAT_SUPERVISION_ENABLED', false, env),
     wasenderNotify: envBool('CHAT_SUPERVISION_WASENDER', false, env),
     humanTakeover: envBool('CHAT_SUPERVISION_HUMAN_TAKEOVER', false, env),
+    // Dedicated pilot allowlist only — never inherit CHATBOT_ALLOWED_COMMERCE_IDS
+    // (that would silently enable supervision for every chatbot-enabled commerce).
     allowedCommerceIds: parseAllowedCommerceIds(
-      env.CHAT_SUPERVISION_COMMERCE_IDS || env.CHATBOT_ALLOWED_COMMERCE_IDS,
+      env.CHAT_SUPERVISION_COMMERCE_IDS,
     ),
     reopenAfterHours: envInt('CHAT_SUPERVISION_REOPEN_HOURS', 12, env),
     retentionDays: envInt('CHAT_SUPERVISION_RETENTION_DAYS', 30, env),
