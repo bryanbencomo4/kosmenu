@@ -46,7 +46,9 @@ describe('chat supervision helpers', () => {
   it('builds authenticated panel deep link without secrets', () => {
     const href = merchantConversationHref('11111111-1111-4111-8111-111111111111');
     expect(href).toContain('/panel/conversaciones/11111111-1111-4111-8111-111111111111');
-    expect(href).toMatch(/app\.elmenuxfa\.com|localhost|127\.0\.0\.1/);
+    // WaSender uses the Next public host (ships with chat APIs), not the Flutter app host.
+    expect(href).toMatch(/elmenuxfa\.com|localhost|127\.0\.0\.1/);
+    expect(href).not.toMatch(/^https:\/\/app\.elmenuxfa\.com\//);
     expect(href).not.toMatch(/service_role|apikey|Bearer/i);
   });
 

@@ -11,7 +11,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 1 | Auditar WaSender/auth/historial/Realtime/RLS | DONE | `docs/chat-supervision-architecture-audit.md` |
 | 2 | Reutilizar WaSender (no segundo proveedor) | DONE | `supervision.ts` → `sendWhatsappText` → `enqueue_wasender_message` (RPC existe en prod) |
 | 3 | Notificar solo primer mensaje real | DONE | `persistConsumerTurn` + dedupe `chat_supervision:new:{id}`; E2E `no_notify_on_open` |
-| 4 | Enlace seguro `/panel/conversaciones/[id]` | DONE | WaSender → `app.elmenuxfa.com/...`; Flutter deep link + Next fallback; sin secretos en URL |
+| 4 | Enlace seguro `/panel/conversaciones/[id]` | DONE | WaSender → `elmenuxfa.com/panel/...` (Next); Flutter inbox opcional; sin secretos en URL |
 | 5 | Auth comerciante (sin segundo sistema) | DONE | Bearer Supabase + membership; `/panel/login`; `/api/panel/conversaciones/me` |
 | 6 | Bandeja en panel existente | DONE | Next `/panel/conversaciones` + Flutter Configuración → Conversaciones (API + Realtime inbox/detail; prioridad `needs_attention`) |
 | 7 | Persistencia servidor (no solo browser) | PARTIAL | Código + migración lista; **tablas null en prod/preview** (read-only) |

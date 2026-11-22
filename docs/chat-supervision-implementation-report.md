@@ -36,7 +36,7 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 
 `sendWhatsappText` + cola existente + `dedupe_key` en `chat_supervision_events`.  
 Destino preferido: `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` → fallback contactos comercio; bloquea soporte plataforma.  
-Enlace: `merchantConversationHref` → `appSiteUrl` (`https://app.elmenuxfa.com/panel/conversaciones/{id}`).  
+Enlace: `merchantConversationHref` → `publicSiteUrl` (`https://elmenuxfa.com/panel/conversaciones/{id}`) — mismo deploy que la API; Flutter inbox es entrada alternativa.  
 Si el enqueue falla: evento `failed` con backoff 1m/5m/15m (máx. 3) y `retryFailedSupervisionNotifies` en turnos posteriores; la cola `wasender_message_queue` reintenta la entrega una vez encolado.  
 En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).
 

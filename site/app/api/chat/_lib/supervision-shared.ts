@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 
-import { appSiteUrl } from '../../_lib/public-site-url';
+import { publicSiteUrl } from '../../_lib/public-site-url';
 
 export function sessionPepper(env: NodeJS.ProcessEnv = process.env) {
   return (
@@ -20,9 +20,12 @@ export function hashConsumerSession(
     .digest('hex');
 }
 
-/** WaSender deep link → Flutter merchant host (native inbox). */
+/**
+ * WaSender deep link → Next merchant panel (same deploy as chat APIs).
+ * Flutter native inbox remains available via Settings / app.elmenuxfa.com.
+ */
 export function merchantConversationHref(conversationId: string) {
-  const base = appSiteUrl.replace(/\/$/, '');
+  const base = publicSiteUrl.replace(/\/$/, '');
   return `${base}/panel/conversaciones/${encodeURIComponent(conversationId)}`;
 }
 

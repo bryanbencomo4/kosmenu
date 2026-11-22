@@ -54,10 +54,9 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 
 ## Deep links / panel comerciante
 
-- WaSender apunta por defecto a `https://app.elmenuxfa.com/panel/conversaciones/{id}` (`appSiteUrl` / `NEXT_PUBLIC_APP_SITE_URL`).
-- Fallback web: Next `/panel/conversaciones` (login + bandeja) sigue disponible en el host público.
-- En Flutter: Configuración → **Conversaciones del asistente** (bandeja nativa + Realtime `chat_conversations` / `chat_messages`).
-- Deep link en host Flutter: tras login abre la conversación en la bandeja nativa.
+- WaSender apunta a `https://elmenuxfa.com/panel/conversaciones/{id}` (`publicSiteUrl`) — mismo deploy Next que las APIs de chat/panel.
+- En Flutter (tras deploy app): Configuración → **Conversaciones del asistente**, o deep link `app.elmenuxfa.com/panel/conversaciones/{id}` tras login.
+- Criterio piloto: el enlace de WhatsApp debe abrir el panel Next autenticado sin depender del deploy Flutter.
 
 Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.
 

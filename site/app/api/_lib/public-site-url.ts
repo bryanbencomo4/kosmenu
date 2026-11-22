@@ -28,7 +28,7 @@ export const publicSiteUrl = resolveSiteUrl(
   process.env.NEXT_PUBLIC_SITE_URL,
 );
 
-/** Merchant Flutter/web app host (chat supervision WaSender deep links). */
+/** Merchant Flutter/web app host (native shell; optional deep-link entry). */
 export const appSiteUrl = resolveSiteUrl(
   fallbackAppSiteUrl,
   process.env.NEXT_PUBLIC_APP_SITE_URL,
