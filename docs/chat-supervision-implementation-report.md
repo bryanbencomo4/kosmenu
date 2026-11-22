@@ -45,8 +45,9 @@ Enlace `/panel/conversaciones/[id]` exige token; sin secretos en URL.
 
 Broadcast best-effort post-escritura; DB es fuente de verdad.  
 Consumidor: feed recovery 8s solo en modo humano.  
-Panel: refresh al volver a la pestaña.  
-Pendiente: canales privados Realtime Authorization en Supabase (migración/config).
+Panel Next: refresh al volver a la pestaña.  
+**Reutilizar patrón Flutter:** el panel comerciante ya hace `postgres_changes`/`.stream()` en `pedidos` con JWT+RLS; la bandeja de chat debería seguir el mismo modelo (publicación + RLS en `chat_messages`) en lugar de inventar sockets.  
+Pendiente: publicar tablas chat en `supabase_realtime`, canales privados / Realtime Authorization, y/o wire en Flutter además del panel Next piloto.
 
 ## 7–11. Bandeja / takeover / mensaje / devolver
 

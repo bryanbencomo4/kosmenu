@@ -59,8 +59,12 @@ Hook de supervisión: tras validar mensaje usuario real → upsert conversación
 
 ## 6. Realtime existente
 
-- Casi nulo en chatbot (tracking de pedidos tiene sync/polling).
-- **Plan:** Broadcast privado post-insert; DB como fuente de verdad; sin polling agresivo; sin WebSockets propios en serverless.
+- **Chatbot / `site/`:** sin suscripciones Supabase Realtime (tracking de pedidos del consumidor es HTTP polling).
+- **Panel Flutter (`app.elmenuxfa.com`):** sí usa Realtime hoy:
+  - `pedidos` vía `.stream()` filtrado por `comercio_id` (JWT + RLS).
+  - FX: `postgres_changes` en `global_market_rates` / `market_rate_provider_status`.
+- **No hay** Broadcast privado, Presence de Supabase ni Realtime Authorization en el repo.
+- **Plan supervisión:** tablas nuevas + RLS (ya migradas en SQL pendiente); Broadcast privado post-insert o `postgres_changes` sobre `chat_messages` con la misma tenancy que pedidos; DB como fuente de verdad; sin WebSockets propios en serverless Next.
 
 ## 7. RLS / pedidos
 
