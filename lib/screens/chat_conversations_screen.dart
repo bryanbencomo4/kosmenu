@@ -5,6 +5,27 @@ import 'package:kosmenu_app/services/chat_supervision_service.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+String _chatStatusLabel(String status) {
+  switch (status) {
+    case 'human_handling':
+      return 'Humano';
+    case 'needs_attention':
+      return 'Atención';
+    case 'closed':
+      return 'Cerrada';
+    default:
+      return 'IA';
+  }
+}
+
+String _chatAssigneeLabel(String? assignedUserId) {
+  final id = (assignedUserId ?? '').trim();
+  if (id.isEmpty) return '';
+  final me = Supabase.instance.client.auth.currentUser?.id;
+  if (me != null && me == id) return 'Resp: Tú';
+  return 'Resp: Personal';
+}
+
 /// Merchant inbox for supervised chatbot conversations (Flutter panel).
 class ChatConversationsScreen extends StatefulWidget {
   const ChatConversationsScreen({
@@ -103,19 +124,6 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
       ),
     );
     if (mounted) await _reload();
-  }
-
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'human_handling':
-        return 'Humano';
-      case 'needs_attention':
-        return 'Atención';
-      case 'closed':
-        return 'Cerrada';
-      default:
-        return 'IA';
-    }
   }
 
   /// Needs-attention first, then by last message (newest first).
@@ -225,9 +233,14 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        _statusLabel(row.status),
+                        _chatStatusLabel(row.status),
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
+                      if ((row.assignedUserId ?? '').isNotEmpty)
+                        Text(
+                          _chatAssigneeLabel(row.assignedUserId),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                       if (row.unreadMerchantCount > 0)
                         Text(
                           '${row.unreadMerchantCount} nuevo(s)',
@@ -386,6 +399,7 @@ class _ChatConversationDetailScreenState
   Widget build(BuildContext context) {
     final status = _detail?.conversation.status ?? '…';
     final human = status == 'human_handling';
+    final assignee = _chatAssigneeLabel(_detail?.conversation.assignedUserId);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Conversación'),
@@ -402,7 +416,13 @@ class _ChatConversationDetailScreenState
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
               children: [
-                Expanded(child: Text('Estado: $status')),
+                Expanded(
+                  child: Text(
+                    assignee.isEmpty
+                        ? 'Estado: $status'
+                        : 'Estado: $status · $assignee',
+                  ),
+                ),
                 TextButton(
                   onPressed: _busy ? null : () => unawaited(_act('take')),
                   child: const Text('Tomar'),

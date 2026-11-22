@@ -50,7 +50,7 @@ function ConversationDetailInner({
   paramsPromise: Promise<{ conversationId: string }>;
   searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { token, email, ready, signOut } = usePanelSession();
+  const { token, email, userId, ready, signOut } = usePanelSession();
   const [conversationId, setConversationId] = useState('');
   const [comercioId, setComercioId] = useState('');
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -220,6 +220,17 @@ function ConversationDetailInner({
             data-status={conversation.status}
           >
             Estado: <strong>{conversation.status}</strong>
+            {conversation.assigned_user_id ? (
+              <>
+                {' '}
+                · Responsable:{' '}
+                <strong>
+                  {userId && conversation.assigned_user_id === userId
+                    ? 'Tú'
+                    : 'Personal'}
+                </strong>
+              </>
+            ) : null}
           </p>
         ) : null}
         {error ? (

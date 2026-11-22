@@ -13,6 +13,7 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
   const [token, setToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     // Local/E2E harness only — never set NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER in prod.
@@ -22,12 +23,17 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
     if (e2eBearer) {
       setToken(e2eBearer);
       setEmail('e2e@local');
+      setUserId(
+        (process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_USER_ID || '').trim() ||
+          'e2e-user',
+      );
       setReady(true);
       return e2eBearer;
     }
     const sb = getBrowserSupabase();
     if (!sb) {
       setToken(null);
+      setUserId(null);
       setReady(true);
       return null;
     }
@@ -35,6 +41,7 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
     const access = data.session?.access_token || null;
     setToken(access);
     setEmail(data.session?.user?.email || null);
+    setUserId(data.session?.user?.id || null);
     setReady(true);
     return access;
   }, []);
@@ -63,6 +70,7 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
           }
           setToken(session?.access_token || null);
           setEmail(session?.user?.email || null);
+          setUserId(session?.user?.id || null);
         })
       : { data: { subscription: { unsubscribe() {} } } };
     return () => {
@@ -75,8 +83,9 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
     const sb = getBrowserSupabase();
     await sb?.auth.signOut();
     setToken(null);
+    setUserId(null);
     router.replace('/panel/login');
   }, [router]);
 
-  return { token, email, ready, refresh, signOut };
+  return { token, email, userId, ready, refresh, signOut };
 }

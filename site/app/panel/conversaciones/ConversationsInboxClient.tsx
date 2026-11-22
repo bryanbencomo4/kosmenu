@@ -63,7 +63,13 @@ function ConversationsInboxInner({
 }: {
   searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { token, email, ready, signOut } = usePanelSession();
+  const { token, email, userId, ready, signOut } = usePanelSession();
+
+  function assigneeLabel(assignedUserId: string | null) {
+    if (!assignedUserId) return null;
+    if (userId && assignedUserId === userId) return 'Tú';
+    return 'Personal';
+  }
   const [comercioId, setComercioId] = useState('');
   const [comercios, setComercios] = useState<ComercioOption[]>([]);
   const [rows, setRows] = useState<ConversationRow[]>([]);
@@ -273,6 +279,11 @@ function ConversationsInboxInner({
                 </div>
                 <div className="text-right text-xs text-stone-500">
                   <p data-status={row.status}>{statusLabel(row.status)}</p>
+                  {assigneeLabel(row.assigned_user_id) ? (
+                    <p className="mt-1">
+                      Resp: {assigneeLabel(row.assigned_user_id)}
+                    </p>
+                  ) : null}
                   {row.unread_merchant_count > 0 ? (
                     <p className="mt-1 font-semibold text-[#c45c26]">
                       {row.unread_merchant_count} nuevo(s)
