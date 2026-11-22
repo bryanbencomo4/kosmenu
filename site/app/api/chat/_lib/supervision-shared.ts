@@ -111,3 +111,28 @@ export function shouldRetrySupervisionNotify(
   const at = Date.parse(String(next));
   return Number.isFinite(at) && at <= nowMs;
 }
+
+/** Platform support digits — never a supervision notify destination. */
+export const PLATFORM_SUPPORT_WHATSAPP_DIGITS = '584220451906';
+
+/**
+ * Merchant WaSender notify destination from config only.
+ * Does NOT fall back to the public menu WhatsApp — that number may be for
+ * diners, not staff alerts. Set config_negocio.supervision_whatsapp (preferred)
+ * or notify_whatsapp / whatsapp_avisos.
+ */
+export function pickSupervisionNotifyPhone(
+  configNegocio: Record<string, unknown> | null | undefined,
+): string | null {
+  const cfg = configNegocio || {};
+  const preferred = String(
+    cfg.supervision_whatsapp ||
+      cfg.notify_whatsapp ||
+      cfg.whatsapp_avisos ||
+      '',
+  ).trim();
+  if (!preferred) return null;
+  const digits = preferred.replace(/\D/g, '');
+  if (!digits || digits === PLATFORM_SUPPORT_WHATSAPP_DIGITS) return null;
+  return preferred;
+}

@@ -24,8 +24,8 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 14 | Feature flags independientes | DONE | `CHAT_SUPERVISION_{ENABLED,WASENDER,HUMAN_TAKEOVER,COMMERCE_IDS}` |
 | 15 | Piloto solo Trueno | PARTIAL | Allowlist en código/docs; **flags no activados en prod** |
 | 16 | Outbox / no bloquear chat si WaSender cae | DONE | cola wasender + retry backoff 1m/5m/15m; chat try/catch |
-| 17 | Vitest | DONE | supervisión 11 (flags, backoff, memoria, privacy) |
-| 18 | Playwright dual | PARTIAL | 14/14 MEMORY local (último: 2026-11-22); **no** contra tablas reales |
+| 17 | Vitest | DONE | supervisión (flags, notify phone, backoff, memoria, privacy) |
+| 18 | Playwright dual | PARTIAL | MEMORY local incl. gemini_resumed post-return; **no** contra tablas reales |
 | 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | static validate 15/15; apply gated; prod readiness **SCHEMA_NOT_READY** |
 | 20 | Sin merge/deploy prod sin auth | DONE | solo rama feature + draft PR; sin merge/deploy prod |
 | 21 | Criterio principal comerciante | BLOCKED | migración + deploy + flags; readiness: chat_* null, take_rpc false |

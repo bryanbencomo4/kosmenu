@@ -10,9 +10,9 @@
 | Preview mismas tablas | comprobar en el momento de activar |
 | Trueno `id` | `0aa8c53b-07f1-446e-8b88-66c2b7ae89ea` |
 | Trueno `whatsapp` público | `+584140821633` |
-| `config_negocio.supervision_whatsapp` | **ausente** → el código caerá a `notify_whatsapp` / contactos / `comercios.whatsapp` |
+| `config_negocio.supervision_whatsapp` | **ausente** → sin aviso WaSender hasta configurar (no se usa el WhatsApp público del menú) |
 
-Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_whatsapp` al número autorizado para avisos (puede diferir del WhatsApp público del menú).
+**Obligatorio antes del piloto con `CHAT_SUPERVISION_WASENDER=1`:** fijar `branding_ia.config_negocio.supervision_whatsapp` al número autorizado para avisos (puede diferir del WhatsApp público del menú). Sin esa preferencia (o `notify_whatsapp` / `whatsapp_avisos`), la notificación se marca `skipped` / `no_supervision_whatsapp`.
 
 ## Orden seguro
 

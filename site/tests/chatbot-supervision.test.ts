@@ -5,6 +5,8 @@ import {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  pickSupervisionNotifyPhone,
+  PLATFORM_SUPPORT_WHATSAPP_DIGITS,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
   SUPERVISION_NOTIFY_MAX_ATTEMPTS,
@@ -160,6 +162,27 @@ describe('chat supervision helpers', () => {
     const w = buildChatbotWelcomeMessage('Pizzas El Trueno');
     expect(w).toMatch(/personal autorizado/i);
     expect(w).toMatch(/procesada por IA/i);
+  });
+
+  it('picks supervision notify phone from dedicated config only', () => {
+    expect(
+      pickSupervisionNotifyPhone({
+        supervision_whatsapp: '+584141111111',
+        notify_whatsapp: '+584142222222',
+      }),
+    ).toBe('+584141111111');
+    expect(
+      pickSupervisionNotifyPhone({ notify_whatsapp: '+584142222222' }),
+    ).toBe('+584142222222');
+    expect(pickSupervisionNotifyPhone({})).toBeNull();
+    expect(pickSupervisionNotifyPhone(null)).toBeNull();
+    expect(
+      pickSupervisionNotifyPhone({
+        supervision_whatsapp: `+${PLATFORM_SUPPORT_WHATSAPP_DIGITS}`,
+      }),
+    ).toBeNull();
+    // Public menu number is intentionally ignored by this helper — callers
+    // must not pass comercios.whatsapp as a fallback for staff alerts.
   });
 
   it('limits WaSender notify retries with backoff', () => {

@@ -108,7 +108,8 @@ Expected before GO:
   - chat_* tables present
   - chat_take_conversation RPC present
   - comercio_members + enqueue_wasender_message present
-  - supervision_whatsapp (preferred) or notify/whatsapp fallback
+  - config_negocio.supervision_whatsapp (preferred) or notify_whatsapp / whatsapp_avisos
+    (public comercios.whatsapp is NOT used for staff alerts)
   - CHAT_SUPERVISION_* flags on for Trueno only (app env)
   - CHAT_SUPERVISION_MEMORY unset
   - Next deploy includes /api/panel/conversaciones

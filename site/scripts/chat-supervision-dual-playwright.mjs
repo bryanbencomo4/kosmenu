@@ -269,7 +269,7 @@ async function main() {
       ok('session_isolation');
     }
 
-    // Return to assistant + close
+    // Return to assistant + prove Gemini resumes on the next consumer turn
     const ret = await api(`/api/panel/conversaciones/${conversationId}`, {
       method: 'POST',
       headers: {
@@ -282,6 +282,28 @@ async function main() {
       ok('return_to_assistant');
     } else {
       fail('return_to_assistant', ret.text.slice(0, 200));
+    }
+
+    const resumed = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        messages: [{ role: 'user', text: '¿Qué promociones tienen hoy?' }],
+      }),
+    });
+    const resumedModel = String(resumed.json?.model || resumed.json?.meta?.model || '');
+    const resumedText = String(resumed.json?.reply || resumed.json?.text || '');
+    const handoff =
+      resumedModel === 'human_handoff' ||
+      /miembro del restaurante|personal del local/i.test(resumedText);
+    if (resumed.res.ok && !handoff && resumedText.trim().length > 0) {
+      ok('gemini_resumed', resumedModel || 'ok');
+    } else {
+      fail(
+        'gemini_resumed',
+        `${resumed.res.status} model=${resumedModel} text=${resumedText.slice(0, 120)}`,
+      );
     }
 
     const closed = await api(`/api/panel/conversaciones/${conversationId}`, {

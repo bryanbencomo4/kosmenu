@@ -1,9 +1,10 @@
 # Informe — supervisión humana del chatbot
 
-**Rama:** `feature/chat-supervision-human` (`bcdd46f`)  
-**Estado:** supervisión implementada en rama; evidencias locales verdes (dual 14/14, Vitest 13, tsc 0); CI Site + Vercel preview **verde**.  
+**Rama:** `feature/chat-supervision-human`  
+**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **15/15** incl. `gemini_resumed`, Vitest **14**, tsc 0).  
 **Veredicto:** **NO-GO** publicar.  
-**Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE` para one-shot).  
+**Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
+**Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
 **Luego:** deploy/merge + flags Trueno + smoke real. Matriz: `docs/chat-supervision-requirements-audit.md`.
 
 ## 1. Arquitectura existente (auditoría)
@@ -36,7 +37,7 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 ## 3. WaSender reutilizado
 
 `sendWhatsappText` + cola existente + `dedupe_key` en `chat_supervision_events`.  
-Destino preferido: `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` → fallback contactos comercio; bloquea soporte plataforma.  
+Destino: solo `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` (sin fallback a WhatsApp público del menú); bloquea soporte plataforma. Contacto alternativo al consumidor sí puede usar el WhatsApp público.  
 Enlace: `merchantConversationHref` → `publicSiteUrl` (`https://elmenuxfa.com/panel/conversaciones/{id}`) — mismo deploy que la API; Flutter inbox es entrada alternativa.  
 Si el enqueue falla: evento `failed` con backoff 1m/5m/15m (máx. 3) y `retryFailedSupervisionNotifies` en turnos posteriores; la cola `wasender_message_queue` reintenta la entrega una vez encolado.  
 En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).

@@ -19,6 +19,8 @@ import {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  pickSupervisionNotifyPhone,
+  PLATFORM_SUPPORT_WHATSAPP_DIGITS,
   shouldRetrySupervisionNotify,
 } from './supervision-shared';
 import {
@@ -38,6 +40,7 @@ export {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  pickSupervisionNotifyPhone,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
 } from './supervision-shared';
@@ -528,12 +531,14 @@ async function offerAlternateContactIfNeeded(input: {
   comercioId: string;
   commerceName: string;
 }) {
-  const dest = isSupervisionMemoryEnabled()
+  // Consumer-facing alternate may use the public menu WhatsApp; merchant
+  // notify numbers stay on dedicated config (resolveSupervisionWhatsapp).
+  const publicContact = isSupervisionMemoryEnabled()
     ? null
-    : await resolveSupervisionWhatsapp(input.comercioId);
-  const name = dest?.nombre || input.commerceName || 'el restaurante';
-  const body = dest?.phone
-    ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${dest.phone}. No prometemos una respuesta humana inmediata.`
+    : await resolvePublicMenuWhatsapp(input.comercioId);
+  const name = publicContact?.nombre || input.commerceName || 'el restaurante';
+  const body = publicContact?.phone
+    ? `El personal de ${name} puede unirse a este chat cuando esté disponible. Si necesitas ayuda ahora, también puedes escribir al WhatsApp del local: ${publicContact.phone}. No prometemos una respuesta humana inmediata.`
     : `El personal de ${name} puede unirse a este chat cuando esté disponible. No prometemos una respuesta humana inmediata; si el local publica WhatsApp en el menú, úsalo para contacto directo.`;
 
   await persistAssistantOrStaffMessage({
@@ -545,33 +550,43 @@ async function offerAlternateContactIfNeeded(input: {
   });
 }
 
+/** Public diner WhatsApp from the menu — OK for consumer alternate contact only. */
+async function resolvePublicMenuWhatsapp(
+  comercioId: string,
+): Promise<{ phone: string; nombre: string } | null> {
+  const sb = getServiceSupabaseClient();
+  const contacts = await resolveMerchantContacts(sb, comercioId);
+  const phone = String(contacts.whatsapp || '').trim();
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (!digits || digits === PLATFORM_SUPPORT_WHATSAPP_DIGITS) return null;
+  return {
+    phone,
+    nombre: contacts.nombre || 'Tu restaurante',
+  };
+}
+
+/**
+ * Staff alert destination for WaSender — dedicated config keys only.
+ * Never falls back to comercios.whatsapp / owner phone (public menu contact).
+ */
 async function resolveSupervisionWhatsapp(
   comercioId: string,
 ): Promise<{ phone: string; nombre: string } | null> {
   const sb = getServiceSupabaseClient();
   const { data: row } = await sb
     .from('comercios')
-    .select('nombre,whatsapp,branding_ia')
+    .select('nombre,branding_ia')
     .eq('id', comercioId)
     .maybeSingle();
   const cfg =
     (row?.branding_ia as { config_negocio?: Record<string, unknown> } | null)
       ?.config_negocio || {};
-  const preferred = String(
-    cfg.supervision_whatsapp ||
-      cfg.notify_whatsapp ||
-      cfg.whatsapp_avisos ||
-      '',
-  ).trim();
-  const contacts = await resolveMerchantContacts(sb, comercioId);
-  const phone = preferred || contacts.whatsapp;
+  const phone = pickSupervisionNotifyPhone(cfg);
   if (!phone) return null;
-  // Hard reject platform support digits if ever misconfigured.
-  const digits = phone.replace(/\D/g, '');
-  if (digits === '584220451906') return null;
   return {
     phone,
-    nombre: contacts.nombre || String(row?.nombre || 'Tu restaurante'),
+    nombre: String(row?.nombre || 'Tu restaurante'),
   };
 }
 
