@@ -19,7 +19,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 9 | Takeover IA→humano atómico | PARTIAL | RPC `chat_take_conversation` + `chat_user_can_supervise` (fix service-role); E2E memoria OK; **no probado en Postgres remoto** |
 | 10 | Respuesta humana → consumidor | PARTIAL | Panel UI + feed session-scoped; E2E 14/14 memoria; falta DB remota |
 | 11 | Devolver a Gemini | PARTIAL | Igual que 9–10 |
-| 12 | Escalamiento “necesita humano” | DONE | `detectNeedsHuman` + status `needs_attention` + notify hourly dedupe |
+| 12 | Escalamiento “necesita humano” | DONE | `detectNeedsHuman` + `needs_attention` + notify hourly + contacto WhatsApp local sin prometer respuesta inmediata |
 | 13 | Privacidad discreta | DONE | Welcome v6 + Vitest |
 | 14 | Feature flags independientes | DONE | `CHAT_SUPERVISION_{ENABLED,WASENDER,HUMAN_TAKEOVER,COMMERCE_IDS}` |
 | 15 | Piloto solo Trueno | PARTIAL | Allowlist en código/docs; **flags no activados en prod** |
