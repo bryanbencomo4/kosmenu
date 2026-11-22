@@ -58,6 +58,8 @@ describe('chat supervision helpers', () => {
       NODE_ENV: 'test',
     });
     expect(cfg.enabled).toBe(false);
+    expect(cfg.humanTakeover).toBe(false);
+    expect(cfg.wasenderNotify).toBe(false);
     expect(
       isSupervisionEnabledForCommerce('0aa8c53b-07f1-446e-8b88-66c2b7ae89ea', {
         CHAT_SUPERVISION_ENABLED: '1',
@@ -72,6 +74,21 @@ describe('chat supervision helpers', () => {
         NODE_ENV: 'production',
       }),
     ).toBe(false);
+  });
+
+  it('keeps human takeover as an independent kill switch', () => {
+    expect(
+      getChatSupervisionConfig({
+        CHAT_SUPERVISION_ENABLED: '1',
+        CHAT_SUPERVISION_HUMAN_TAKEOVER: '',
+      }).humanTakeover,
+    ).toBe(false);
+    expect(
+      getChatSupervisionConfig({
+        CHAT_SUPERVISION_ENABLED: '1',
+        CHAT_SUPERVISION_HUMAN_TAKEOVER: '1',
+      }).humanTakeover,
+    ).toBe(true);
   });
 
   it('includes discreet privacy notice in welcome copy', () => {

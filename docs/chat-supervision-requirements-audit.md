@@ -23,12 +23,12 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 13 | Privacidad discreta | DONE | Welcome v6 + Vitest |
 | 14 | Feature flags independientes | DONE | `CHAT_SUPERVISION_{ENABLED,WASENDER,HUMAN_TAKEOVER,COMMERCE_IDS}` |
 | 15 | Piloto solo Trueno | PARTIAL | Allowlist en código/docs; **flags no activados en prod** |
-| 16 | Outbox / no bloquear chat si WaSender cae | DONE | `void enqueue…`; eventos `queued/sent/failed/skipped`; chat try/catch |
-| 17 | Vitest | DONE | Suite site 827; supervisión 9 |
-| 18 | Playwright dual | PARTIAL | 14/14 con `CHAT_SUPERVISION_MEMORY=1`; **no** contra tablas reales |
-| 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | `20261123090000_…sql`; script gated `apply-chat-supervision-migration.mjs` |
-| 20 | Sin deploy/push/merge sin auth | DONE | Sin push/merge/deploy en esta rama |
-| 21 | Criterio principal comerciante | BLOCKED | Requiere migración + deploy rama + flags Trueno; prod API panel aún 404; chat_* null |
+| 16 | Outbox / no bloquear chat si WaSender cae | DONE | cola wasender + retry backoff 1m/5m/15m; chat try/catch |
+| 17 | Vitest | DONE | supervisión 11 (flags, backoff, memoria, privacy) |
+| 18 | Playwright dual | PARTIAL | 14/14 MEMORY local (último: 2026-11-22); **no** contra tablas reales |
+| 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | static validate 15/15; apply gated; prod readiness **SCHEMA_NOT_READY** |
+| 20 | Sin merge/deploy prod sin auth | DONE | solo rama feature + draft PR; sin merge/deploy prod |
+| 21 | Criterio principal comerciante | BLOCKED | migración + deploy + flags; readiness: chat_* null, take_rpc false |
 
 ## Prerequisites prod (read-only OK)
 

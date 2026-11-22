@@ -153,11 +153,13 @@ incluye takeover UI, mensaje staff UI, feed consumidor con sesión correcta, ais
 
 Criterio principal (abrir enlace → historial → intervenir → devolver) verificado en E2E local con store en memoria y flags. Aún bloquea GO:
 
-1. Autorización para aplicar `20261123090000_chat_supervision_conversations.sql` (+ publication Realtime) — **confirmado ausente en prod** (`chat_*` null; `comercio_members` + WaSender OK).
+1. Autorización para aplicar `20261123090000_chat_supervision_conversations.sql` (+ publication Realtime) — readiness read-only **SCHEMA_NOT_READY** (`chat_*` null, `take_rpc=false`; `comercio_members` + WaSender OK; Trueno `whatsapp=+584140821633`, sin `supervision_whatsapp`).
 2. Autorización de **deploy/merge** de esta rama: `elmenuxfa.com/api/panel/conversaciones` hoy responde **404**.
-3. Smoke con persistencia Supabase real (script ampliado: takeover → Gemini paused → staff → return → Gemini resumed → close).
-4. Aviso WaSender real; Trueno hoy usa `whatsapp=+584140821633` y **no** tiene `supervision_whatsapp` dedicado (recomendado fijarlo).
-5. Activación exclusiva Trueno (kit: `docs/chat-supervision-activation-trueno.md`).
+3. Smoke con persistencia Supabase real (`chat-supervision-post-migration-smoke.mjs`: takeover → Gemini paused → staff → return → Gemini resumed → close).
+4. Dual MEMORY local **14/14** (último reinicio 3010). `HUMAN_TAKEOVER` gatea take/return/message (403 si off).
+5. Aviso WaSender real + preferir `supervision_whatsapp` dedicado.
+6. Activación Trueno: `docs/chat-supervision-activation-trueno.md`.
 
-Sin esos pasos el comerciante no puede supervisar conversaciones reales en staging/prod.  
-No hay merge ni deploy a producción sin tu autorización.
+Sin esos pasos el comerciante no puede supervisar conversaciones reales.  
+No hay merge ni deploy a producción sin tu autorización.  
+Desbloqueo: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`.
