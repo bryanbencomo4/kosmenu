@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **17/17** incl. reopen tras cerrar, Vitest **16**, tsc 0).  
+**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **19/19**, Vitest **16**, tsc 0, CI verde).  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  

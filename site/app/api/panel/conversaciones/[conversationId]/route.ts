@@ -8,6 +8,15 @@ import {
   getChatSupervisionConfig,
   isSupervisionEnabledForCommerce,
 } from '../../../chat/_lib/supervision-config';
+
+function supervisionFlagsPayload(comercioId: string) {
+  const cfg = getChatSupervisionConfig();
+  return {
+    enabled: isSupervisionEnabledForCommerce(comercioId),
+    human_takeover: cfg.humanTakeover,
+    wasender_notify: cfg.wasenderNotify,
+  };
+}
 import {
   persistAssistantOrStaffMessage,
   publishConversationEvent,
@@ -75,6 +84,7 @@ export async function GET(
         conversationId,
         Number.isFinite(afterSeq) ? afterSeq : 0,
       ).slice(0, 100),
+      flags: supervisionFlagsPayload(access.comercioId),
       memory: true,
     });
   }
@@ -104,6 +114,7 @@ export async function GET(
     ok: true,
     conversation,
     messages: messages || [],
+    flags: supervisionFlagsPayload(access.comercioId),
   });
 }
 

@@ -86,7 +86,7 @@ const tables = query(
   'schema',
 );
 
-query(
+const truenoInfo = query(
   `select id::text, nombre, whatsapp,
           branding_ia->'config_negocio'->>'supervision_whatsapp' as supervision_whatsapp,
           branding_ia->'config_negocio'->>'notify_whatsapp' as notify_whatsapp
@@ -103,6 +103,12 @@ const ready =
   row.wasender_rpc === true &&
   row.take_rpc === true;
 
+const truenoRow = truenoInfo?.rows?.[0] || {};
+const notifyConfigured = Boolean(
+  String(truenoRow.supervision_whatsapp || '').trim() ||
+    String(truenoRow.notify_whatsapp || '').trim(),
+);
+
 console.log(`
 Expected before GO:
   - chat_* tables present
@@ -113,6 +119,8 @@ Expected before GO:
   - CHAT_SUPERVISION_* flags on for Trueno only (app env)
   - CHAT_SUPERVISION_MEMORY unset
   - Next deploy includes /api/panel/conversaciones
+
+Trueno staff-alert WhatsApp: ${notifyConfigured ? 'configured' : 'MISSING (WaSender notify will skip)'}
 
 Verdict: ${ready ? 'SCHEMA_READY (still need flags + deploy + smoke)' : 'SCHEMA_NOT_READY — authorize migration'}
 `);

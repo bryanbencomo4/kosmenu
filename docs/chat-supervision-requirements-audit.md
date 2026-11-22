@@ -17,7 +17,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 7 | Persistencia servidor (no solo browser) | PARTIAL | Código + migración lista; **tablas null en prod/preview** (read-only) |
 | 8 | Realtime (no polling 1–5s) | PARTIAL | Cliente `postgres_changes` + broadcast best-effort; publication pendiente de apply |
 | 9 | Takeover IA→humano atómico | PARTIAL | RPC `chat_take_conversation` + `chat_user_can_supervise` (fix service-role); E2E memoria OK; **no probado en Postgres remoto** |
-| 10 | Respuesta humana → consumidor | PARTIAL | Panel UI + feed session-scoped; E2E 14/14 memoria; falta DB remota |
+| 10 | Respuesta humana → consumidor | PARTIAL | Panel UI + feed session-scoped; E2E 19/19 memoria (UI staff); falta DB remota |
 | 11 | Devolver a Gemini | PARTIAL | Igual que 9–10 |
 | 12 | Escalamiento “necesita humano” | DONE | `detectNeedsHuman` + `needs_attention` + notify hourly + contacto WhatsApp local sin prometer respuesta inmediata |
 | 13 | Privacidad discreta | DONE | Welcome v6 + Vitest |
@@ -25,7 +25,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 15 | Piloto solo Trueno | PARTIAL | Allowlist en código/docs; **flags no activados en prod** |
 | 16 | Outbox / no bloquear chat si WaSender cae | DONE | cola wasender + retry backoff 1m/5m/15m; chat try/catch |
 | 17 | Vitest | DONE | supervisión (flags, notify phone, backoff, memoria, privacy) |
-| 18 | Playwright dual | PARTIAL | MEMORY local 17/17 (gemini_resumed, staff≤2s, reopen_after_close); **no** contra tablas reales |
+| 18 | Playwright dual | PARTIAL | MEMORY local **19/19** (gemini_resumed, staff UI, reopen, takeover 409); **no** contra tablas reales |
 | 19 | Migración reversible | DONE (archivo) / BLOCKED (apply) | static validate 15/15; apply gated; prod readiness **SCHEMA_NOT_READY** |
 | 20 | Sin merge/deploy prod sin auth | DONE | solo rama feature + draft PR; sin merge/deploy prod |
 | 21 | Criterio principal comerciante | BLOCKED | migración + deploy + flags; readiness: chat_* null, take_rpc false |

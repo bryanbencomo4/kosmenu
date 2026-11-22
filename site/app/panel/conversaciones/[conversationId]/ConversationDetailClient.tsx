@@ -58,6 +58,7 @@ function ConversationDetailInner({
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(true);
   const lastSeqRef = useRef(0);
 
   useEffect(() => {
@@ -96,6 +97,9 @@ function ConversationDetailInner({
       }
       setError(null);
       setConversation(data.conversation);
+      if (typeof data.flags?.human_takeover === 'boolean') {
+        setHumanTakeoverEnabled(data.flags.human_takeover);
+      }
       if (!comercioId && data.conversation?.comercio_id) {
         setComercioId(String(data.conversation.comercio_id));
       }
@@ -254,24 +258,33 @@ function ConversationDetailInner({
           </p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            data-testid="take-conversation"
-            className="rounded-xl bg-[#c45c26] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            onClick={() => void act('take')}
-          >
-            Tomar conversación
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            data-testid="return-assistant"
-            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"
-            onClick={() => void act('return')}
-          >
-            Devolver al asistente
-          </button>
+          {humanTakeoverEnabled ? (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                data-testid="take-conversation"
+                className="rounded-xl bg-[#c45c26] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={() => void act('take')}
+              >
+                Tomar conversación
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                data-testid="return-assistant"
+                className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                onClick={() => void act('return')}
+              >
+                Devolver al asistente
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-stone-500" data-testid="takeover-disabled-hint">
+              Intervención humana desactivada (feature flag). Puedes supervisar
+              el historial; el asistente sigue atendiendo.
+            </p>
+          )}
           <button
             type="button"
             disabled={busy}
@@ -321,31 +334,33 @@ function ConversationDetailInner({
             );
           })}
         </ul>
-        <div className="mt-3 flex gap-2">
-          <input
-            className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm"
-            data-testid="staff-draft"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={
-              conversation?.status === 'human_handling'
-                ? 'Escribe al cliente…'
-                : 'Toma la conversación para escribir'
-            }
-            disabled={conversation?.status !== 'human_handling' || busy}
-          />
-          <button
-            type="button"
-            data-testid="staff-send"
-            className="rounded-xl bg-[#c45c26] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            disabled={
-              conversation?.status !== 'human_handling' || busy || !draft.trim()
-            }
-            onClick={() => void act('message', draft.trim())}
-          >
-            Enviar
-          </button>
-        </div>
+        {humanTakeoverEnabled ? (
+          <div className="mt-3 flex gap-2">
+            <input
+              className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-sm"
+              data-testid="staff-draft"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={
+                conversation?.status === 'human_handling'
+                  ? 'Escribe al cliente…'
+                  : 'Toma la conversación para escribir'
+              }
+              disabled={conversation?.status !== 'human_handling' || busy}
+            />
+            <button
+              type="button"
+              data-testid="staff-send"
+              className="rounded-xl bg-[#c45c26] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={
+                conversation?.status !== 'human_handling' || busy || !draft.trim()
+              }
+              onClick={() => void act('message', draft.trim())}
+            >
+              Enviar
+            </button>
+          </div>
+        ) : null}
         <p className="mt-2 text-[11px] text-stone-500">
           Solo texto por ahora: notas de voz y adjuntos aún no están disponibles
           desde el panel. Mensajes nuevos llegan por Realtime; si se pierde la
