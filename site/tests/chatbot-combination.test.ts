@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { LoadedPublicMenu } from '../app/api/menu/_lib/load-public-menu';
-import { prepareCartLineProposal } from '../app/api/chat/_lib/cart-proposals';
+import {
+  prepareCartLineProposal,
+  summarizeCartSnapshot,
+} from '../app/api/chat/_lib/cart-proposals';
 import {
   parseHalfHalfIntent,
   canCombineProducts,
@@ -266,6 +269,32 @@ describe('prepareCartLineProposal combinación', () => {
       );
       expect(done.cartActions[0].quantity).toBe(1);
     }
+  });
+
+  it('summarizeCartSnapshot applies MAX for combinación (one line)', () => {
+    const menu = comboMenu();
+    const ready = prepareCartLineProposal(menu, COMMERCE, {
+      product_name: 'Granjera',
+      combine_with_product_name: 'Campesina',
+      option_labels: ['Grande'],
+      quantity: 1,
+    });
+    expect(ready.status).toBe('ready');
+    if (ready.status !== 'ready') return;
+
+    const summary = summarizeCartSnapshot(menu, COMMERCE, [
+      {
+        productId: ready.action.product_id,
+        quantity: ready.action.quantity,
+        selection: ready.action.selection,
+      },
+    ]);
+    expect(summary.ok).toBe(true);
+    expect(summary.lines).toHaveLength(1);
+    expect(summary.lines[0]!.unit_price).toBe(ready.action.unit_price);
+    expect(summary.subtotal).toBe(ready.action.line_total);
+    expect(summary.currency).toBe(ready.action.currency);
+    expect(summary.lines[0]!.name).toMatch(/Combinaci[oó]n|Granjera|Campesina/i);
   });
 });
 

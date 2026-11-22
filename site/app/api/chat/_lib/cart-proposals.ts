@@ -833,30 +833,58 @@ export function summarizeCartSnapshot(
       continue;
     }
     const selection = line.selection || {};
-    const issues = validateOptionGroupSelection(product, selection);
-    if (issues.length) {
+    const partnerId = selection.combinacion?.productId;
+    const partner = partnerId
+      ? asProducts(menu).find((p) => p.id === partnerId) || null
+      : null;
+    if (selection.combinacion && !partner) {
       errors.push(
-        `${product.nombre}: ${issues.map((i) => i.message).join('; ')}`,
+        `${product.nombre}: mitad combinada ausente del catálogo (${partnerId}).`,
       );
       continue;
     }
-    const unit_price = resolveCartLineUnitPrice(
-      product,
-      categoryFor(menu, product),
-      selection,
-    );
+    const issues = partner
+      ? [
+          ...validateCustomizationSelection(product, selection),
+          ...validateCustomizationSelection(
+            partner,
+            selection.combinacion!.seleccion,
+          ),
+        ]
+      : validateOptionGroupSelection(product, selection).map((i) => i.message);
+    if (issues.length) {
+      errors.push(
+        `${product.nombre}: ${issues.join('; ')}`,
+      );
+      continue;
+    }
+    const category = categoryFor(menu, product);
+    const partnerCategory = partner ? categoryFor(menu, partner) : null;
+    // Same commercial rule as propose_add / traditional menu (Math.max).
+    const unit_price = partner
+      ? resolveCombinedUnitPrice(
+          product,
+          category,
+          selection,
+          partner,
+          partnerCategory,
+        )
+      : resolveCartLineUnitPrice(product, category, selection);
     const quantity = Math.max(0, Number(line.quantity) || 0);
     if (!(unit_price > 0) || !(quantity > 0)) continue;
     const cart_key = buildCartLineKey(product.id, selection);
     const selected = describeSelection(product, selection);
+    const displayName = partner
+      ? combinationDisplayName(product, partner)
+      : product.nombre || '';
     out.push({
       cart_key,
       product_id: product.id,
-      name: product.nombre || '',
+      name: displayName,
       quantity,
       unit_price,
       line_total: Math.round(unit_price * quantity * 100) / 100,
-      label: `${quantity}× ${product.nombre}${
+      label: `${quantity}× ${displayName}${
         selected.length ? ` (${selected.join(', ')})` : ''
       }`,
     });

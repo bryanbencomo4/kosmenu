@@ -30,6 +30,9 @@ describe('dispatchOrderNotification', () => {
 
   it('skips when service role config is missing', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    // .env.local may preload SUPABASE_SERVICE_ROLE_KEY into the worker; clear it
+    // so this case actually exercises the missing-config path (no network hang).
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     const result = await dispatchOrderNotification({
       type: 'INSERT',

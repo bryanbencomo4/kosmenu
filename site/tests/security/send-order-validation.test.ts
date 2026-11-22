@@ -7,6 +7,7 @@ import {
   sanitizeDisplayName,
   sendOrderRequestSchema,
 } from '../../app/api/_lib/send-order-validation';
+import { publicSiteUrl } from '../../app/api/_lib/public-site-url';
 import { consumeRateLimit, resetRateLimitStoreForTests } from '../../app/api/_lib/rate-limit';
 
 describe('sendOrderRequestSchema', () => {
@@ -62,30 +63,21 @@ describe('tracking URL safety', () => {
   });
 
   it('rejects same-origin tracking path without token', () => {
-    const site = (process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(
-      /\/$/,
-      '',
-    );
-    const candidate = `${site}/orders/ORDER-1`;
+    const candidate = `${publicSiteUrl}/orders/ORDER-1`;
     expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBeNull();
   });
 
   it('accepts same-origin tracking path with token', () => {
-    const site = (process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(
-      /\/$/,
-      '',
-    );
-    const candidate = `${site}/orders/ORDER-1?t=secret-token`;
+    const candidate = `${publicSiteUrl}/orders/ORDER-1?t=secret-token`;
     expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBe(candidate);
   });
 
   it('accepts same-origin short tracking links', () => {
-    const site = (process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(
-      /\/$/,
-      '',
+    // Short links are normalized to origin+path (query stripped).
+    const candidate = `${publicSiteUrl}/o/AbCdEfGh12`;
+    expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBe(
+      `${publicSiteUrl}/o/AbCdEfGh12`,
     );
-    const candidate = `${site}/o/AbCdEfGh12`;
-    expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBe(candidate);
   });
 });
 

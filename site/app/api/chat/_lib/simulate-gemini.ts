@@ -340,6 +340,123 @@ export function runSimulatedChat(params: {
     }
   }
 
+  // Human / restaurant WhatsApp (tenant-bound contact only).
+  if (
+    /humano|hablar con|whats?app del local|atenci[oó]n|asesor|reclamo|queja/.test(
+      q,
+    )
+  ) {
+    toolCalls += 1;
+    const info = executeChatTool(
+      { menu: params.menu, commerceId: params.commerceId },
+      'get_business_information',
+      {},
+    ) as {
+      whatsapp_url?: string | null;
+      name?: string | null;
+      guidance?: string | null;
+    };
+    const url = (info.whatsapp_url || '').trim();
+    return {
+      text: url
+        ? `Claro. Para atención humana del local puedes escribirles aquí: ${url}`
+        : 'Este restaurante no tiene un WhatsApp público configurado. Puedes usar el menú o el checkout para continuar tu pedido.',
+      model: 'simulated',
+      tokensInput: 0,
+      tokensOutput: 0,
+      toolCalls,
+      geminiHttpCalls: 0,
+      cartActions: [],
+      productCards: [],
+      skippedLlm: true,
+    };
+  }
+
+  // Campesina / Granjera as a normal (non-combined) pizza.
+  if (
+    /(campesina|granjera)/.test(q) &&
+    !/mitad|media|combin/.test(q) &&
+    !/y (una |la )?(campesina|granjera)/.test(q)
+  ) {
+    const name = /campesina/.test(q) ? 'Campesina' : 'Granjera';
+    const size = detectSizeLabel(last);
+    const r = pushReady({
+      product_name: name,
+      quantity: 1,
+      option_labels: size ? [size] : [],
+    });
+    if (r.status === 'needs_options') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: [],
+        productCards: r.ask_attribute_only ? [] : cards,
+        pendingConfiguration: r.pending_configuration || null,
+        skippedLlm: true,
+      };
+    }
+    if (r.status === 'ready') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: actions,
+        productCards: cards,
+        skippedLlm: true,
+      };
+    }
+  }
+
+  // Refresco 2 Lt with selectable flavor (Coca-Cola is an option, not a SKU).
+  if (/refresco/.test(q) && /2\s*(lt|l\.?|litro)/.test(q)) {
+    const flavor = /coca/.test(q)
+      ? 'Coca-Cola'
+      : /pepsi/.test(q)
+        ? 'Pepsi'
+        : /colita/.test(q)
+          ? 'Colita'
+          : null;
+    const r = pushReady({
+      product_name: 'Refresco de 2 Lt',
+      quantity: 1,
+      option_labels: flavor ? [flavor] : [],
+    });
+    if (r.status === 'needs_options') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: [],
+        productCards: r.ask_attribute_only ? [] : cards,
+        pendingConfiguration: r.pending_configuration || null,
+        skippedLlm: true,
+      };
+    }
+    if (r.status === 'ready') {
+      return {
+        text: r.message,
+        model: 'simulated',
+        tokensInput: 0,
+        tokensOutput: 0,
+        toolCalls,
+        geminiHttpCalls: 0,
+        cartActions: actions,
+        productCards: cards,
+        skippedLlm: true,
+      };
+    }
+  }
+
   // Scenario B: add a drink (skip when the turn already asked for pizzas/hawaiana)
   if (
     /bebida|refresco|coca|agua/.test(q) &&
@@ -353,6 +470,25 @@ export function runSimulatedChat(params: {
       { category: 'BEBIDAS', available_only: true, limit: 8 },
     ) as { results: Array<{ id: string; name: string; price_min: number }> };
     if (/coca/.test(q)) {
+      // Prefer flavor on Refresco 2 Lt over a non-existent Coca-Cola SKU.
+      const flavored = pushReady({
+        product_name: 'Refresco de 2 Lt',
+        quantity: 1,
+        option_labels: ['Coca-Cola'],
+      });
+      if (flavored.status === 'ready') {
+        return {
+          text: flavored.message,
+          model: 'simulated',
+          tokensInput: 0,
+          tokensOutput: 0,
+          toolCalls,
+          geminiHttpCalls: 0,
+          cartActions: actions,
+          productCards: cards,
+          skippedLlm: true,
+        };
+      }
       const r = pushReady({ product_name: 'Coca-Cola', quantity: 1 });
       if (r.status === 'ready') {
         return {

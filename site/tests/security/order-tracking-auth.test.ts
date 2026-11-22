@@ -23,6 +23,7 @@ import {
   resolveSafeTrackingUrl,
   sendOrderRequestSchema,
 } from '../../app/api/_lib/send-order-validation';
+import { publicSiteUrl } from '../../app/api/_lib/public-site-url';
 
 const SERVICE_ROLE = 'service-role-secret-for-tests-only';
 const ANON_KEY = 'anon-key-for-tests-only';
@@ -620,11 +621,8 @@ describe('comprobante upload validation', () => {
 
 describe('tracking URL with token', () => {
   it('preserves only the tracking token query param', () => {
-    const site = (process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(
-      /\/$/,
-      '',
-    );
-    const candidate = `${site}/orders/ORDER-1?t=abc123&utm=evil`;
+    // Same origin resolver as production (ignores blank SITE_URL="" in .env.local).
+    const candidate = `${publicSiteUrl}/orders/ORDER-1?t=abc123&utm=evil`;
     const safe = resolveSafeTrackingUrl(candidate, 'ORDER-1', null);
     expect(safe).toContain('t=abc123');
     expect(safe).not.toContain('utm=evil');
