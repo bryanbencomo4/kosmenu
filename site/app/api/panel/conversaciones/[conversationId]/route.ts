@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
 import { requireMerchantConversationAccess } from '../_lib/auth';
+import { canSendStaffMessage } from '../_lib/staff-authz';
 import {
   getChatSupervisionConfig,
   isSupervisionEnabledForCommerce,
@@ -277,13 +278,15 @@ export async function POST(
       return NextResponse.json({ error: 'not_in_human_mode' }, { status: 409 });
     }
     if (
-      conversation.assigned_user_id &&
-      String(conversation.assigned_user_id) !== access.user.id
+      !canSendStaffMessage({
+        assignedUserId: conversation.assigned_user_id
+          ? String(conversation.assigned_user_id)
+          : null,
+        actorUserId: access.user.id,
+        role: access.role,
+      })
     ) {
-      // Allow other admins to send if assigned; soft allow for administrador.
-      if (access.role !== 'administrador') {
-        return NextResponse.json({ error: 'not_assignee' }, { status: 403 });
-      }
+      return NextResponse.json({ error: 'not_assignee' }, { status: 403 });
     }
     const saved = await persistAssistantOrStaffMessage({
       conversationId,

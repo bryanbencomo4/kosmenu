@@ -24,6 +24,7 @@ import {
   memoryUpsertConversation,
 } from '../app/api/chat/_lib/supervision-memory';
 import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
+import { canSendStaffMessage } from '../app/api/panel/conversaciones/_lib/staff-authz';
 
 const COMERCIO = '0aa8c53b-07f1-446e-8b88-66c2b7ae89ea';
 
@@ -88,6 +89,30 @@ describe('chat supervision helpers', () => {
         CHAT_SUPERVISION_ENABLED: '1',
         CHAT_SUPERVISION_HUMAN_TAKEOVER: '1',
       }).humanTakeover,
+    ).toBe(true);
+  });
+
+  it('limits staff replies to assignee (admins may assist)', () => {
+    expect(
+      canSendStaffMessage({
+        assignedUserId: 'user-a',
+        actorUserId: 'user-a',
+        role: 'caja',
+      }),
+    ).toBe(true);
+    expect(
+      canSendStaffMessage({
+        assignedUserId: 'user-a',
+        actorUserId: 'user-b',
+        role: 'caja',
+      }),
+    ).toBe(false);
+    expect(
+      canSendStaffMessage({
+        assignedUserId: 'user-a',
+        actorUserId: 'user-b',
+        role: 'administrador',
+      }),
     ).toBe(true);
   });
 
