@@ -53,8 +53,9 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 
 ## Deep links / panel comerciante
 
-- WaSender puede apuntar a `https://elmenuxfa.com/panel/conversaciones/{id}` (Next) **o** `https://app.elmenuxfa.com/panel/conversaciones/{id}` (Flutter).
-- En Flutter: Configuración → **Conversaciones del asistente** (bandeja nativa + Realtime postgres_changes).
+- WaSender apunta por defecto a `https://app.elmenuxfa.com/panel/conversaciones/{id}` (`appSiteUrl` / `NEXT_PUBLIC_APP_SITE_URL`).
+- Fallback web: Next `/panel/conversaciones` (login + bandeja) sigue disponible en el host público.
+- En Flutter: Configuración → **Conversaciones del asistente** (bandeja nativa + Realtime `chat_conversations` / `chat_messages`).
 - Deep link en host Flutter: tras login abre la conversación en la bandeja nativa.
 
 Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.

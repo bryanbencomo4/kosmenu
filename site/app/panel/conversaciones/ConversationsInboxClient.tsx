@@ -35,6 +35,29 @@ function statusLabel(status: string) {
   }
 }
 
+function statusRank(status: string) {
+  switch (status) {
+    case 'needs_attention':
+      return 0;
+    case 'human_handling':
+      return 1;
+    case 'closed':
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+function prioritizeConversations(rows: ConversationRow[]) {
+  return [...rows].sort((a, b) => {
+    const byStatus = statusRank(a.status) - statusRank(b.status);
+    if (byStatus !== 0) return byStatus;
+    return String(b.last_message_at || '').localeCompare(
+      String(a.last_message_at || ''),
+    );
+  });
+}
+
 function ConversationsInboxInner({
   searchParamsPromise,
 }: {
@@ -124,7 +147,7 @@ function ConversationsInboxInner({
       setRows([]);
       return;
     }
-    setRows(data.conversations || []);
+    setRows(prioritizeConversations(data.conversations || []));
   }, [token, comercioId]);
 
   useEffect(() => {

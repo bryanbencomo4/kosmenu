@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama; evidencias locales verdes.  
+**Estado:** supervisión implementada en rama; evidencias locales verdes; deep links WaSender → Flutter host.  
 **Veredicto:** **NO-GO** publicar. Migración no aplicada; WaSender real / piloto Trueno pendientes de tu autorización.  
 **Desbloqueo:** autorizar `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` → `site/scripts/apply-chat-supervision-migration.mjs` (prod). Matriz: `docs/chat-supervision-requirements-audit.md`.
 
@@ -20,6 +20,8 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 - `site/app/panel/_lib/useConversationRealtime.ts` — `postgres_changes` por conversación
 - `site/app/api/chat/_lib/supervision-memory.ts` — store in-memory (E2E/local)
 - `site/scripts/chat-supervision-dual-playwright.mjs` — dual context consumer+merchant
+- `site/scripts/chat-supervision-retention-purge.mjs` — purge gated por retención
+- Flutter: `lib/services/chat_supervision_service.dart`, `lib/screens/chat_conversations_screen.dart`
 
 ### Modificados
 - Welcome chatbot: aviso de privacidad discreto (`CHATBOT_WELCOME_VERSION=6`)
@@ -34,6 +36,7 @@ Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era
 
 `sendWhatsappText` + cola existente + `dedupe_key` en `chat_supervision_events`.  
 Destino preferido: `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` → fallback contactos comercio; bloquea soporte plataforma.  
+Enlace: `merchantConversationHref` → `appSiteUrl` (`https://app.elmenuxfa.com/panel/conversaciones/{id}`).  
 En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).
 
 ## 4. Persistencia

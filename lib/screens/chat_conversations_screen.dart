@@ -23,11 +23,18 @@ class ChatConversationsScreen extends StatefulWidget {
 
 class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
   late Future<List<ChatConversationSummary>> _future;
+  RealtimeChannel? _inboxChannel;
+  Timer? _recoveryTimer;
 
   @override
   void initState() {
     super.initState();
     _future = ChatSupervisionService.listConversations(widget.comercioId);
+    _bindInboxRealtime();
+    _recoveryTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      unawaited(_reload(silent: true));
+    });
     final initial = (widget.initialConversationId ?? '').trim();
     if (initial.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -37,10 +44,52 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
     }
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _future = ChatSupervisionService.listConversations(widget.comercioId);
-    });
+  @override
+  void dispose() {
+    _recoveryTimer?.cancel();
+    unawaited(_inboxChannel?.unsubscribe() ?? Future<void>.value());
+    super.dispose();
+  }
+
+  void _bindInboxRealtime() {
+    if (_inboxChannel != null) return;
+    try {
+      _inboxChannel = Supabase.instance.client
+          .channel('commerce:${widget.comercioId}:chat_inbox')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'chat_conversations',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'comercio_id',
+              value: widget.comercioId,
+            ),
+            callback: (_) {
+              unawaited(_reload(silent: true));
+            },
+          )
+          .subscribe();
+    } catch (_) {
+      // Publication may be pending — REST reload still works.
+    }
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    final next = ChatSupervisionService.listConversations(widget.comercioId);
+    if (!silent && mounted) {
+      setState(() => _future = next);
+    } else {
+      _future = next;
+      try {
+        final rows = await next;
+        if (!mounted) return;
+        setState(() => _future = Future.value(rows));
+      } catch (_) {
+        /* keep prior future */
+      }
+      return;
+    }
     await _future;
   }
 
@@ -67,6 +116,34 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
       default:
         return 'IA';
     }
+  }
+
+  /// Needs-attention first, then by last message (newest first).
+  List<ChatConversationSummary> _prioritizeInbox(
+    List<ChatConversationSummary> rows,
+  ) {
+    int rank(String status) {
+      switch (status) {
+        case 'needs_attention':
+          return 0;
+        case 'human_handling':
+          return 1;
+        case 'closed':
+          return 3;
+        default:
+          return 2;
+      }
+    }
+
+    final sorted = List<ChatConversationSummary>.from(rows);
+    sorted.sort((a, b) {
+      final byStatus = rank(a.status).compareTo(rank(b.status));
+      if (byStatus != 0) return byStatus;
+      final aAt = a.lastMessageAt ?? '';
+      final bAt = b.lastMessageAt ?? '';
+      return bAt.compareTo(aAt);
+    });
+    return sorted;
   }
 
   @override
@@ -109,7 +186,9 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
               ),
             );
           }
-          final rows = snapshot.data ?? const <ChatConversationSummary>[];
+          final rows = _prioritizeInbox(
+            snapshot.data ?? const <ChatConversationSummary>[],
+          );
           if (rows.isEmpty) {
             return const Center(
               child: Padding(
@@ -193,16 +272,22 @@ class _ChatConversationDetailScreenState
   bool _busy = false;
   final _draft = TextEditingController();
   RealtimeChannel? _channel;
+  Timer? _recoveryTimer;
   int _lastSeq = 0;
 
   @override
   void initState() {
     super.initState();
     unawaited(_load());
+    _recoveryTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      unawaited(_load(incremental: true));
+    });
   }
 
   @override
   void dispose() {
+    _recoveryTimer?.cancel();
     unawaited(_channel?.unsubscribe() ?? Future<void>.value());
     _draft.dispose();
     super.dispose();

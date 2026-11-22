@@ -30,7 +30,7 @@ class MerchantDeepLink {
     _openPaymentProof = openPaymentProof;
   }
 
-  /// Remembers a chat-supervision deep link so AuthGate can open the Next panel.
+  /// Remembers a chat-supervision deep link so the dashboard opens the native inbox.
   static void rememberConversation(String? conversationId) {
     final id = (conversationId ?? '').trim();
     if (id.isEmpty) return;
@@ -69,7 +69,7 @@ class MerchantDeepLink {
     return id;
   }
 
-  /// Absolute URL on the public Next site (auth + Realtime bandeja).
+  /// Absolute URL on the Flutter merchant host (native inbox).
   static Uri? publicConversationUri([String? conversationId]) {
     final id = (conversationId ?? _conversationId ?? '').trim();
     if (id.isEmpty) return null;

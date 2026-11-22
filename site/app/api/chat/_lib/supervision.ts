@@ -217,6 +217,16 @@ export async function persistConsumerTurn(
           comercioId: input.comercioId,
           commerceName: input.commerceName,
         }).catch(() => {});
+      } else if (
+        cfg.wasenderNotify &&
+        detectNeedsHuman(input.text) &&
+        conversation.status === 'needs_attention'
+      ) {
+        void enqueueNeedsAttentionNotify({
+          conversationId: conversation.id,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+        }).catch(() => {});
       }
       return {
         ok: true,
