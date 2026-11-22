@@ -18,6 +18,16 @@ import {
   hashConsumerSession,
   merchantConversationHref,
 } from './supervision-shared';
+import {
+  isSupervisionMemoryEnabled,
+  memoryAddMessage,
+  memoryGetBySession,
+  memoryGetConversation,
+  memoryInsertEvent,
+  memoryUpdateConversation,
+  memoryUpdateEvent,
+  memoryUpsertConversation,
+} from './supervision-memory';
 
 export {
   detectNeedsHuman,
@@ -62,6 +72,19 @@ export async function getConversationBySession(
 ): Promise<SupervisionConversation | null> {
   if (!isSupervisionEnabledForCommerce(comercioId)) return null;
   try {
+    if (isSupervisionMemoryEnabled()) {
+      const row = memoryGetBySession(comercioId, sessionId);
+      if (!row) return null;
+      return {
+        id: row.id,
+        comercio_id: row.comercio_id,
+        status: row.status,
+        attention_version: row.attention_version,
+        assigned_user_id: row.assigned_user_id,
+        consumer_label: row.consumer_label,
+        last_message_preview: row.last_message_preview,
+      };
+    }
     const sb = getServiceSupabaseClient();
     const hash = hashConsumerSession(comercioId, sessionId);
     const { data, error } = await sb
@@ -127,11 +150,88 @@ export async function persistConsumerTurn(
   }
 
   try {
-    const sb = getServiceSupabaseClient();
     const cfg = getChatSupervisionConfig();
     const hash = hashConsumerSession(input.comercioId, input.sessionId);
     const now = new Date();
     const reopenMs = cfg.reopenAfterHours * 3600_000;
+
+    if (isSupervisionMemoryEnabled()) {
+      const existing = memoryGetBySession(input.comercioId, input.sessionId);
+      let isNewConversation = !existing;
+      let conversation = existing;
+      if (!conversation) {
+        conversation = memoryUpsertConversation({
+          comercio_id: input.comercioId,
+          consumer_session_id: input.sessionId.trim().slice(0, 80),
+          consumer_session_hash: hash,
+          status: detectNeedsHuman(input.text)
+            ? 'needs_attention'
+            : 'ai_handling',
+          first_consumer_message_at: now.toISOString(),
+          last_message_at: now.toISOString(),
+          last_message_preview: previewText(input.text),
+          unread_merchant_count: 1,
+        });
+      } else {
+        const lastAt = conversation.last_message_at
+          ? new Date(conversation.last_message_at).getTime()
+          : 0;
+        const wasClosed = conversation.status === 'closed';
+        if (wasClosed) isNewConversation = true;
+        const nextStatus = detectNeedsHuman(input.text)
+          ? 'needs_attention'
+          : wasClosed
+            ? 'ai_handling'
+            : conversation.status;
+        conversation =
+          memoryUpdateConversation(conversation.id, {
+            status: nextStatus,
+            last_message_at: now.toISOString(),
+            last_message_preview: previewText(input.text),
+            unread_merchant_count: conversation.unread_merchant_count + 1,
+            closed_at: wasClosed ? null : conversation.closed_at,
+            ...(wasClosed
+              ? {
+                  assigned_user_id: null,
+                  assigned_at: null,
+                  attention_version: conversation.attention_version + 1,
+                }
+              : {}),
+          }) || conversation;
+        void reopenMs;
+      }
+      const clientMessageId =
+        (input.clientMessageId || '').trim() ||
+        `c_${createHash('sha256')
+          .update(`${conversation.id}:${input.text}:${now.toISOString()}`)
+          .digest('hex')
+          .slice(0, 24)}`;
+      const msg = memoryAddMessage({
+        conversation_id: conversation.id,
+        comercio_id: input.comercioId,
+        role: 'consumer',
+        body: input.text.slice(0, 4000),
+        client_message_id: clientMessageId,
+        payload: input.payload || {},
+      });
+      if (isNewConversation && cfg.wasenderNotify) {
+        void enqueueNewConversationNotify({
+          conversationId: conversation.id,
+          comercioId: input.comercioId,
+          commerceName: input.commerceName,
+        }).catch(() => {});
+      }
+      return {
+        ok: true,
+        conversationId: conversation.id,
+        messageId: msg?.id,
+        isNewConversation,
+        status: conversation.status,
+        attentionVersion: conversation.attention_version,
+      };
+    }
+
+    const sb = getServiceSupabaseClient();
 
     const existing = await sb
       .from('chat_conversations')
@@ -280,6 +380,38 @@ export async function persistAssistantOrStaffMessage(input: {
     return { ok: false };
   }
   try {
+    const clientMessageId =
+      (input.clientMessageId || '').trim() || `m_${randomUUID()}`;
+
+    if (isSupervisionMemoryEnabled()) {
+      const live = memoryGetConversation(input.conversationId);
+      if (
+        input.role === 'assistant' &&
+        input.attentionVersionAtStart != null &&
+        live &&
+        (live.status === 'human_handling' ||
+          live.status === 'closed' ||
+          live.attention_version !== Number(input.attentionVersionAtStart))
+      ) {
+        return { ok: true, discarded: true };
+      }
+      const msg = memoryAddMessage({
+        conversation_id: input.conversationId,
+        comercio_id: input.comercioId,
+        role: input.role,
+        body: input.text.slice(0, 4000),
+        sender_user_id: input.senderUserId || null,
+        client_message_id: clientMessageId,
+        payload: input.payload || {},
+      });
+      if (!msg) return { ok: false };
+      memoryUpdateConversation(input.conversationId, {
+        last_message_at: new Date().toISOString(),
+        last_message_preview: previewText(input.text),
+      });
+      return { ok: true, messageId: msg.id };
+    }
+
     const sb = getServiceSupabaseClient();
     if (
       input.role === 'assistant' &&
@@ -301,8 +433,6 @@ export async function persistAssistantOrStaffMessage(input: {
       }
     }
 
-    const clientMessageId =
-      (input.clientMessageId || '').trim() || `m_${randomUUID()}`;
     const { data, error } = await sb
       .from('chat_messages')
       .upsert(
@@ -379,19 +509,38 @@ async function enqueueNewConversationNotify(input: {
   const cfg = getChatSupervisionConfig();
   if (!cfg.wasenderNotify) return;
   const dedupeKey = `chat_supervision:new:${input.conversationId}`;
+
+  if (isSupervisionMemoryEnabled()) {
+    const inserted = memoryInsertEvent({
+      conversation_id: input.conversationId,
+      comercio_id: input.comercioId,
+      event_type: 'new_conversation',
+      dedupe_key: dedupeKey,
+    });
+    if (!inserted.ok) return;
+    // Memory mode: mark prepared; do not hit WaSender unless explicitly enabled
+    // outside e2e. Still exercise idempotency path.
+    if ((process.env.CHAT_SUPERVISION_MEMORY_SEND_WASENDER || '').trim() !== '1') {
+      memoryUpdateEvent(dedupeKey, { status: 'skipped', last_error: 'memory_mode' });
+      return;
+    }
+  }
+
   const sb = getServiceSupabaseClient();
 
-  const { error: dedupeErr } = await sb.from('chat_supervision_events').insert({
-    conversation_id: input.conversationId,
-    comercio_id: input.comercioId,
-    event_type: 'new_conversation',
-    dedupe_key: dedupeKey,
-    channel: 'whatsapp',
-    status: 'queued',
-  });
-  if (dedupeErr) {
-    // Unique violation = already notified
-    return;
+  if (!isSupervisionMemoryEnabled()) {
+    const { error: dedupeErr } = await sb.from('chat_supervision_events').insert({
+      conversation_id: input.conversationId,
+      comercio_id: input.comercioId,
+      event_type: 'new_conversation',
+      dedupe_key: dedupeKey,
+      channel: 'whatsapp',
+      status: 'queued',
+    });
+    if (dedupeErr) {
+      // Unique violation = already notified
+      return;
+    }
   }
 
   const dest = await resolveSupervisionWhatsapp(input.comercioId);

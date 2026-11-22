@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+
+import { usePanelSession } from '../_lib/usePanelSession';
+import { getBrowserSupabase } from '../../_lib/supabase-browser';
 
 type ConversationRow = {
   id: string;
@@ -25,12 +28,12 @@ function statusLabel(status: string) {
   }
 }
 
-export function ConversationsInboxClient({
+function ConversationsInboxInner({
   searchParamsPromise,
 }: {
   searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [token, setToken] = useState('');
+  const { token, email, ready, signOut } = usePanelSession();
   const [comercioId, setComercioId] = useState('');
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +46,8 @@ export function ConversationsInboxClient({
       const c = typeof sp.comercioId === 'string' ? sp.comercioId : '';
       if (!cancelled && c) setComercioId(c);
       try {
-        const saved = window.sessionStorage.getItem('elmenuxfa:panel-bearer');
-        if (!cancelled && saved) setToken(saved);
+        const saved = window.sessionStorage.getItem('elmenuxfa:panel-comercio');
+        if (!cancelled && !c && saved) setComercioId(saved);
       } catch {
         /* ignore */
       }
@@ -54,24 +57,19 @@ export function ConversationsInboxClient({
     };
   }, [searchParamsPromise]);
 
-  const canLoad = useMemo(
-    () => Boolean(token.trim() && comercioId.trim()),
-    [token, comercioId],
-  );
-
-  async function loadInbox() {
-    if (!canLoad) return;
+  const loadInbox = useCallback(async () => {
+    if (!token || !comercioId.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      window.sessionStorage.setItem('elmenuxfa:panel-bearer', token.trim());
+      window.sessionStorage.setItem('elmenuxfa:panel-comercio', comercioId.trim());
     } catch {
       /* ignore */
     }
     const res = await fetch(
       `/api/panel/conversaciones?comercioId=${encodeURIComponent(comercioId.trim())}`,
       {
-        headers: { Authorization: `Bearer ${token.trim()}` },
+        headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       },
     );
@@ -80,24 +78,70 @@ export function ConversationsInboxClient({
     if (!res.ok) {
       setError(
         res.status === 401
-          ? 'Inicia sesión en el panel de El Menú XFA y pega aquí tu access token de sesión (piloto web).'
+          ? 'Sesión expirada. Vuelve a iniciar sesión.'
           : String(data.error || 'No se pudo cargar la bandeja'),
       );
       setRows([]);
       return;
     }
     setRows(data.conversations || []);
+  }, [token, comercioId]);
+
+  useEffect(() => {
+    if (ready && token && comercioId.trim()) void loadInbox();
+  }, [ready, token, comercioId, loadInbox]);
+
+  // Inbox Realtime: light broadcast / conversation row updates via postgres_changes.
+  useEffect(() => {
+    if (!token || !comercioId.trim()) return;
+    const sb = getBrowserSupabase();
+    if (!sb) return;
+    const channel = sb
+      .channel(`commerce:${comercioId.trim()}:chat_inbox`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'chat_conversations',
+          filter: `comercio_id=eq.${comercioId.trim()}`,
+        },
+        () => {
+          void loadInbox();
+        },
+      )
+      .subscribe();
+    return () => {
+      void sb.removeChannel(channel);
+    };
+  }, [token, comercioId, loadInbox]);
+
+  if (!ready) {
+    return <p className="text-sm text-stone-500">Comprobando sesión…</p>;
   }
 
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
-        <p className="text-sm text-stone-600">
-          Esta bandeja usa la misma autenticación Bearer del panel comerciante.
-          El enlace de WhatsApp abre una conversación concreta; aquí listamos las
-          recientes del comercio.
-        </p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-sm text-stone-600">
+              Bandeja de conversaciones del asistente virtual. Autenticación del
+              panel (sin pegar tokens).
+            </p>
+            {email ? (
+              <p className="mt-1 text-xs text-stone-500">{email}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="text-xs font-medium text-stone-600 underline"
+            onClick={() => void signOut()}
+          >
+            Salir
+          </button>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
           <label className="block text-sm">
             <span className="font-medium">Comercio ID</span>
             <input
@@ -107,26 +151,17 @@ export function ConversationsInboxClient({
               placeholder="UUID del comercio"
             />
           </label>
-          <label className="block text-sm">
-            <span className="font-medium">Access token (Bearer)</span>
-            <input
-              className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Supabase access_token"
-              type="password"
-              autoComplete="off"
-            />
-          </label>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="w-full rounded-xl bg-[#c45c26] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+              disabled={!token || !comercioId.trim() || loading}
+              onClick={() => void loadInbox()}
+            >
+              {loading ? 'Cargando…' : 'Actualizar'}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="mt-3 rounded-xl bg-[#c45c26] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          disabled={!canLoad || loading}
-          onClick={() => void loadInbox()}
-        >
-          {loading ? 'Cargando…' : 'Actualizar bandeja'}
-        </button>
         {error ? (
           <p className="mt-2 text-sm text-red-700" role="alert">
             {error}
@@ -140,6 +175,7 @@ export function ConversationsInboxClient({
             <a
               href={`/panel/conversaciones/${encodeURIComponent(row.id)}?comercioId=${encodeURIComponent(comercioId)}`}
               className="block rounded-2xl border border-black/10 bg-white p-4 shadow-sm transition hover:border-[#c45c26]/40"
+              data-testid="conversation-row"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -151,7 +187,7 @@ export function ConversationsInboxClient({
                   </p>
                 </div>
                 <div className="text-right text-xs text-stone-500">
-                  <p>{statusLabel(row.status)}</p>
+                  <p data-status={row.status}>{statusLabel(row.status)}</p>
                   {row.unread_merchant_count > 0 ? (
                     <p className="mt-1 font-semibold text-[#c45c26]">
                       {row.unread_merchant_count} nuevo(s)
@@ -170,5 +206,17 @@ export function ConversationsInboxClient({
         ) : null}
       </ul>
     </div>
+  );
+}
+
+export function ConversationsInboxClient({
+  searchParamsPromise,
+}: {
+  searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  return (
+    <Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}>
+      <ConversationsInboxInner searchParamsPromise={searchParamsPromise} />
+    </Suspense>
   );
 }

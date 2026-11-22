@@ -4,6 +4,10 @@ import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 import { requireMerchantConversationAccess } from './_lib/auth';
 import { isSupervisionEnabledForCommerce } from '../../chat/_lib/supervision-config';
+import {
+  isSupervisionMemoryEnabled,
+  memoryListConversations,
+} from '../../chat/_lib/supervision-memory';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +30,15 @@ export async function GET(request: Request) {
   }
   if (!isSupervisionEnabledForCommerce(access.comercioId)) {
     return NextResponse.json({ error: 'supervision_disabled' }, { status: 403 });
+  }
+
+  if (isSupervisionMemoryEnabled()) {
+    return NextResponse.json({
+      ok: true,
+      comercioId: access.comercioId,
+      conversations: memoryListConversations(access.comercioId).slice(0, 50),
+      memory: true,
+    });
   }
 
   const sb = getServiceSupabaseClient();

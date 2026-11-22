@@ -1,76 +1,115 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** implementación base lista para revisión; **NO-GO** publicar sin migración autorizada + smoke dual navegador.
+**Estado:** implementación de supervisión + panel auth + Realtime cliente + memoria E2E.  
+**Veredicto:** **NO-GO** publicar. Migración no aplicada; piloto Trueno pendiente de autorización.
 
 ## 1. Arquitectura existente (auditoría)
 
 Ver `docs/chat-supervision-architecture-audit.md`.
 
-Resumen: WaSender vía `enqueue_wasender_message`; historial chat solo `sessionStorage`; panel comerciante Flutter + Bearer; Next `admin` es plataforma; Realtime casi ausente en chat.
+Resumen: WaSender vía `enqueue_wasender_message`; historial chat consumidor era `sessionStorage`; panel comerciante Flutter + Bearer; Next `admin` es plataforma; patrón Realtime existente = `postgres_changes` en `pedidos` (Flutter).
 
-## 2. Archivos creados / modificados
+## 2. Archivos creados / modificados (esta iteración)
 
 ### Nuevos
-- `supabase/migrations/20261123090000_chat_supervision_conversations.sql` (no aplicada)
-- `site/app/api/chat/_lib/supervision-config.ts`
-- `site/app/api/chat/_lib/supervision-shared.ts`
-- `site/app/api/chat/_lib/supervision.ts`
-- `site/app/api/panel/conversaciones/**`
-- `site/app/api/chat/[comercioId]/supervision-feed/route.ts`
-- `site/app/panel/**` (bandeja web piloto)
-- `site/tests/chatbot-supervision.test.ts`
-- docs de auditoría e informe
+- `site/app/_lib/supabase-browser.ts` — cliente anon + sesión panel
+- `site/app/panel/login/**` — login email/password + redirect `?next=`
+- `site/app/panel/_lib/usePanelSession.ts` — sesión sin pegar Bearer
+- `site/app/panel/_lib/useConversationRealtime.ts` — `postgres_changes` por conversación
+- `site/app/api/chat/_lib/supervision-memory.ts` — store in-memory (E2E/local)
+- `site/scripts/chat-supervision-dual-playwright.mjs` — dual context consumer+merchant
 
 ### Modificados
-- `site/app/api/chat/[comercioId]/route.ts` — persistencia + gate humano (best-effort)
-- `site/app/v/[id]/_components/chat/ChatAssistantView.tsx` — feed staff en modo humano
+- Welcome chatbot: aviso de privacidad discreto (`CHATBOT_WELCOME_VERSION=6`)
+- Panel bandeja/detalle: auth sesión + Realtime + recovery 20s
+- APIs panel/feed: rama memoria + takeover/return/close
+- Auth panel: E2E bearer solo fuera de prod + comercio pinneado
+- Migración: nota de publicación Realtime (comentada)
+- `ChatAssistantView`: feed staff con dedupe + visibility (8s recovery, no 1–5s)
+- `site/middleware.ts`: excluir `/panel` del rewrite a `/v/...` (crítico para enlaces WaSender)
 
 ## 3. WaSender reutilizado
 
-`sendWhatsappText` + cola `wasender_message_queue` + `dedupe_key` en `chat_supervision_events`.  
-Destino: `config_negocio.supervision_whatsapp|notify_whatsapp` → fallback `comercios.whatsapp` / owner; bloquea dígitos de soporte elmenuxfa.
+`sendWhatsappText` + cola existente + `dedupe_key` en `chat_supervision_events`.  
+Destino preferido: `config_negocio.supervision_whatsapp|notify_whatsapp|whatsapp_avisos` → fallback contactos comercio; bloquea soporte plataforma.  
+En modo memoria E2E la notificación se marca `skipped` (no llama WaSender salvo `CHAT_SUPERVISION_MEMORY_SEND_WASENDER=1`).
 
 ## 4. Persistencia
 
-Tablas: `chat_conversations`, `chat_messages`, `chat_supervision_events`.  
-Hash HMAC de `sessionId` por comercio. Notificación solo en primera apertura/reapertura.
+Tablas (migración pendiente de auth): `chat_conversations`, `chat_messages`, `chat_supervision_events`.  
+Hash HMAC de `sessionId` por comercio. Notificación solo en conversación nueva/reapertura cerrada.  
+Modo `CHAT_SUPERVISION_MEMORY=1` permite probar sin migración.
 
 ## 5. Auth comerciante
 
-Bearer Supabase (`getUserFromBearerRequest`) + owner/`comercio_members` roles `administrador|caja|marketing`.  
-Enlace `/panel/conversaciones/[id]` exige token; sin secretos en URL.
+1. Producción/piloto: login `/panel/login` → sesión Supabase browser → Bearer automático.
+2. Deep link `/panel/conversaciones/[id]` → si no hay sesión, redirect login con `next=`.
+3. API: `getUserFromBearerRequest` + owner/`comercio_members` (`administrador|caja|marketing`).
+4. Sin secretos en URL. RLS member select en migración.
 
-## 6. Realtime
+## 6. Realtime Broadcast / postgres_changes
 
-Broadcast best-effort post-escritura; DB es fuente de verdad.  
-Consumidor: feed recovery 8s solo en modo humano.  
-Panel Next: refresh al volver a la pestaña.  
-**Reutilizar patrón Flutter:** el panel comerciante ya hace `postgres_changes`/`.stream()` en `pedidos` con JWT+RLS; la bandeja de chat debería seguir el mismo modelo (publicación + RLS en `chat_messages`) en lugar de inventar sockets.  
-Pendiente: publicar tablas chat en `supabase_realtime`, canales privados / Realtime Authorization, y/o wire en Flutter además del panel Next piloto.
+- Merchant detalle: `useConversationRealtime` (`INSERT` en `chat_messages` filtrado por `conversation_id`).
+- Merchant bandeja: canal inbox `chat_conversations` por `comercio_id`.
+- Server: `publishConversationEvent` broadcast best-effort.
+- Consumidor anónimo: feed REST session-scoped (HMAC); recovery 8s + visibility (no polling 1–5s).
+- Requiere migración + `alter publication supabase_realtime add table …` (comentado en SQL).
 
-## 7–11. Bandeja / takeover / mensaje / devolver
+## 7. Bandeja
 
-APIs POST `take|return|close|message` + RPC atómicos `chat_take_conversation` / `chat_return_to_assistant`.  
-Gemini se omite si `human_handling`/`closed` y flag takeover.  
-Respuestas Gemini en vuelo se descartan si `attention_version` cambió.
+`/panel/conversaciones` + detalle: estados, último mensaje, unread, takeover/devolver/cerrar/enviar.
 
-## 12–15. Multi-empleado / reconexión / seguridad / rendimiento
+## 8. Notificación una sola vez
 
-Takeover atómico (conflicto 409).  
-Reconexión vía `afterSeq`.  
-RLS member select; consumidor solo por hash de sesión.  
-Rendimiento Playwright dual / carga: **pendiente** (requiere migración + auth).
+`dedupe_key = chat_supervision:new:{conversationId}` (unique). Apertura de página / welcome no dispara persistencia.
 
-## 16–18. Suites
+## 9–11. Takeover / staff / return
 
-- Vitest helpers supervisión: incluidos.
-- Suite completa / Playwright 2 browsers: ejecutar tras aplicar migración en entorno de prueba.
-- TypeScript: verificar en commit.
+RPC atómicos (DB) o equivalentes memoria. Gemini gated por `human_handling`/`closed`. Respuestas IA en vuelo descartadas si `attention_version` cambió. Staff no llama Gemini ni WaSender como transporte.
+
+## 12. Multi-empleado
+
+Primer `take` gana; segundo usuario → conflicto 409 (DB) / null (memoria). Assignee o `administrador` puede enviar.
+
+## 13. Recuperación
+
+`afterSeq` incremental; visibility + intervalo largo de recovery; IDs estables para dedupe.
+
+## 14. Seguridad (evidencia local)
+
+| Caso | Resultado |
+| --- | --- |
+| Deep link sin sesión | Redirect `/panel/login?next=…` |
+| Otro comercio (E2E pin) | Bearer e2e rechaza otro `comercioId` |
+| Otro `sessionId` en feed | No ve mensajes ajenos (Vitest + script) |
+| Dedupe notificación | Unique / memory duplicate false |
+| Takeover concurrente | Conflicto |
+| Flags off | Chat sigue; supervisión no-op |
+
+## 15. Rendimiento
+
+Objetivo 1–2s en red controlada tras Realtime publicado. Medición de carga agresiva: **no ejecutada** (no prod). Script dual documentado para staging.
+
+## 16. Vitest
+
+`tests/chatbot-supervision.test.ts` — **8 passed** (helpers + memoria + privacy welcome).
+
+## 17. TypeScript
+
+Verificar con `npx tsc --noEmit` en commit local.
+
+## 18. Playwright dual
+
+`site/scripts/chat-supervision-dual-playwright.mjs` — dos contextos Playwright + asserts API.
+
+**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **13/13 passed**  
+(open≠notify, create, auth gate, take, staff, isolation, return, close, cross-commerce deny).  
+**No corre contra producción.**
 
 ## 19. Migraciones
 
-`20261123090000_chat_supervision_conversations.sql` — **no ejecutar en prod sin autorización**. Rollback documentado al final del SQL.
+`20261123090000_chat_supervision_conversations.sql` — **NO aplicar sin autorización**.
 
 ## 20. Variables de entorno
 
@@ -79,32 +118,36 @@ Rendimiento Playwright dual / carga: **pendiente** (requiere migración + auth).
 | `CHAT_SUPERVISION_ENABLED` | master |
 | `CHAT_SUPERVISION_WASENDER` | avisos WhatsApp |
 | `CHAT_SUPERVISION_HUMAN_TAKEOVER` | pausar Gemini |
-| `CHAT_SUPERVISION_COMMERCE_IDS` | allowlist (piloto Trueno) |
-| `CHAT_SUPERVISION_SESSION_PEPPER` | HMAC sesiones |
+| `CHAT_SUPERVISION_COMMERCE_IDS` | allowlist piloto |
+| `CHAT_SUPERVISION_SESSION_PEPPER` | HMAC |
 | `CHAT_SUPERVISION_REOPEN_HOURS` | default 12 |
+| `CHAT_SUPERVISION_MEMORY` | store local/E2E (nunca prod) |
+| `CHAT_SUPERVISION_E2E_BEARER` | Bearer de prueba |
+| `CHAT_SUPERVISION_E2E_COMERCIO_ID` | pin comercio E2E |
+| `NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER` | panel UI E2E only |
 | `WASENDER_API_KEY` | existente |
 
 ## 21. Costos operativos
 
-- WaSender: 1 msg/conversación nueva (+ hourly needs_attention).
-- DB: ~2 writes/turno + índices.
-- Realtime: eventos ligeros; sin historial completo en broadcast.
+- WaSender: 1 msg/conversación nueva (+ needs_attention ≤1/hora).
+- DB: ~2 writes/turno.
+- Realtime: eventos ligeros.
 
 ## 22. Activación / rollback
 
-1. Autorizar migración en staging.
-2. Flags off → on solo Trueno.
-3. Smoke dual navegador.
-4. Rollback: flags off; opcional DROP tablas (SQL down).
+1. Autorizar migración + publication Realtime en staging.
+2. Flags off → on solo Trueno (`CHAT_SUPERVISION_COMMERCE_IDS`).
+3. Smoke dual + WhatsApp real a número de avisos.
+4. Rollback: flags off; SQL DOWN opcional.
 
 ## 23. Veredicto
 
-**NO-GO publicar.** Base sólida reutilizando WaSender/auth/cola; falta:
-1. Aplicar migración en entorno de prueba.
-2. Completar auth web del panel (hoy Bearer manual de piloto).
-3. Realtime privado end-to-end.
-4. Playwright dual + Vitest completo post-migración.
-5. Aviso de privacidad discreto en UI consumidor.
-6. Confirmación WhatsApp de avisos de Trueno (`supervision_whatsapp`).
+**NO-GO** publicar / merge a producción.
 
-**Criterio principal** (abrir enlace → ver historial → intervenir → devolver) queda implementado a nivel API/UI piloto, pero **no verificado E2E** hasta migración + tokens reales.
+Criterio principal (comerciante abre enlace, ve historial, interviene, devuelve) está implementado en código + Vitest/memoria; falta:
+
+1. Autorización para aplicar migración.
+2. Smoke dual con server + (opcional) WhatsApp real Trueno.
+3. Confirmación de `supervision_whatsapp` en branding del piloto.
+
+No hay push, merge ni deploy en esta rama sin tu autorización.

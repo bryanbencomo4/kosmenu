@@ -202,8 +202,14 @@ grant execute on function public.chat_return_to_assistant(uuid, uuid) to authent
 comment on table public.chat_conversations is
   'Supervised chatbot conversations. consumer_session_hash binds anonymous sessions; merchants access via membership RLS.';
 
+-- Optional Realtime publication (apply only if not already present):
+-- alter publication supabase_realtime add table public.chat_conversations;
+-- alter publication supabase_realtime add table public.chat_messages;
+
 -- ---------------------------------------------------------------------------
 -- DOWN (manual rollback — do not auto-run)
+-- alter publication supabase_realtime drop table if exists public.chat_messages;
+-- alter publication supabase_realtime drop table if exists public.chat_conversations;
 -- drop function if exists public.chat_return_to_assistant(uuid, uuid);
 -- drop function if exists public.chat_take_conversation(uuid, uuid);
 -- drop table if exists public.chat_supervision_events;

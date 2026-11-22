@@ -321,6 +321,14 @@ export async function POST(
       requestId,
       skipped_llm: true,
       simulated: true,
+      ...(supervisionConversationId
+        ? {
+            supervision: {
+              mode: 'ai_handling',
+              conversationId: supervisionConversationId,
+            },
+          }
+        : {}),
       usage: {
         tokensInput: 0,
         tokensOutput: 0,

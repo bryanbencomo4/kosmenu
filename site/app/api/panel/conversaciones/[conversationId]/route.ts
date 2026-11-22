@@ -8,10 +8,21 @@ import {
   persistAssistantOrStaffMessage,
   publishConversationEvent,
 } from '../../../chat/_lib/supervision';
+import {
+  isSupervisionMemoryEnabled,
+  memoryGetConversation,
+  memoryListMessages,
+  memoryReturnToAssistant,
+  memoryTakeConversation,
+  memoryUpdateConversation,
+} from '../../../chat/_lib/supervision-memory';
 
 export const runtime = 'nodejs';
 
 async function loadConversation(conversationId: string) {
+  if (isSupervisionMemoryEnabled()) {
+    return memoryGetConversation(conversationId) as Record<string, unknown> | null;
+  }
   const sb = getServiceSupabaseClient();
   const { data, error } = await sb
     .from('chat_conversations')
@@ -50,6 +61,20 @@ export async function GET(
 
   const url = new URL(request.url);
   const afterSeq = Number(url.searchParams.get('afterSeq') || 0);
+
+  if (isSupervisionMemoryEnabled()) {
+    memoryUpdateConversation(conversationId, { unread_merchant_count: 0 });
+    return NextResponse.json({
+      ok: true,
+      conversation,
+      messages: memoryListMessages(
+        conversationId,
+        Number.isFinite(afterSeq) ? afterSeq : 0,
+      ).slice(0, 100),
+      memory: true,
+    });
+  }
+
   const sb = getServiceSupabaseClient();
   let q = sb
     .from('chat_messages')
@@ -115,10 +140,25 @@ export async function POST(
   }
 
   const action = String(body.action || '').trim();
-  const sb = getServiceSupabaseClient();
+  const sb = isSupervisionMemoryEnabled() ? null : getServiceSupabaseClient();
 
   if (action === 'take') {
-    const { data, error } = await sb.rpc('chat_take_conversation', {
+    if (isSupervisionMemoryEnabled()) {
+      const data = memoryTakeConversation(conversationId, access.user.id);
+      if (!data) {
+        return NextResponse.json({ error: 'conflict' }, { status: 409 });
+      }
+      await persistAssistantOrStaffMessage({
+        conversationId,
+        comercioId: access.comercioId,
+        role: 'system',
+        text: 'Un miembro del restaurante se ha unido a la conversación 😊',
+        senderUserId: access.user.id,
+        clientMessageId: `sys_take_${conversationId}_${data.attention_version}`,
+      });
+      return NextResponse.json({ ok: true, conversation: data, memory: true });
+    }
+    const { data, error } = await sb!.rpc('chat_take_conversation', {
       p_conversation_id: conversationId,
       p_user_id: access.user.id,
     });
@@ -144,7 +184,22 @@ export async function POST(
   }
 
   if (action === 'return') {
-    const { data, error } = await sb.rpc('chat_return_to_assistant', {
+    if (isSupervisionMemoryEnabled()) {
+      const data = memoryReturnToAssistant(conversationId);
+      if (!data) {
+        return NextResponse.json({ error: 'conflict' }, { status: 409 });
+      }
+      await persistAssistantOrStaffMessage({
+        conversationId,
+        comercioId: access.comercioId,
+        role: 'system',
+        text: 'El asistente virtual vuelve a atender esta conversación.',
+        senderUserId: access.user.id,
+        clientMessageId: `sys_return_${conversationId}_${data.attention_version}`,
+      });
+      return NextResponse.json({ ok: true, conversation: data, memory: true });
+    }
+    const { data, error } = await sb!.rpc('chat_return_to_assistant', {
       p_conversation_id: conversationId,
       p_user_id: access.user.id,
     });
@@ -170,7 +225,18 @@ export async function POST(
   }
 
   if (action === 'close') {
-    const { data, error } = await sb
+    if (isSupervisionMemoryEnabled()) {
+      const data = memoryUpdateConversation(conversationId, {
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        attention_version: Number(conversation.attention_version || 1) + 1,
+      });
+      if (!data) {
+        return NextResponse.json({ error: 'close_failed' }, { status: 503 });
+      }
+      return NextResponse.json({ ok: true, conversation: data, memory: true });
+    }
+    const { data, error } = await sb!
       .from('chat_conversations')
       .update({
         status: 'closed',

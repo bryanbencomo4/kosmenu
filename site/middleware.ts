@@ -26,6 +26,7 @@ const EXCLUDED_PREFIXES = [
   '/preview',
   '/orders',
   '/delivery',
+  '/panel',
   '/.well-known',
 ];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);

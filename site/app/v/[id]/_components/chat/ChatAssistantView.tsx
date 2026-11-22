@@ -617,10 +617,13 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
-  // Staff messages while human is handling (recovery feed; DB is source of truth).
+  // Staff/system messages while human is handling.
+  // Consumers are anonymous (no Supabase auth) — recovery uses session-scoped REST
+  // (HMAC-bound). Merchant panel uses Realtime; this feed is not 1–5s polling.
   useEffect(() => {
     if (!humanSupervisionActive || !live) return;
     let cancelled = false;
+    const seenIds = new Set<string>();
     const tick = async () => {
       try {
         const sid = ensureChatSessionId(comercioId);
@@ -638,7 +641,10 @@ export function ChatAssistantView({
           }>;
         } | null;
         if (cancelled || !data) return;
-        if (data.conversation?.status === 'ai_handling') {
+        if (
+          data.conversation?.status === 'ai_handling' ||
+          data.conversation?.status === 'closed'
+        ) {
           setHumanSupervisionActive(false);
         }
         const incoming = data.messages || [];
@@ -647,7 +653,19 @@ export function ChatAssistantView({
           const next = [...prev];
           for (const m of incoming) {
             if ((m.seq || 0) <= supervisionAfterSeqRef.current) continue;
-            next.push(createMessage('assistant', m.body));
+            if (seenIds.has(m.id)) continue;
+            seenIds.add(m.id);
+            const prefix =
+              m.role === 'staff'
+                ? ''
+                : m.role === 'system'
+                  ? ''
+                  : '';
+            next.push(
+              createMessage('assistant', `${prefix}${m.body}`, {
+                demo: m.role === 'system',
+              }),
+            );
             supervisionAfterSeqRef.current = Math.max(
               supervisionAfterSeqRef.current,
               m.seq || 0,
@@ -660,10 +678,15 @@ export function ChatAssistantView({
       }
     };
     void tick();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
     const id = window.setInterval(() => void tick(), 8000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [humanSupervisionActive, live, comercioId]);
 
