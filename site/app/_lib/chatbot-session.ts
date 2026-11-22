@@ -6,6 +6,8 @@ import type { ChatMessage } from '../v/[id]/_components/chat/chat-types';
 
 const PREFIX = 'elmenuxfa:chat-v1:';
 const SESSION_ID_PREFIX = 'elmenuxfa:chat-sid-v1:';
+const FEED_TOKEN_PREFIX = 'elmenuxfa:chat-feed-token-v1:';
+const FEED_SEQ_PREFIX = 'elmenuxfa:chat-feed-seq-v1:';
 const DEFAULT_MAX = 40;
 
 function storageKey(comercioId: string) {
@@ -14,6 +16,14 @@ function storageKey(comercioId: string) {
 
 function sessionIdKey(comercioId: string) {
   return `${SESSION_ID_PREFIX}${comercioId.trim()}`;
+}
+
+function feedTokenKey(comercioId: string) {
+  return `${FEED_TOKEN_PREFIX}${comercioId.trim()}`;
+}
+
+function feedSeqKey(comercioId: string) {
+  return `${FEED_SEQ_PREFIX}${comercioId.trim()}`;
 }
 
 function canUseStorage() {
@@ -47,6 +57,43 @@ export function ensureChatSessionId(comercioId: string): string {
       : `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
   saveChatSessionId(comercioId, id);
   return id;
+}
+
+export function loadSupervisionFeedToken(comercioId: string): string | null {
+  if (!canUseStorage() || !comercioId.trim()) return null;
+  try {
+    return sessionStorage.getItem(feedTokenKey(comercioId));
+  } catch {
+    return null;
+  }
+}
+
+export function saveSupervisionFeedToken(comercioId: string, token: string) {
+  if (!canUseStorage() || !comercioId.trim() || !token.trim()) return;
+  try {
+    sessionStorage.setItem(feedTokenKey(comercioId), token.trim());
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadSupervisionAfterSeq(comercioId: string): number {
+  if (!canUseStorage() || !comercioId.trim()) return 0;
+  try {
+    const n = Number(sessionStorage.getItem(feedSeqKey(comercioId)) || 0);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveSupervisionAfterSeq(comercioId: string, seq: number) {
+  if (!canUseStorage() || !comercioId.trim()) return;
+  try {
+    sessionStorage.setItem(feedSeqKey(comercioId), String(Math.max(0, seq)));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function loadChatHistory(
@@ -133,6 +180,8 @@ export function clearChatHistory(comercioId: string) {
   try {
     sessionStorage.removeItem(storageKey(comercioId));
     sessionStorage.removeItem(sessionIdKey(comercioId));
+    sessionStorage.removeItem(feedTokenKey(comercioId));
+    sessionStorage.removeItem(feedSeqKey(comercioId));
   } catch {
     /* ignore */
   }

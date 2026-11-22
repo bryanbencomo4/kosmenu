@@ -22,8 +22,12 @@ import {
   clearChatHistory,
   ensureChatSessionId,
   loadChatHistory,
+  loadSupervisionAfterSeq,
+  loadSupervisionFeedToken,
   saveChatHistory,
   saveChatSessionId,
+  saveSupervisionAfterSeq,
+  saveSupervisionFeedToken,
 } from '../../../../_lib/chatbot-session';
 import {
   ChatComposer,
@@ -472,9 +476,11 @@ export function ChatAssistantView({
   const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
   /** Watch feed after server created a supervised conversation (idle takeover). */
   const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
-  const supervisionAfterSeqRef = useRef(0);
+  const supervisionAfterSeqRef = useRef(loadSupervisionAfterSeq(comercioId));
   const supervisionSeenIdsRef = useRef<Set<string>>(new Set());
-  const supervisionFeedTokenRef = useRef<string | null>(null);
+  const supervisionFeedTokenRef = useRef<string | null>(
+    loadSupervisionFeedToken(comercioId),
+  );
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -691,6 +697,20 @@ export function ChatAssistantView({
     });
   }, [catalog]);
 
+  // Resume feed watch after reload when a feed token was already issued.
+  useEffect(() => {
+    if (!live) return;
+    const token =
+      supervisionFeedTokenRef.current || loadSupervisionFeedToken(comercioId);
+    if (!token) return;
+    supervisionFeedTokenRef.current = token;
+    supervisionAfterSeqRef.current = Math.max(
+      supervisionAfterSeqRef.current,
+      loadSupervisionAfterSeq(comercioId),
+    );
+    setSupervisionWatchActive(true);
+  }, [live, comercioId]);
+
   // Staff/system via session-scoped REST after a conversation exists.
   // Faster cadence only while a human is (or may be) attending — target ~1–2s
   // delivery under controlled network; idle AI watch stays sparse (not 1–5s spam).
@@ -750,6 +770,7 @@ export function ChatAssistantView({
               supervisionAfterSeqRef.current,
               m.seq || 0,
             );
+            saveSupervisionAfterSeq(comercioId, supervisionAfterSeqRef.current);
           }
           return next;
         });
@@ -1470,6 +1491,7 @@ export function ChatAssistantView({
         }
         if (data?.supervision?.feedToken) {
           supervisionFeedTokenRef.current = data.supervision.feedToken;
+          saveSupervisionFeedToken(comercioId, data.supervision.feedToken);
         }
         if (data?.supervision?.conversationId) {
           setSupervisionWatchActive(true);

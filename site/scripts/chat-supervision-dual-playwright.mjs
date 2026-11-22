@@ -160,11 +160,14 @@ async function main() {
     });
     conversationId = chat.json?.supervision?.conversationId || null;
     chatJson = chat.json;
+    const feedToken = String(chat.json?.supervision?.feedToken || '').trim();
     if (chat.res.ok && conversationId) {
       ok('consumer_api_send', conversationId);
     } else {
       fail('consumer_api_send', chat.text.slice(0, 300));
     }
+    if (feedToken) ok('feed_token_issued');
+    else fail('feed_token_issued', 'missing supervision.feedToken');
 
     const after = await api(
       `/api/panel/conversaciones?comercioId=${encodeURIComponent(COMERCIO)}`,
@@ -187,22 +190,17 @@ async function main() {
       process.exit(1);
     }
 
-    // Unauthenticated deep link must redirect to login (unless e2e bearer public).
-    const anon = await browser.newContext();
-    const aPage = await anon.newPage();
-    await aPage.goto(
-      `${BASE}/panel/conversaciones/${conversationId}`,
-      { waitUntil: 'domcontentloaded', timeout: 60_000 },
-    );
-    await aPage.waitForTimeout(800);
-    const url = aPage.url();
-    if (url.includes('/panel/login') || url.includes('conversaciones')) {
-      // With NEXT_PUBLIC e2e bearer the page may open; without it, login.
-      ok('deep_link_auth_gate', url);
+    // API must reject conversation detail without a merchant bearer.
+    // (NEXT_PUBLIC E2E bearer may unlock UI in MEMORY tests; server auth is the gate.)
+    const unauthDetail = await api(`/api/panel/conversaciones/${conversationId}`);
+    if ([401, 403].includes(unauthDetail.res.status)) {
+      ok('deep_link_auth_gate', `api=${unauthDetail.res.status}`);
     } else {
-      fail('deep_link_auth_gate', url);
+      fail(
+        'deep_link_auth_gate',
+        `expected 401/403 without bearer, got ${unauthDetail.res.status}`,
+      );
     }
-    await anon.close();
 
     // Merchant opens conversation with e2e session
     await mPage.goto(
@@ -326,7 +324,10 @@ async function main() {
     let deliveredMs = null;
     for (let i = 0; i < 8; i++) {
       feedOk = await api(
-        `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
+        `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?afterSeq=0`,
+        feedToken
+          ? { headers: { 'X-Chat-Supervision-Feed-Token': feedToken } }
+          : undefined,
       );
       const bodies = (feedOk.json?.messages || [])
         .filter((m) => m.role === 'staff' || m.role === 'system')
@@ -368,16 +369,24 @@ async function main() {
       )
       .catch(() => {});
     const hookResult = await cPage.evaluate(
-      async ({ comercioId, sid }) => {
+      async ({ comercioId, sid, token }) => {
         const api = window.__elmenuxfaSupervisionE2E;
         if (!api?.ingestStaff || !api?.setSession) {
           return { ok: false, reason: 'hook_missing' };
         }
         sessionStorage.setItem(`elmenuxfa:chat-sid-v1:${comercioId}`, sid);
+        if (token) {
+          sessionStorage.setItem(`elmenuxfa:chat-feed-token-v1:${comercioId}`, token);
+        }
         api.setSession(sid);
         const res = await fetch(
-          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?sessionId=${encodeURIComponent(sid)}&afterSeq=0`,
-          { cache: 'no-store' },
+          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?afterSeq=0`,
+          {
+            cache: 'no-store',
+            headers: token
+              ? { 'X-Chat-Supervision-Feed-Token': token }
+              : undefined,
+          },
         );
         const data = await res.json().catch(() => null);
         const rows = (data?.messages || []).filter(
@@ -392,7 +401,7 @@ async function main() {
           staff: rows.map((m) => m.body).slice(0, 5),
         };
       },
-      { comercioId: COMERCIO, sid: sessionId },
+      { comercioId: COMERCIO, sid: sessionId, token: feedToken },
     );
     if (!hookResult?.ok) {
       fail(

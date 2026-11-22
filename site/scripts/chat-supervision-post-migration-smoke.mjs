@@ -92,12 +92,26 @@ if (!conversationId) {
   process.exit(1);
 }
 ok('conversation_persisted', conversationId);
+const feedToken = String(chat.json?.supervision?.feedToken || '').trim();
+if (!feedToken) {
+  fail('feed_token', 'missing supervision.feedToken on chat POST');
+  process.exit(1);
+}
+ok('feed_token', 'present');
 
 const detail = await api(`/api/panel/conversaciones/${conversationId}`, {
   headers: { Authorization: `Bearer ${BEARER}` },
 });
 if (!detail.res.ok || !(detail.json?.messages || []).length) {
   fail('merchant_history', detail.text.slice(0, 200));
+  process.exit(1);
+}
+const roles = (detail.json.messages || []).map((m) => m.role);
+if (!roles.includes('consumer') || !roles.includes('assistant')) {
+  fail(
+    'merchant_history_roles',
+    `expected consumer+assistant, got ${roles.join(',')}`,
+  );
   process.exit(1);
 }
 ok('merchant_history', `${detail.json.messages.length} msgs`);
@@ -158,14 +172,33 @@ if (!staff.res.ok) {
 ok('staff_message');
 
 const feed = await api(
-  `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
+  `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?afterSeq=0`,
+  { headers: { 'X-Chat-Supervision-Feed-Token': feedToken } },
 );
 const bodies = (feed.json?.messages || []).map((m) => m.body).join('\n');
-if (!/te atiende el restaurante|se ha unido/i.test(bodies)) {
-  fail('consumer_feed', bodies.slice(0, 200) || 'empty');
+if (!feed.res.ok || !/te atiende el restaurante|se ha unido/i.test(bodies)) {
+  fail('consumer_feed', `${feed.res.status} ${bodies.slice(0, 200) || 'empty'}`);
   process.exit(1);
 }
 ok('consumer_feed');
+
+const feedNoToken = await api(
+  `/api/chat/${encodeURIComponent(COMERCIO)}/supervision-feed?sessionId=${encodeURIComponent(sessionId)}&afterSeq=0`,
+);
+if (
+  feedNoToken.res.status === 401 ||
+  feedNoToken.json?.error === 'missing_feed_token'
+) {
+  ok('consumer_feed_requires_token', String(feedNoToken.res.status));
+} else if (feedNoToken.res.ok && process.env.CHAT_SUPERVISION_MEMORY === '1') {
+  ok('consumer_feed_requires_token', 'MEMORY allows sessionId query');
+} else {
+  fail(
+    'consumer_feed_requires_token',
+    `expected 401 without token, got ${feedNoToken.res.status}`,
+  );
+  process.exit(1);
+}
 
 const ret = await api(`/api/panel/conversaciones/${conversationId}`, {
   method: 'POST',

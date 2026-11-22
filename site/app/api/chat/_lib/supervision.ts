@@ -359,12 +359,15 @@ export async function persistConsumerTurn(
 
     const messageInserted = Boolean(msg.data?.id);
     if (messageInserted) {
+      const expectedStatus = String(conversation!.status || '');
+      const expectedVersion = Number(conversation!.attention_version || 1);
       const nextStatus = nextConversationStatusAfterConsumerMessage({
-        previousStatus: String(conversation!.status || ''),
+        previousStatus: expectedStatus,
         consumerText: input.text,
         wasClosed,
       });
-      const upd = await sb
+      // Optimistic lock — a concurrent take must not be overwritten.
+      let upd = await sb
         .from('chat_conversations')
         .update({
           status: nextStatus,
@@ -378,15 +381,52 @@ export async function persistConsumerTurn(
             ? {
                 assigned_user_id: null,
                 assigned_at: null,
-                attention_version:
-                  Number(conversation!.attention_version || 1) + 1,
+                attention_version: expectedVersion + 1,
               }
             : {}),
         })
         .eq('id', conversationId)
+        .eq('status', expectedStatus)
+        .eq('attention_version', expectedVersion)
         .select('*')
-        .single();
-      if (upd.data) conversation = upd.data as Record<string, unknown>;
+        .maybeSingle();
+      if (!upd.data) {
+        const again = await sb
+          .from('chat_conversations')
+          .select('*')
+          .eq('id', conversationId)
+          .maybeSingle();
+        if (again.data) {
+          conversation = again.data as Record<string, unknown>;
+          const liveStatus = String(conversation.status || '');
+          // Never demote an in-flight human takeover; only refresh preview/unread.
+          const safeStatus =
+            liveStatus === 'human_handling'
+              ? 'human_handling'
+              : nextConversationStatusAfterConsumerMessage({
+                  previousStatus: liveStatus,
+                  consumerText: input.text,
+                  wasClosed: liveStatus === 'closed',
+                });
+          upd = await sb
+            .from('chat_conversations')
+            .update({
+              status: safeStatus,
+              last_message_at: now.toISOString(),
+              last_message_preview: previewText(input.text),
+              unread_merchant_count:
+                Number(conversation.unread_merchant_count || 0) + 1,
+              updated_at: now.toISOString(),
+            })
+            .eq('id', conversationId)
+            .eq('status', liveStatus)
+            .select('*')
+            .maybeSingle();
+          if (upd.data) conversation = upd.data as Record<string, unknown>;
+        }
+      } else {
+        conversation = upd.data as Record<string, unknown>;
+      }
 
       const escalated = didEscalateToNeedsAttention(
         previousStatus,

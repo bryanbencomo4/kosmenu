@@ -40,6 +40,9 @@ const required = [
   ['unique session hash', /unique\s*\(\s*comercio_id\s*,\s*consumer_session_hash\s*\)/i],
   ['unique dedupe_key', /unique\s*\(\s*dedupe_key\s*\)/i],
   ['DOWN comments', /DOWN \(manual rollback/i],
+  // Publication may be applied by apply script; SQL must document both tables.
+  ['realtime chat_conversations note', /supabase_realtime[\s\S]*chat_conversations|chat_conversations[\s\S]*supabase_realtime/i],
+  ['realtime chat_messages note', /supabase_realtime[\s\S]*chat_messages|chat_messages[\s\S]*supabase_realtime/i],
 ];
 
 let failed = 0;

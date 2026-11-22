@@ -184,6 +184,15 @@ function ConversationsInboxInner({
     };
   }, [token, comercioId, loadInbox]);
 
+  // Recovery poll when Realtime publication is missing or the socket drops.
+  useEffect(() => {
+    if (!token || !comercioId.trim()) return;
+    const id = window.setInterval(() => {
+      void loadInbox();
+    }, 20_000);
+    return () => window.clearInterval(id);
+  }, [token, comercioId, loadInbox]);
+
   if (!ready) {
     return <p className="text-sm text-stone-500">Comprobando sesión…</p>;
   }

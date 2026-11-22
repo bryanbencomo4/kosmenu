@@ -379,7 +379,7 @@ export async function POST(
         order_actions: [],
       });
     }
-    void persistAssistantReply(simulated.text, {
+    await persistAssistantReply(simulated.text, {
       cart_actions: simulated.cartActions,
       product_cards: simulated.productCards,
     });
@@ -445,7 +445,7 @@ export async function POST(
       result.status === 'ready'
         ? result.message
         : result.message || 'Necesito un dato más para armar la combinación.';
-    void persistAssistantReply(detReply, {
+    await persistAssistantReply(detReply, {
       cart_actions: cartActions,
       product_cards: productCards,
     });
@@ -478,7 +478,7 @@ export async function POST(
   }
   if (body.deterministic_action === 'summarize_cart') {
     const result = runDeterministicCartSummary({ toolCtx, requestId });
-    void persistAssistantReply(result.text, {
+    await persistAssistantReply(result.text, {
       cart_actions: result.cartActions,
       product_cards: result.productCards,
     });
@@ -508,7 +508,7 @@ export async function POST(
   }
   if (body.deterministic_action === 'delivery_info') {
     const result = runDeterministicDeliveryInfo({ toolCtx, requestId });
-    void persistAssistantReply(result.text);
+    await persistAssistantReply(result.text);
     return json({
       ok: true,
       reply: result.text,
@@ -600,7 +600,7 @@ export async function POST(
       });
     }
 
-    void persistAssistantReply(result.text, {
+    await persistAssistantReply(result.text, {
       cart_actions: result.cartActions,
       product_cards: result.productCards,
     });
