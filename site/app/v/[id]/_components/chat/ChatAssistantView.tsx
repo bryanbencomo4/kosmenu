@@ -466,6 +466,8 @@ export function ChatAssistantView({
   /** Pending combinación / attribute ask — completed without re-search. */
   const [pendingConfiguration, setPendingConfiguration] =
     useState<PendingChatConfiguration | null>(null);
+  const pendingConfigurationRef = useRef<PendingChatConfiguration | null>(null);
+  pendingConfigurationRef.current = pendingConfiguration;
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -1246,9 +1248,10 @@ export function ChatAssistantView({
           apiMessages.push({ role: 'user', text: userText });
         }
 
+        const pendingNow = pendingConfigurationRef.current;
         const sizeOnly =
           /^(normal|grande|mediana|familiar)$/i.test(userText.trim()) &&
-          Boolean(pendingConfiguration);
+          Boolean(pendingNow);
         const res = await fetch(`/api/chat/${encodeURIComponent(comercioId)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1256,20 +1259,22 @@ export function ChatAssistantView({
             messages: apiMessages.slice(-24),
             sessionId,
             cart_snapshot: cartSnapshot.slice(0, 40),
-            ...(sizeOnly && pendingConfiguration
+            // Always attach pending so the Gemini simulator can complete size
+            // even when it short-circuits deterministic_action.
+            ...(pendingNow
               ? {
-                  deterministic_action: 'complete_pending_config',
+                  ...(sizeOnly
+                    ? { deterministic_action: 'complete_pending_config' }
+                    : {}),
                   pending_configuration: {
-                    product_id: pendingConfiguration.product_id,
-                    product_name: pendingConfiguration.product_name,
-                    combine_with_product_id:
-                      pendingConfiguration.combine_with_product_id,
+                    product_id: pendingNow.product_id,
+                    product_name: pendingNow.product_name,
+                    combine_with_product_id: pendingNow.combine_with_product_id,
                     combine_with_product_name:
-                      pendingConfiguration.combine_with_product_name,
-                    quantity: pendingConfiguration.quantity,
-                    option_labels: pendingConfiguration.option_labels,
-                    exclude_ingredients:
-                      pendingConfiguration.exclude_ingredients,
+                      pendingNow.combine_with_product_name,
+                    quantity: pendingNow.quantity,
+                    option_labels: pendingNow.option_labels,
+                    exclude_ingredients: pendingNow.exclude_ingredients,
                   },
                 }
               : {}),
@@ -1386,7 +1391,6 @@ export function ChatAssistantView({
       comercioId,
       cartSnapshot,
       catalog,
-      pendingConfiguration,
       playAssistantReceivedOnce,
     ],
   );

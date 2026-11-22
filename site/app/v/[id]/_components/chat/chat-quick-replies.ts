@@ -106,9 +106,10 @@ export function buildContextualQuickReplies(input: {
     pendingSizeChoices = null,
   } = input;
 
-  // Pending size attribute — highest priority over product carousels
+  // Pending size attribute — highest priority over product carousels.
+  // Stable context id so React re-renders do not invalidate chips mid-tap.
   if (pendingSizeChoices && pendingSizeChoices.length >= 2) {
-    const contextId = newContextId('size');
+    const contextId = 'qr_pending_size';
     return {
       chips: pendingSizeChoices.slice(0, OPTION_CHIP_CAP).map((label) =>
         chip(

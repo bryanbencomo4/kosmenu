@@ -266,12 +266,33 @@ export function describeBusinessExchangeRate(
     marketRates: menu.marketRates as never,
   };
 
-  // Natural "a cómo el dólar": 1 quote → menu units (e.g. 1 USD = $X COP).
-  const oneQuoteInMenu = convertAmountBetweenCurrencies(1, quote, menuCurrency, fxOpts);
-  const rateLabel =
-    Number.isFinite(oneQuoteInMenu) && oneQuoteInMenu > 0
-      ? `1 ${quote} = ${formatChatMoney(oneQuoteInMenu, menuCurrency)}`
-      : `1 ${menuCurrency} = ${rate} ${quote}`;
+  // Prefer the direction whose right-hand amount is ≥ 1 so labels stay readable:
+  // - USD menu / COP quote → "1 USD = $3.200 COP"
+  // - COP menu / USD quote → "1 USD = $4.000 COP" (not "1 COP = US$0,00")
+  const oneMenuInQuote = convertAmountBetweenCurrencies(
+    1,
+    menuCurrency,
+    quote,
+    fxOpts,
+  );
+  const oneQuoteInMenu = convertAmountBetweenCurrencies(
+    1,
+    quote,
+    menuCurrency,
+    fxOpts,
+  );
+  let rateLabel = `1 ${menuCurrency} = ${rate} ${quote}`;
+  if (
+    Number.isFinite(oneQuoteInMenu) &&
+    oneQuoteInMenu >= 1 &&
+    !(Number.isFinite(oneMenuInQuote) && oneMenuInQuote >= 1 && oneMenuInQuote >= oneQuoteInMenu)
+  ) {
+    rateLabel = `1 ${quote} = ${formatChatMoney(oneQuoteInMenu, menuCurrency)}`;
+  } else if (Number.isFinite(oneMenuInQuote) && oneMenuInQuote >= 1) {
+    rateLabel = `1 ${menuCurrency} = ${formatChatMoney(oneMenuInQuote, quote)}`;
+  } else if (Number.isFinite(oneQuoteInMenu) && oneQuoteInMenu > 0) {
+    rateLabel = `1 ${quote} = ${formatChatMoney(oneQuoteInMenu, menuCurrency)}`;
+  }
 
   const result: Extract<DescribeExchangeRateResult, { ok: true }> = {
     ok: true,

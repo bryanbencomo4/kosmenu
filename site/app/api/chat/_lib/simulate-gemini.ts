@@ -18,6 +18,10 @@ import { describeBusinessExchangeRate } from './chat-currency';
 import { getDeliveryConditions } from './delivery-conditions';
 import type { LoadedPublicMenu } from '../../menu/_lib/load-public-menu';
 import { executeChatTool } from './tools';
+import {
+  resolveCartLineUnitPrice,
+  resolveCombinedUnitPrice,
+} from '../../../_lib/menu-product-options';
 
 function norm(s: string) {
   return s
@@ -173,19 +177,68 @@ export function runSimulatedChat(params: {
   }
 
   if (
-    /tasa|cambio|a como|a c[oó]mo|dolar|d[oó]lar|cu[aá]ntos pesos|aceptan d[oó]lares|pagar en pesos|equivalente/.test(
+    /tasa|cambio|a como|a c[oó]mo|dolar|d[oó]lar|cu[aá]ntos? (pesos|cop)|en pesos|cuesta.*pesos|precio.*pesos|aceptan d[oó]lares|pagar en (pesos|cop|d[oó]lares|usd)|\bcop\b|equivalente/.test(
       q,
     )
   ) {
     toolCalls += 1;
     const amountMatch = last.match(/(\d+(?:[.,]\d+)?)/);
-    const amount = amountMatch
+    let amount = amountMatch
       ? Number(amountMatch[1]!.replace(',', '.'))
       : undefined;
+    const menuCurrency = String(
+      (params.menu.comercio as { moneda?: string } | undefined)?.moneda || 'COP',
+    )
+      .trim()
+      .toUpperCase();
+    // Ask about the "other" currency people care about (COP when menu is USD).
+    const quoteCurrency = menuCurrency === 'USD' ? 'COP' : 'USD';
+    const askingPriceInPesos =
+      /(cuesta|precio|vale)/.test(q) && /(pesos|cop)/.test(q);
+    if (
+      (!Number.isFinite(amount) || amount == null) &&
+      askingPriceInPesos &&
+      cart.length > 0
+    ) {
+      const products = (params.menu.productos || []) as Array<{
+        id: string;
+        precio?: number | null;
+        opciones_menu?: unknown;
+      }>;
+      amount = cart.reduce((sum, line) => {
+        const product = products.find((p) => p.id === line.productId);
+        if (!product) return sum;
+        const selection = line.selection || {};
+        const partnerId = selection.combinacion?.productId;
+        const partner = partnerId
+          ? products.find((p) => p.id === partnerId)
+          : null;
+        const unit = partner
+          ? resolveCombinedUnitPrice(
+              product,
+              null,
+              selection,
+              partner,
+              null,
+            )
+          : resolveCartLineUnitPrice(product, null, selection);
+        return sum + unit * Math.max(1, Number(line.quantity) || 1);
+      }, 0);
+    }
+    const fromCurrency =
+      askingPriceInPesos
+        ? menuCurrency
+        : /\b(cop|pesos?)\b/.test(q) && /\b(usd|d[oó]lar)/.test(q)
+          ? /cu[aá]ntos (cop|pesos)/.test(q)
+            ? 'USD'
+            : quoteCurrency
+          : /\b(usd|d[oó]lar)/.test(q)
+            ? 'USD'
+            : quoteCurrency;
     const fx = describeBusinessExchangeRate(params.menu, {
-      quoteCurrency: 'USD',
+      quoteCurrency,
       amount: Number.isFinite(amount) ? amount : undefined,
-      fromCurrency: 'USD',
+      fromCurrency,
     });
     return {
       text: fx.ok

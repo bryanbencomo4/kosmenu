@@ -289,7 +289,8 @@ describe('currency + exchange rate', () => {
     });
     expect(fx.ok).toBe(true);
     if (!fx.ok) return;
-    expect(fx.rate_label).toMatch(/USD/);
+    expect(fx.rate_label).toMatch(/1 USD/i);
+    expect(fx.rate_label).toMatch(/4\.?000|4000/);
     expect(fx.amount_to_label).toBeTruthy();
   });
 
