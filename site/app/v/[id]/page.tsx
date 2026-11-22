@@ -73,6 +73,7 @@ import {
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { ChatAssistantView } from './_components/chat/ChatAssistantView';
+import type { ChatCatalogSnapshot } from './_components/chat/chat-catalog';
 import { ChatModeSwitcher } from './_components/chat/ChatModeSwitcher';
 import type {
   ChatAppliedAddNotice,
@@ -4062,6 +4063,52 @@ export default function PublicMenuPage() {
       }),
     [categoriasConProductos, comercioLogoUrl],
   );
+  // Slim catalog snapshot for the conversational chat UX (carousels + sheet).
+  // Prices are base-currency menu prices; cart/checkout stay authoritative here.
+  const chatCatalog = useMemo<ChatCatalogSnapshot | null>(() => {
+    if (categoriasConProductos.length === 0) return null;
+    const currency = businessBaseCurrency;
+    const categories: ChatCatalogSnapshot['categories'] = [];
+    const products: ChatCatalogSnapshot['products'] = [];
+    for (const categoria of categoriasConProductos) {
+      const sorted = categoria.productos
+        .slice()
+        .sort(
+          (left, right) =>
+            (left.orden ?? Number.MAX_SAFE_INTEGER) -
+            (right.orden ?? Number.MAX_SAFE_INTEGER),
+        );
+      categories.push({
+        id: categoria.id,
+        name: formatCategoryDisplayName(categoria.nombre),
+        imageUrl:
+          resolveCategoryCover(
+            categoria.imagen_url,
+            sorted,
+            comercioLogoUrl,
+            MENU_IMAGE_WIDTH.tile,
+          ) || null,
+        productCount: sorted.length,
+        availableCount: sorted.filter((p) => p.disponible !== false).length,
+      });
+      for (const product of sorted) {
+        const price = getProductMinimumPrice(product);
+        products.push({
+          id: product.id,
+          categoryId: categoria.id,
+          name: product.nombre,
+          description: (product.descripcion ?? '').trim() || null,
+          imageUrl:
+            displayProductImage(product.imagen_url, comercioLogoUrl, 280) || null,
+          price: Number.isFinite(price) && price > 0 ? price : Number(product.precio ?? 0) || 0,
+          currency,
+          available: product.disponible !== false,
+          requiresConfiguration: productRequiresConfiguration(product, categoria),
+        });
+      }
+    }
+    return { currency, categories, products };
+  }, [categoriasConProductos, businessBaseCurrency, comercioLogoUrl]);
   const kioskProductsByCategory = useMemo(() => {
     const map: Record<string, Array<{
       id: string;
@@ -7134,6 +7181,7 @@ export default function PublicMenuPage() {
             businessName={comercioNombre}
             logoUrl={comercioLogoUrl || null}
             initialLetter={comercioInitialLetter}
+            catalog={chatCatalog}
             cartCount={cartCount}
             cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
             cartSnapshot={cartItems.map((item) => ({

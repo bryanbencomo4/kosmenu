@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 
 import {
   buildCartLineKey,
+  getProductMinimumPrice,
   parseCartLineKey,
   productRequiresConfiguration,
   resolveCartLineUnitPrice,
@@ -11,6 +12,7 @@ import {
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
 import { ChatAssistantView } from '../../v/[id]/_components/chat/ChatAssistantView';
+import type { ChatCatalogSnapshot } from '../../v/[id]/_components/chat/chat-catalog';
 import type {
   ChatAppliedAddNotice,
   ChatCartActionData,
@@ -65,6 +67,44 @@ export function DevChatbotTruenoClient({
     () => new Map(categories.map((c) => [c.id, c])),
     [categories],
   );
+
+  const chatCatalog = useMemo<ChatCatalogSnapshot>(() => {
+    const cats = categories
+      .map((c) => {
+        const inCat = products.filter((p) => p.categoria_id === c.id);
+        if (inCat.length === 0) return null;
+        const available = inCat.filter((p) => p.disponible !== false);
+        const cover =
+          inCat.find((p) => p.imagen_url)?.imagen_url || null;
+        return {
+          id: c.id,
+          name: c.nombre,
+          imageUrl: cover,
+          productCount: inCat.length,
+          availableCount: available.length,
+        };
+      })
+      .filter(Boolean) as ChatCatalogSnapshot['categories'];
+
+    return {
+      currency,
+      categories: cats,
+      products: products.map((p) => ({
+        id: p.id,
+        categoryId: p.categoria_id || '',
+        name: p.nombre,
+        description: p.descripcion || null,
+        imageUrl: p.imagen_url,
+        price: getProductMinimumPrice(p),
+        currency,
+        available: p.disponible !== false,
+        requiresConfiguration: productRequiresConfiguration(
+          p,
+          p.categoria_id ? categoryById.get(p.categoria_id) : null,
+        ),
+      })),
+    };
+  }, [products, categories, currency, categoryById]);
 
   const [cart, setCart] = useState<Record<string, number>>({});
   const [optionsProductId, setOptionsProductId] = useState<string | null>(null);
@@ -162,6 +202,7 @@ export function DevChatbotTruenoClient({
           initialLetter={(businessName || 'P').slice(0, 1).toUpperCase()}
           cartCount={cartCount}
           cartTotalLabel={formatMoney(cartTotal, currency)}
+          catalog={chatCatalog}
           cartSnapshot={cartItems.map((i) => ({
             productId: i.product.id,
             quantity: i.quantity,

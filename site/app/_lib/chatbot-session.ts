@@ -91,6 +91,10 @@ export function saveChatHistory(
       // Keep proposal cards across remounts so confirm UI does not vanish.
       productCards: m.productCards,
       cartActions: m.cartActions,
+      // Cited reply + sticker are tiny/serializable. Catalog carousels are
+      // rebuilt from the live catalog, so they are intentionally not persisted.
+      replyTo: m.replyTo ?? undefined,
+      sticker: m.sticker ?? undefined,
       // GPS share (serializable); blob media URLs are session-only and omitted.
       location: m.location
         ? {

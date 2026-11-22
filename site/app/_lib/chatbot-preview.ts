@@ -75,7 +75,7 @@ export function shouldOpenChatbotFromQuery(params: {
 }
 
 /** Bump when welcome copy changes so persisted chats refresh the first bubble. */
-export const CHATBOT_WELCOME_VERSION = 4;
+export const CHATBOT_WELCOME_VERSION = 5;
 
 export function buildChatbotWelcomeMessage(
   restaurantName: string,
@@ -83,11 +83,9 @@ export function buildChatbotWelcomeMessage(
 ): string {
   const name = restaurantName.trim() || 'nuestro restaurante';
   return [
-    `¡Hola! 👋 Bienvenido a ${name}.`,
+    `¡Hola! 👋 Bienvenido a ${name} 🍕`,
     '',
-    'Soy tu asistente virtual. 🍕',
-    '',
-    '¿Ya sabes qué quieres pedir o prefieres que te recomiende algo?',
+    '¿Qué se te antoja hoy? Mira nuestro menú o dime qué te gustaría pedir.',
   ].join('\n');
 }
 

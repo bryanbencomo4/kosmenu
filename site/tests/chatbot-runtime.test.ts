@@ -43,7 +43,7 @@ describe('chatbot runtime gates', () => {
     const live = buildChatbotWelcomeMessage('Lunetz', { runtimeEnabled: true });
     expect(demo).toContain('Lunetz');
     expect(live).toContain('Lunetz');
-    expect(live).toMatch(/asistente virtual/i);
+    expect(live).toMatch(/qué se te antoja/i);
     expect(live).not.toMatch(/solo se agregan al carrito/i);
     expect(live.split('\n').length).toBeLessThanOrEqual(6);
   });

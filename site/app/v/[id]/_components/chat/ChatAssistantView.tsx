@@ -29,8 +29,20 @@ import {
   type ChatFilePayload,
   type ChatVoicePayload,
 } from './ChatComposer';
+import { ChatCatalogSheet } from './ChatCatalogSheet';
 import { ChatHeader } from './ChatHeader';
 import { ChatMessageList } from './ChatMessageList';
+import {
+  CHAT_CATALOG_PAGE_SIZE,
+  productsInCategory,
+  suggestComplementProducts,
+  toChatProductCard,
+  type ChatCatalogSnapshot,
+} from './chat-catalog';
+import {
+  buildChatReplyRef,
+  prefixTextWithReplyContext,
+} from './chat-gestures';
 import {
   chatThemeVars,
   loadStoredChatTheme,
@@ -49,11 +61,18 @@ import type {
   ChatAppliedAddNotice,
   ChatAttachment,
   ChatCartActionData,
+  ChatCatalogCategory,
   ChatDeliveryStatus,
   ChatMessage,
   ChatProductCardData,
+  ChatReplyRef,
   ChatSharedLocation,
 } from './chat-types';
+
+/** User declined extras / the recommendation ("no gracias", "ahora no", "no quiero"). */
+const DECLINE_RE = /\b(no[, ]?gracias|ahora no|no quiero)\b/i;
+/** Max complement carousels per conversation. */
+const MAX_COMPLEMENT_ROUNDS = 2;
 
 export type ChatCartSnapshotLine = {
   productId: string;
@@ -66,6 +85,8 @@ type ChatAssistantViewProps = {
   businessName: string;
   logoUrl: string | null;
   initialLetter: string;
+  /** Slim catalog snapshot powering category/product carousels and the sheet. */
+  catalog?: ChatCatalogSnapshot | null;
   cartCount: number;
   cartTotalLabel: string;
   /** Authoritative shared cart (same as PublicMenuPage). */
@@ -110,6 +131,11 @@ function createMessage(
     voiceDurationMs?: number;
     attachments?: ChatAttachment[];
     location?: ChatMessage['location'];
+    replyTo?: ChatReplyRef | null;
+    catalogCategories?: ChatCatalogCategory[];
+    catalogProducts?: ChatProductCardData[];
+    catalogCategoryId?: string | null;
+    sticker?: ChatMessage['sticker'];
   },
 ): ChatMessage {
   return {
@@ -128,7 +154,29 @@ function createMessage(
     voiceDurationMs: options?.voiceDurationMs,
     attachments: options?.attachments,
     location: options?.location,
+    replyTo: options?.replyTo ?? undefined,
+    catalogCategories: options?.catalogCategories,
+    catalogProducts: options?.catalogProducts,
+    catalogCategoryId: options?.catalogCategoryId,
+    sticker: options?.sticker ?? undefined,
   };
+}
+
+function welcomeCategories(
+  catalog: ChatCatalogSnapshot | null | undefined,
+): ChatCatalogCategory[] | undefined {
+  return catalog && catalog.categories.length > 0
+    ? catalog.categories
+    : undefined;
+}
+
+function sameCategoryIds(
+  a: ChatCatalogCategory[] | undefined,
+  b: ChatCatalogCategory[] | undefined,
+) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((c, i) => c.id === b[i].id && c.name === b[i].name);
 }
 
 /** Only the latest outbound user bubble — never fake-advance older ticks. */
@@ -154,6 +202,7 @@ export function ChatAssistantView({
   businessName,
   logoUrl,
   initialLetter,
+  catalog = null,
   cartCount,
   cartTotalLabel,
   cartSnapshot = [],
@@ -211,12 +260,23 @@ export function ChatAssistantView({
             createMessage('assistant', welcome, {
               demo: !live,
               isWelcome: true,
+              catalogCategories: welcomeCategories(catalog),
             }),
           ];
     return refreshWelcomeInHistory(base, welcome, {
       runtimeEnabled: live,
     }) as ChatMessage[];
   });
+  const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
+  const [catalogSheetOpen, setCatalogSheetOpen] = useState(false);
+  const [catalogSheetCategoryId, setCatalogSheetCategoryId] = useState<
+    string | null
+  >(null);
+  // Latest reply target for async send paths (voice/file await network first).
+  const replyToRef = useRef<ChatReplyRef | null>(null);
+  replyToRef.current = replyTo;
+  const [declinedComplements, setDeclinedComplements] = useState(false);
+  const [complementsShownCount, setComplementsShownCount] = useState(0);
   const [draft, setDraft] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -335,16 +395,68 @@ export function ChatAssistantView({
     );
   }, [welcome, live]);
 
+  // Categories are not persisted in history; (re)attach them to the welcome
+  // bubble whenever the live catalog is available or changes.
+  useEffect(() => {
+    const categories = welcomeCategories(catalog);
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.isWelcome);
+      if (idx < 0) return prev;
+      if (sameCategoryIds(prev[idx].catalogCategories, categories)) return prev;
+      const next = prev.slice();
+      next[idx] = { ...next[idx], catalogCategories: categories };
+      return next;
+    });
+  }, [catalog]);
+
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
     ensureChatSessionId(comercioId);
     setMessages([
-      createMessage('assistant', welcome, { demo: !live, isWelcome: true }),
+      createMessage('assistant', welcome, {
+        demo: !live,
+        isWelcome: true,
+        catalogCategories: welcomeCategories(catalog),
+      }),
     ]);
     setConfirmedProposalIds(new Set());
     setErrorText(null);
     setDraft('');
-  }, [comercioId, welcome, live]);
+    setReplyTo(null);
+    setCatalogSheetOpen(false);
+    setCatalogSheetCategoryId(null);
+    setDeclinedComplements(false);
+    setComplementsShownCount(0);
+  }, [comercioId, welcome, live, catalog]);
+
+  const openCatalogSheet = useCallback((categoryId?: string | null) => {
+    setCatalogSheetCategoryId(categoryId ?? null);
+    setCatalogSheetOpen(true);
+  }, []);
+
+  /** Deterministic (no Gemini): show the category's products as a carousel. */
+  const onSelectCategory = useCallback(
+    (categoryId: string) => {
+      if (!catalog) return;
+      const category = catalog.categories.find((c) => c.id === categoryId);
+      if (!category) return;
+      const items = productsInCategory(catalog, categoryId);
+      // Cap DOM size; the full list stays reachable through the sheet.
+      const cards = items
+        .slice(0, CHAT_CATALOG_PAGE_SIZE)
+        .map(toChatProductCard);
+      const msg = createMessage(
+        'assistant',
+        cards.length > 0
+          ? `¡Claro! 🍕 Estas son las opciones de ${category.name}.`
+          : `Por ahora no tengo productos en ${category.name}.`,
+        { catalogProducts: cards, catalogCategoryId: categoryId },
+      );
+      setMessages((prev) => [...prev, msg]);
+      playAssistantReceivedOnce(msg);
+    },
+    [catalog, playAssistantReceivedOnce],
+  );
 
   useEffect(() => {
     if (!incomingProposal) return;
@@ -366,16 +478,50 @@ export function ChatAssistantView({
 
   useEffect(() => {
     if (!incomingAppliedNotice) return;
+    const notice = incomingAppliedNotice;
     setMessages((prev) => [
       ...prev,
-      createMessage('system', `Agregado: ${incomingAppliedNotice.label}`, {
-        productCards: incomingAppliedNotice.productCard
-          ? [incomingAppliedNotice.productCard]
-          : [],
+      createMessage('system', `Agregado: ${notice.label}`, {
+        productCards: notice.productCard ? [notice.productCard] : [],
       }),
     ]);
+    if (
+      catalog &&
+      !declinedComplements &&
+      complementsShownCount < MAX_COMPLEMENT_ROUNDS
+    ) {
+      const cartProductIds = Array.from(
+        new Set([
+          ...cartSnapshot.map((line) => line.productId),
+          ...(notice.productCard?.product_id
+            ? [notice.productCard.product_id]
+            : []),
+        ]),
+      );
+      const suggestions = suggestComplementProducts(catalog, cartProductIds, {
+        limit: 4,
+      });
+      if (suggestions.length > 0) {
+        const suggestMsg = createMessage(
+          'assistant',
+          '¡Listo! Ya está en tu pedido. ¿Te provoca algo más?',
+          { catalogProducts: suggestions.map(toChatProductCard) },
+        );
+        setMessages((prev) => [...prev, suggestMsg]);
+        setComplementsShownCount((n) => n + 1);
+        playAssistantReceivedOnce(suggestMsg);
+      }
+    }
     onIncomingAppliedNoticeConsumed?.();
-  }, [incomingAppliedNotice, onIncomingAppliedNoticeConsumed]);
+  }, [
+    incomingAppliedNotice,
+    onIncomingAppliedNoticeConsumed,
+    catalog,
+    cartSnapshot,
+    declinedComplements,
+    complementsShownCount,
+    playAssistantReceivedOnce,
+  ]);
 
   const confirmCartAction = useCallback(
     (action: ChatCartActionData) => {
@@ -416,14 +562,54 @@ export function ChatAssistantView({
           ...prev,
           createMessage('system', `Listo: ${action.label}`),
         ]);
+
+        // Complement upsell: at most twice, never after the user said no.
+        if (
+          action.type === 'propose_add' &&
+          catalog &&
+          !declinedComplements &&
+          complementsShownCount < MAX_COMPLEMENT_ROUNDS
+        ) {
+          const cartProductIds = Array.from(
+            new Set([
+              ...cartSnapshot.map((line) => line.productId),
+              action.product_id,
+            ]),
+          );
+          const suggestions = suggestComplementProducts(
+            catalog,
+            cartProductIds,
+            { limit: 4 },
+          );
+          if (suggestions.length > 0) {
+            const suggestMsg = createMessage(
+              'assistant',
+              '¡Listo! Ya está en tu pedido. ¿Te provoca algo más?',
+              { catalogProducts: suggestions.map(toChatProductCard) },
+            );
+            setMessages((prev) => [...prev, suggestMsg]);
+            setComplementsShownCount((n) => n + 1);
+            playAssistantReceivedOnce(suggestMsg);
+          }
+        }
       } finally {
         setCartBusy(false);
       }
     },
-    [onApplyCartAction, onOpenCheckout, confirmedProposalIds],
+    [
+      onApplyCartAction,
+      onOpenCheckout,
+      confirmedProposalIds,
+      catalog,
+      cartSnapshot,
+      declinedComplements,
+      complementsShownCount,
+      playAssistantReceivedOnce,
+    ],
   );
 
   const dismissCartAction = useCallback((action: ChatCartActionData) => {
+    if (action.type === 'propose_add') setDeclinedComplements(true);
     setMessages((prev) =>
       prev.map((m) =>
         m.cartActions?.length
@@ -466,13 +652,24 @@ export function ChatAssistantView({
 
       try {
         const sessionId = ensureChatSessionId(comercioId);
-        const apiMessages = history
+        const apiHistory = history
           .filter((m) => m.role === 'user' || m.role === 'assistant')
-          .filter((m) => !m.demo)
-          .map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            text: m.text,
-          }));
+          .filter((m) => !m.demo);
+        let lastUserIdx = -1;
+        for (let i = apiHistory.length - 1; i >= 0; i--) {
+          if (apiHistory[i].role === 'user') {
+            lastUserIdx = i;
+            break;
+          }
+        }
+        const apiMessages = apiHistory.map((m, i) => ({
+          role: m.role as 'user' | 'assistant',
+          // Cited reply context applies to the LAST user message only.
+          text:
+            i === lastUserIdx && m.replyTo
+              ? prefixTextWithReplyContext(m.text, m.replyTo, history)
+              : m.text,
+        }));
 
         if (
           apiMessages.length === 0 ||
@@ -560,11 +757,17 @@ export function ChatAssistantView({
 
     setErrorText(null);
     setDraft('');
-    const userMsg = createMessage('user', text, { deliveryStatus: 'sent' });
+    if (DECLINE_RE.test(text)) setDeclinedComplements(true);
+    const reply = replyTo;
+    setReplyTo(null);
+    const userMsg = createMessage('user', text, {
+      deliveryStatus: 'sent',
+      replyTo: reply,
+    });
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     await runAssistantTurn(text, nextMessages);
-  }, [draft, isTyping, messages, runAssistantTurn]);
+  }, [draft, isTyping, messages, replyTo, runAssistantTurn]);
 
   const sendVoice = useCallback(
     async (payload: ChatVoicePayload) => {
@@ -602,7 +805,13 @@ export function ChatAssistantView({
       }
 
       const text = transcript || `🎤 Nota de voz (${secs}s)`;
+      if (transcript && DECLINE_RE.test(transcript)) {
+        setDeclinedComplements(true);
+      }
+      const reply = replyToRef.current;
+      setReplyTo(null);
       const userMsg = createMessage('user', text, {
+        replyTo: reply,
         deliveryStatus: 'sent',
         voiceUrl: payload.url,
         voiceDurationMs: payload.durationMs,
@@ -660,7 +869,10 @@ export function ChatAssistantView({
         analysis,
       };
       const userText = analysis || label;
+      const reply = replyToRef.current;
+      setReplyTo(null);
       const userMsg = createMessage('user', userText, {
+        replyTo: reply,
         deliveryStatus: 'sent',
         attachments: [attachment],
       });
@@ -678,10 +890,13 @@ export function ChatAssistantView({
       const label =
         location.label?.trim() ||
         `📍 ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+      const reply = replyToRef.current;
+      setReplyTo(null);
       const userMsg = createMessage(
         'user',
         `Compartí mi ubicación para delivery: ${label}`,
         {
+          replyTo: reply,
           deliveryStatus: 'sent',
           location: {
             lat: location.lat,
@@ -789,11 +1004,16 @@ export function ChatAssistantView({
         onConfigureProduct={onConfigureProduct}
         onAddSimpleProduct={onAddSimpleProduct}
         cartActionBusy={cartBusy}
+        onReply={(m) => setReplyTo(buildChatReplyRef(m))}
+        onSelectCategory={catalog ? onSelectCategory : undefined}
+        onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
       />
 
       <ChatComposer
         value={draft}
         disabled={isTyping}
+        replyTo={replyTo}
+        onClearReply={() => setReplyTo(null)}
         onChange={setDraft}
         onSend={() => {
           void sendMessage();
@@ -808,6 +1028,21 @@ export function ChatAssistantView({
           void shareLocation(location);
         }}
       />
+
+      {catalog ? (
+        <ChatCatalogSheet
+          open={catalogSheetOpen}
+          catalog={catalog}
+          initialCategoryId={catalogSheetCategoryId}
+          onClose={() => setCatalogSheetOpen(false)}
+          onConfigureProduct={(productId) => {
+            // Close first so ProductOptionsSheet (parent overlay) isn't hidden behind it.
+            setCatalogSheetOpen(false);
+            onConfigureProduct?.(productId);
+          }}
+          onAddSimpleProduct={onAddSimpleProduct}
+        />
+      ) : null}
     </section>
   );
 }

@@ -84,11 +84,35 @@ export type ChatAttachment = {
   analysis?: string | null;
 };
 
+/**
+ * Slim category shape for conversational catalog UI.
+ * Defined here (re-exported from chat-catalog) to avoid import cycles.
+ */
+export type ChatCatalogCategory = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  productCount: number;
+  availableCount: number;
+};
+
+/**
+ * Lightweight pointer to the message being quoted/replied to.
+ * `preview` is already clamped plain text (see `buildChatReplyRef`).
+ */
+export type ChatReplyRef = {
+  messageId: string;
+  role: ChatRole;
+  preview: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: ChatRole;
   text: string;
   createdAt: number;
+  /** Quoted message this bubble replies to (rendered as a mini quote above the text). */
+  replyTo?: ChatReplyRef | null;
   /** Marks demo / non-AI copy so UI can style it without pretending it is live AI. */
   demo?: boolean;
   /** First assistant bubble; refreshed when welcome copy/version changes. */
@@ -104,6 +128,14 @@ export type ChatMessage = {
   location?: { lat: number; lng: number; label?: string } | null;
   productCards?: ChatProductCardData[];
   cartActions?: ChatCartActionData[];
+  /** Category carousel rendered under the bubble. */
+  catalogCategories?: ChatCatalogCategory[];
+  /** Product carousel rendered under the bubble (compact vertical cards). */
+  catalogProducts?: ChatProductCardData[];
+  /** Category the catalogProducts belong to (null = all / mixed). */
+  catalogCategoryId?: string | null;
+  /** Sticker sent as a message (id + accessible label). */
+  sticker?: { id: string; label: string } | null;
 };
 
 export type ChatSharedLocation = {

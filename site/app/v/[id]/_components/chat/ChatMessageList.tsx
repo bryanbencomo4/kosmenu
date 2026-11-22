@@ -20,6 +20,12 @@ type ChatMessageListProps = {
   onConfigureProduct?: (productId: string) => void;
   onAddSimpleProduct?: (productId: string) => void;
   cartActionBusy?: boolean;
+  /** Swipe / long-press / button reply on a bubble. */
+  onReply?: (message: ChatMessage) => void;
+  /** Tap a category card in a welcome/category carousel. */
+  onSelectCategory?: (categoryId: string) => void;
+  /** "Ver todos" under a product carousel (null = whole catalog). */
+  onSeeAllCatalog?: (categoryId: string | null) => void;
 };
 
 export function ChatMessageList({
@@ -33,6 +39,9 @@ export function ChatMessageList({
   onConfigureProduct,
   onAddSimpleProduct,
   cartActionBusy = false,
+  onReply,
+  onSelectCategory,
+  onSeeAllCatalog,
 }: ChatMessageListProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -61,7 +70,7 @@ export function ChatMessageList({
         }}
       />
       <div
-        className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-0 py-2"
+        className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-0 py-2"
         role="log"
         aria-live="polite"
         aria-relevant="additions"
@@ -93,6 +102,9 @@ export function ChatMessageList({
                 onConfigureProduct={onConfigureProduct}
                 onAddSimpleProduct={onAddSimpleProduct}
                 cartActionBusy={cartActionBusy}
+                onReply={onReply}
+                onSelectCategory={onSelectCategory}
+                onSeeAllCatalog={onSeeAllCatalog}
               />
             );
           })}
