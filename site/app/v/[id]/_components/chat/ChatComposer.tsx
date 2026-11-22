@@ -1014,8 +1014,9 @@ export function ChatComposer({
             ) : (
             <div
               key="pane-input"
-              className="flex min-h-[44px] flex-1 items-end rounded-[24px] py-1 pl-1 pr-2 shadow-sm"
-              style={{ backgroundColor: 'var(--chat-input)' }}
+              className="flex min-h-[44px] flex-1 items-end rounded-[24px] border-0 py-1 pl-1 pr-2 shadow-sm outline-none ring-0 focus-within:outline-none focus-within:ring-0"
+              style={{ backgroundColor: 'var(--chat-input)', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }}
+              data-chat-composer-input-shell="1"
             >
               <button
                 type="button"
@@ -1064,9 +1065,12 @@ export function ChatComposer({
                   setAttachOpen(false);
                 }}
                 placeholder="Escribe un mensaje"
-                className="max-h-[7.5rem] min-h-[28px] w-full resize-none bg-transparent py-2 text-[15.5px] leading-[1.35] text-[var(--chat-text)] outline-none placeholder:text-[var(--chat-text-muted)] read-only:opacity-60"
+                className="max-h-[7.5rem] min-h-[28px] w-full resize-none bg-transparent py-2 text-[15.5px] leading-[1.35] text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
+                style={{ outline: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                 enterKeyHint="send"
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck
               />
             </div>
             )}

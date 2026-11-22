@@ -17,6 +17,7 @@ import { ChatProductCard } from './ChatProductCard';
 import { ChatProductCarousel } from './ChatProductCarousel';
 import { ChatReceiptTicks } from './ChatReceiptTicks';
 import { formatChatText } from './chat-format';
+import { staticMapPreviewUrl } from './chat-location';
 import {
   REPLY_LONG_PRESS_MS,
   REPLY_SWIPE_SLOP_PX,
@@ -454,22 +455,67 @@ export function ChatMessageBubble({
           )}
           {hasLocation && message.location ? (
             <div
-              className="mb-1 rounded-lg bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] px-2.5 py-2 text-[13px]"
+              className="mb-1 w-full max-w-[16.5rem] overflow-hidden rounded-xl bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)]"
               data-chat-location="1"
+              data-chat-location-kind={message.location.kind || 'customer'}
             >
-              <p className="font-medium">📍 Ubicación para delivery</p>
-              <p className="text-[12px] text-[var(--chat-text-muted)]">
-                {message.location.label ||
-                  `${message.location.lat.toFixed(5)}, ${message.location.lng.toFixed(5)}`}
-              </p>
               <a
-                className="mt-1 inline-block text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
-                href={`https://maps.google.com/?q=${message.location.lat},${message.location.lng}`}
+                href={
+                  message.location.mapsUrl ||
+                  `https://maps.google.com/?q=${message.location.lat},${message.location.lng}`
+                }
                 target="_blank"
                 rel="noreferrer"
+                className="block"
+                data-chat-location-map="1"
               >
-                Ver en mapa
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={staticMapPreviewUrl(
+                    message.location.lat,
+                    message.location.lng,
+                  )}
+                  alt=""
+                  className="h-[120px] w-full object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
               </a>
+              <div className="px-2.5 py-2 text-[13px]">
+                <p className="font-semibold leading-snug text-[var(--chat-text)]">
+                  {message.location.kind === 'business'
+                    ? '📍 Ubicación del local'
+                    : '📍 Ubicación para delivery'}
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-[var(--chat-text-muted)]">
+                  {message.location.address ||
+                    message.location.label ||
+                    `${message.location.lat.toFixed(5)}, ${message.location.lng.toFixed(5)}`}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                  <a
+                    className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
+                    href={
+                      message.location.mapsUrl ||
+                      `https://maps.google.com/?q=${message.location.lat},${message.location.lng}`
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir en Maps
+                  </a>
+                  {message.location.directionsUrl ? (
+                    <a
+                      className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
+                      href={message.location.directionsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Cómo llegar
+                    </a>
+                  ) : null}
+                </div>
+              </div>
             </div>
           ) : null}
           {hasText ? (

@@ -8,6 +8,7 @@ export type ChatSuggestedAction =
   | { type: 'catalog'; categoryId: string | null }
   | { type: 'cart' }
   | { type: 'payments' }
+  | { type: 'location' }
   | { type: 'text'; text: string };
 
 export type ChatSuggestedChip = {
@@ -30,12 +31,15 @@ export function buildSuggestedReplies(input: {
   activeCategoryId?: string | null;
   /** When true, include a "Cómo pago" chip. */
   hasPaymentMethods?: boolean;
+  /** When true, include a "Ubicación" chip. */
+  hasBusinessLocation?: boolean;
 }): ChatSuggestedChip[] {
   const {
     catalog,
     cartCount,
     activeCategoryId = null,
     hasPaymentMethods = false,
+    hasBusinessLocation = false,
   } = input;
   const hasCart = cartCount > 0;
   const chips: ChatSuggestedChip[] = [];
@@ -48,6 +52,11 @@ export function buildSuggestedReplies(input: {
     id: 'payments',
     label: 'Cómo pago',
     action: { type: 'payments' },
+  };
+  const locationChip: ChatSuggestedChip = {
+    id: 'location',
+    label: 'Ubicación',
+    action: { type: 'location' },
   };
   const recommendChip: ChatSuggestedChip = {
     id: 'recommend',
@@ -75,16 +84,17 @@ export function buildSuggestedReplies(input: {
       chips.push(
         ...categories
           .filter((c) => c.id !== active.id)
-          .slice(0, hasPaymentMethods || hasCart ? 1 : 2)
+          .slice(0, hasPaymentMethods || hasBusinessLocation || hasCart ? 1 : 2)
           .map(catChip),
       );
+      if (hasBusinessLocation) chips.push(locationChip);
       if (hasPaymentMethods) chips.push(payChip);
       if (hasCart) chips.push(cartChip);
       chips.push(recommendChip);
     } else {
       chips.push(
         ...categories
-          .slice(0, hasCart || hasPaymentMethods ? 2 : 3)
+          .slice(0, hasCart || hasPaymentMethods || hasBusinessLocation ? 2 : 3)
           .map(catChip),
       );
       chips.push({
@@ -92,6 +102,7 @@ export function buildSuggestedReplies(input: {
         label: 'Ver menú',
         action: { type: 'catalog', categoryId: null },
       });
+      if (hasBusinessLocation) chips.push(locationChip);
       if (hasPaymentMethods) chips.push(payChip);
       if (hasCart) chips.push(cartChip);
       chips.push(recommendChip);
@@ -104,6 +115,7 @@ export function buildSuggestedReplies(input: {
     label: 'Ver menú',
     action: { type: 'text', text: 'Ver menú' },
   });
+  if (hasBusinessLocation) chips.push(locationChip);
   if (hasPaymentMethods) chips.push(payChip);
   chips.push(recommendChip);
   if (hasCart) chips.push(cartChip);

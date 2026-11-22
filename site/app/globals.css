@@ -740,6 +740,27 @@ select {
   transition: all 300ms ease;
 }
 
+/* Chat composer: never show the yellow/gold UA focus ring around the input pill. */
+[data-chat-composer-input-shell],
+[data-chat-composer-input-shell]:focus-within {
+  outline: none !important;
+  border: none !important;
+}
+#chatbot-composer-input,
+#chatbot-composer-input:focus,
+#chatbot-composer-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+#chatbot-composer-input:-webkit-autofill,
+#chatbot-composer-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--chat-text, inherit);
+  transition: background-color 99999s ease-out;
+  box-shadow: 0 0 0 1000px var(--chat-input, transparent) inset !important;
+}
+
 .checkout-phone-field .PhoneInput {
   display: flex;
   align-items: center;

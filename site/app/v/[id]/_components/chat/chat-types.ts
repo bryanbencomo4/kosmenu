@@ -129,8 +129,17 @@ export type ChatMessage = {
    */
   voicePending?: boolean;
   attachments?: ChatAttachment[];
-  /** Shared GPS for delivery (user-authorized). */
-  location?: { lat: number; lng: number; label?: string } | null;
+  /** Shared GPS pin (customer delivery or business location). */
+  location?: {
+    lat: number;
+    lng: number;
+    label?: string;
+    /** business = local pin; customer = delivery share. */
+    kind?: 'business' | 'customer';
+    address?: string | null;
+    mapsUrl?: string | null;
+    directionsUrl?: string | null;
+  } | null;
   productCards?: ChatProductCardData[];
   cartActions?: ChatCartActionData[];
   /** Category carousel rendered under the bubble. */

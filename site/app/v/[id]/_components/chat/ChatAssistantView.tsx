@@ -39,6 +39,10 @@ import {
 } from './ChatSuggestedReplies';
 import { findProductImageEl, flyToCart } from './chat-fly-to-cart';
 import {
+  matchLocationIntent,
+  type ChatBusinessLocation,
+} from './chat-location';
+import {
   matchPaymentIntent,
   type ChatPaymentMethod,
 } from './chat-payments';
@@ -106,6 +110,8 @@ type ChatAssistantViewProps = {
   catalog?: ChatCatalogSnapshot | null;
   /** Slim payment methods for "cómo pago" answers. */
   paymentMethods?: ChatPaymentMethod[];
+  /** Business GPS pin for "dónde están / cómo llego". */
+  businessLocation?: ChatBusinessLocation | null;
   cartCount: number;
   cartTotalLabel: string;
   /** Authoritative shared cart (same as PublicMenuPage). */
@@ -281,6 +287,7 @@ export function ChatAssistantView({
   initialLetter,
   catalog = null,
   paymentMethods = [],
+  businessLocation = null,
   cartCount,
   cartTotalLabel,
   cartSnapshot = [],
@@ -579,6 +586,47 @@ export function ChatAssistantView({
       return true;
     },
     [catalog, buildCategoryMessage, playAssistantReceivedOnce],
+  );
+
+  /** Deterministic "dónde están / cómo llego" → WhatsApp-like location pin. */
+  const answerLocationIntent = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!matchLocationIntent(text)) return false;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      if (!businessLocation) {
+        const empty = createMessage(
+          'assistant',
+          'Todavía no tengo el pin GPS del local publicado. Puedes preguntar por WhatsApp o buscar el nombre del restaurante en Maps.',
+        );
+        setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
+        playAssistantReceivedOnce(empty);
+        setIsTyping(false);
+        return true;
+      }
+      const reply = createMessage(
+        'assistant',
+        businessLocation.address
+          ? `Aquí tienes nuestra ubicación:\n${businessLocation.address}`
+          : 'Aquí tienes nuestra ubicación:',
+        {
+          location: {
+            lat: businessLocation.lat,
+            lng: businessLocation.lng,
+            label: businessLocation.label,
+            kind: 'business',
+            address: businessLocation.address,
+            mapsUrl: businessLocation.mapsUrl,
+            directionsUrl: businessLocation.directionsUrl,
+          },
+        },
+      );
+      setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
+      playAssistantReceivedOnce(reply);
+      setIsTyping(false);
+      return true;
+    },
+    [businessLocation, playAssistantReceivedOnce],
   );
 
   /** Deterministic "cómo pago / métodos de pago" → payment methods card. */
@@ -1005,8 +1053,9 @@ export function ChatAssistantView({
       });
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
-      // Local UX answers first (carousels / payment card), then Gemini.
+      // Local UX answers first (carousels / location pin / payment card), then Gemini.
       if (await answerCatalogIntent(text)) return;
+      if (await answerLocationIntent(text)) return;
       if (await answerPaymentIntent(text)) return;
       await runAssistantTurn(text, nextMessages);
     },
@@ -1016,6 +1065,7 @@ export function ChatAssistantView({
       replyTo,
       runAssistantTurn,
       answerCatalogIntent,
+      answerLocationIntent,
       answerPaymentIntent,
     ],
   );
@@ -1043,6 +1093,9 @@ export function ChatAssistantView({
           break;
         case 'payments':
           void sendText('Cómo pago');
+          break;
+        case 'location':
+          void sendText('Envíame la ubicación');
           break;
         case 'text':
           void sendText(action.text);
@@ -1168,6 +1221,10 @@ export function ChatAssistantView({
         setIsTyping(false);
         return;
       }
+      if (await answerLocationIntent(transcript)) {
+        setIsTyping(false);
+        return;
+      }
       if (await answerPaymentIntent(transcript)) {
         setIsTyping(false);
         return;
@@ -1182,6 +1239,7 @@ export function ChatAssistantView({
       runAssistantTurn,
       comercioId,
       answerCatalogIntent,
+      answerLocationIntent,
       answerPaymentIntent,
       playAssistantReceivedOnce,
     ],
@@ -1256,8 +1314,9 @@ export function ChatAssistantView({
         cartCount,
         activeCategoryId: messages[messages.length - 1]?.catalogCategoryId ?? null,
         hasPaymentMethods: paymentMethods.length > 0,
+        hasBusinessLocation: Boolean(businessLocation),
       }),
-    [catalog, cartCount, messages, paymentMethods.length],
+    [catalog, cartCount, messages, paymentMethods.length, businessLocation],
   );
 
   const shareLocation = useCallback(

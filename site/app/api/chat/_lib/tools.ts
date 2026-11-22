@@ -464,15 +464,35 @@ export function executeChatTool(
 
     case 'get_business_information': {
       const c = menu.comercio as Record<string, unknown>;
+      const lat = Number(c.latitud);
+      const lng = Number(c.longitud);
+      const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+      const addressParts = [c.direccion, c.ciudad]
+        .map((v) => (v == null ? '' : String(v).trim()))
+        .filter(Boolean);
+      const mapsQuery = hasCoords
+        ? `${lat},${lng}`
+        : addressParts.join(', ') || String(c.nombre ?? '');
       return {
         id: menu.resolvedComercioId,
         name: c.nombre ?? null,
         slug: c.slug ?? null,
-        address: c.direccion ?? null,
+        address: addressParts.join(', ') || null,
+        lat: hasCoords ? lat : null,
+        lng: hasCoords ? lng : null,
+        maps_url: mapsQuery
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}`
+          : null,
+        directions_url: mapsQuery
+          ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapsQuery)}`
+          : null,
         currency: c.moneda ?? 'USD',
         online: c.en_linea === true,
         hours: c.horarios ?? c.horario ?? null,
         whatsapp: c.whatsapp ?? null,
+        note: hasCoords
+          ? 'La UI puede mostrar el pin GPS. Responde breve y comparte maps_url; NUNCA digas que no puedes enviar ubicación.'
+          : 'No hay coordenadas GPS publicadas; da la dirección textual si existe.',
       };
     }
 
