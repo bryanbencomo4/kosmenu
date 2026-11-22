@@ -1,5 +1,6 @@
 'use client';
 
+import { ChevronsDown } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -52,6 +53,9 @@ type ChatMessageListProps = {
   onOpenImage?: (src: string, alt: string) => void;
   /** Pull-to-refresh at the very top (touch). Parent may no-op. */
   onRefresh?: () => void;
+  /** Avatar for incoming voice notes (business logo). */
+  voiceAvatarUrl?: string | null;
+  voiceAvatarLetter?: string;
 };
 
 export function ChatMessageList({
@@ -71,6 +75,8 @@ export function ChatMessageList({
   onOpenCheckout,
   onOpenImage,
   onRefresh,
+  voiceAvatarUrl = null,
+  voiceAvatarLetter = '?',
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +85,8 @@ export function ChatMessageList({
   const [visibleCount, setVisibleCount] = useState(CHAT_HISTORY_INITIAL_WINDOW);
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  /** Floating jump-to-latest control (WhatsApp-like). */
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
 
   /** True while the viewport is at / near the bottom (updated on scroll, pre-layout). */
   const nearBottomRef = useRef(true);
@@ -116,6 +124,8 @@ export function ChatMessageList({
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior });
     }
+    nearBottomRef.current = true;
+    setShowJumpLatest(false);
   }, []);
 
   // --- Bottom-first on mount / empty→nonempty / append ------------------------
@@ -211,8 +221,10 @@ export function ChatMessageList({
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    nearBottomRef.current =
+    const near =
       el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    nearBottomRef.current = near;
+    setShowJumpLatest(!near);
     if (
       el.scrollTop < LOAD_OLDER_THRESHOLD_PX &&
       hasOlder &&
@@ -360,6 +372,8 @@ export function ChatMessageList({
                 onSeeAllCatalog={onSeeAllCatalog}
                 onOpenCheckout={onOpenCheckout}
                 onOpenImage={onOpenImage}
+                voiceAvatarUrl={voiceAvatarUrl}
+                voiceAvatarLetter={voiceAvatarLetter}
               />
             );
           })}
@@ -394,6 +408,18 @@ export function ChatMessageList({
           <div ref={endRef} className="h-px w-full shrink-0" />
         </div>
       </div>
+
+      {showJumpLatest ? (
+        <button
+          type="button"
+          data-chat-jump-latest="1"
+          aria-label="Ir al mensaje más reciente"
+          onClick={() => scrollToEnd('smooth')}
+          className="absolute bottom-3 right-3 z-30 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-[var(--chat-text-muted)] shadow-md transition hover:bg-[color-mix(in_srgb,var(--chat-text)_6%,var(--chat-card))] active:scale-95"
+        >
+          <ChevronsDown className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+        </button>
+      ) : null}
     </div>
   );
 }

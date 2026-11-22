@@ -18,6 +18,7 @@ import { ChatPaymentMethodsCard } from './ChatPaymentMethodsCard';
 import { ChatProductCard } from './ChatProductCard';
 import { ChatProductCarousel } from './ChatProductCarousel';
 import { ChatReceiptTicks } from './ChatReceiptTicks';
+import { ChatVoiceNote } from './ChatVoiceNote';
 import { formatChatText } from './chat-format';
 import { staticMapPreviewUrl } from './chat-location';
 import {
@@ -207,6 +208,9 @@ type ChatMessageBubbleProps = {
   onOpenCheckout?: () => void;
   /** Full-screen image viewer (product / attachment / avatar). */
   onOpenImage?: (src: string, alt: string) => void;
+  /** Avatar for incoming WhatsApp-like voice notes. */
+  voiceAvatarUrl?: string | null;
+  voiceAvatarLetter?: string;
 };
 
 function formatChatTime(ts: number) {
@@ -219,14 +223,6 @@ function formatChatTime(ts: number) {
   } catch {
     return null;
   }
-}
-
-function formatDuration(ms?: number) {
-  if (!ms || ms <= 0) return '0:00';
-  const total = Math.round(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export function ChatMessageBubble({
@@ -244,6 +240,8 @@ export function ChatMessageBubble({
   onSeeAllCatalog,
   onOpenCheckout,
   onOpenImage,
+  voiceAvatarUrl = null,
+  voiceAvatarLetter = '?',
 }: ChatMessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -393,41 +391,15 @@ export function ChatMessageBubble({
             </div>
           ) : null}
           {hasVoice ? (
-            <div className="mb-1 min-w-[12rem]" data-chat-voice="1">
-              {message.voicePending ? (
-                <div
-                  className="flex min-h-9 w-full max-w-[16rem] items-center gap-2.5 rounded-lg bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] px-2.5 py-1.5"
-                  data-chat-voice-pending="1"
-                  role="status"
-                  aria-live="polite"
-                  aria-label="Procesando nota de voz"
-                >
-                  <span
-                    className="inline-block h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[var(--chat-text-muted)] border-t-[var(--chat-send)]"
-                    aria-hidden
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium leading-tight text-[var(--chat-text)]">
-                      Nota de voz
-                    </p>
-                    <p className="truncate text-[11px] leading-tight text-[var(--chat-text-muted)]">
-                      Procesando…
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <audio
-                    controls
-                    preload="metadata"
-                    src={message.voiceUrl || undefined}
-                    className="h-9 w-full max-w-[16rem]"
-                  />
-                  <p className="mt-0.5 text-[11px] text-[var(--chat-text-muted)]">
-                    Nota de voz · {formatDuration(message.voiceDurationMs)}
-                  </p>
-                </>
-              )}
+            <div className="mb-1">
+              <ChatVoiceNote
+                src={message.voiceUrl}
+                durationMs={message.voiceDurationMs}
+                pending={message.voicePending}
+                incoming={!isUser}
+                avatarUrl={voiceAvatarUrl}
+                avatarLetter={voiceAvatarLetter}
+              />
             </div>
           ) : null}
           {mediaAttachments.map((att) =>

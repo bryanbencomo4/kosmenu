@@ -1808,6 +1808,8 @@ export function ChatAssistantView({
         onOpenCheckout={onOpenCheckout}
         onOpenImage={openImage}
         onRefresh={refreshConversation}
+        voiceAvatarUrl={logoUrl}
+        voiceAvatarLetter={initialLetter}
       />
 
       <ChatSuggestedReplies
