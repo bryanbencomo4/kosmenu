@@ -375,11 +375,31 @@ class _ChatConversationDetailScreenState
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
+        SnackBar(content: Text(_friendlyActError(error))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  String _friendlyActError(Object error) {
+    final raw = error.toString();
+    if (raw.contains('human_takeover_disabled')) {
+      return 'La intervención humana está desactivada (feature flag).';
+    }
+    if (raw.contains('conflict')) {
+      return 'Otro empleado ya tomó esta conversación.';
+    }
+    if (raw.contains('not_assignee')) {
+      return 'Solo el responsable (o un administrador) puede responder.';
+    }
+    if (raw.contains('not_in_human_mode')) {
+      return 'Toma la conversación antes de escribir.';
+    }
+    if (raw.contains('supervision_disabled')) {
+      return 'La supervisión no está activa para este comercio.';
+    }
+    return raw;
   }
 
   String _roleLabel(String role) {

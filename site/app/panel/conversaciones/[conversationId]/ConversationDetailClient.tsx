@@ -181,7 +181,22 @@ function ConversationDetailInner({
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      setError(String(data.error || 'Acción fallida'));
+      const code = String(data.error || '');
+      const friendly: Record<string, string> = {
+        human_takeover_disabled:
+          'La intervención humana está desactivada (feature flag).',
+        conflict: 'Otro empleado ya tomó esta conversación.',
+        not_assignee: 'Solo el responsable (o un administrador) puede responder.',
+        not_in_human_mode: 'Toma la conversación antes de escribir.',
+        supervision_disabled: 'La supervisión no está activa para este comercio.',
+        unauthorized: 'Sesión expirada. Vuelve a iniciar sesión.',
+      };
+      setError(friendly[code] || code || 'Acción fallida');
+      if (res.status === 401) {
+        window.location.href = `/panel/login?next=${encodeURIComponent(
+          `/panel/conversaciones/${encodeURIComponent(conversationId)}`,
+        )}`;
+      }
       return;
     }
     setDraft('');

@@ -1,9 +1,10 @@
 # Informe — supervisión humana del chatbot
 
-**Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama; evidencias locales verdes; deep links WaSender → Flutter host.  
-**Veredicto:** **NO-GO** publicar. Migración no aplicada; WaSender real / piloto Trueno pendientes de tu autorización.  
-**Desbloqueo:** autorizar `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` → `site/scripts/apply-chat-supervision-migration.mjs` (prod). Matriz: `docs/chat-supervision-requirements-audit.md`.
+**Rama:** `feature/chat-supervision-human` (`952bb6f`+)  
+**Estado:** supervisión implementada en rama; evidencias locales verdes (dual 14/14, Vitest 13, tsc 0).  
+**Veredicto:** **NO-GO** publicar.  
+**Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE` para one-shot).  
+**Luego:** deploy/merge + flags Trueno + smoke real. Matriz: `docs/chat-supervision-requirements-audit.md`.
 
 ## 1. Arquitectura existente (auditoría)
 
