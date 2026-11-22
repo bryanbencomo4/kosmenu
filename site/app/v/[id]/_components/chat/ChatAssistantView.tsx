@@ -469,7 +469,7 @@ export function ChatAssistantView({
   const pendingConfigurationRef = useRef<PendingChatConfiguration | null>(null);
   pendingConfigurationRef.current = pendingConfiguration;
   /** Merchant is actively handling — skip expecting Gemini replies. */
-  const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
+  const [, setHumanSupervisionActive] = useState(false);
   /** Watch feed after server created a supervised conversation (idle takeover). */
   const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
   const supervisionAfterSeqRef = useRef(0);

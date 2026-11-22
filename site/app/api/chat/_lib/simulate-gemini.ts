@@ -66,7 +66,7 @@ export function runSimulatedChat(params: {
   const actions: ChatCartAction[] = [];
   const cards: ChatProductCard[] = [];
   let toolCalls = 0;
-  let pendingConfiguration: PendingCombinationConfig | null =
+  const pendingConfiguration: PendingCombinationConfig | null =
     params.pendingConfiguration || null;
 
   const pushReady = (input: {

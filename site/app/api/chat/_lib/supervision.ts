@@ -173,9 +173,6 @@ export async function persistConsumerTurn(
           unread_merchant_count: 1,
         });
       } else {
-        const lastAt = conversation.last_message_at
-          ? new Date(conversation.last_message_at).getTime()
-          : 0;
         const wasClosed = conversation.status === 'closed';
         if (wasClosed) isNewConversation = true;
         const nextStatus = detectNeedsHuman(input.text)
