@@ -14,10 +14,19 @@
 
 **Obligatorio antes del piloto con `CHAT_SUPERVISION_WASENDER=1`:** fijar `branding_ia.config_negocio.supervision_whatsapp` al número autorizado para avisos (puede diferir del WhatsApp público del menú). Sin esa preferencia (o `notify_whatsapp` / `whatsapp_avisos`), la notificación se marca `skipped` / `no_supervision_whatsapp`.
 
+## Preflight (siempre primero)
+
+```powershell
+node site/scripts/chat-supervision-preflight.mjs
+# opcional: sondear si el panel ya está desplegado
+$env:BASE_URL='https://elmenuxfa.com'; node site/scripts/chat-supervision-preflight.mjs
+```
+
 ## Orden seguro
 
 **Nota (evidencia read-only 2026-11-22):** prod tiene `comercio_members` + WaSender RPC; `chat_*` = **null**. Preview **no** sirve (sin `comercio_members`). Piloto = **prod** + flags Trueno.  
-`elmenuxfa.com/api/panel/conversaciones` aún **404** hasta merge/deploy de esta rama.
+`elmenuxfa.com/api/panel/conversaciones` aún **404** hasta merge/deploy de esta rama.  
+HEAD de trabajo: `feature/chat-supervision-human` (CI verde).
 
 1. Autorizar en el chat la frase exacta: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`
 2. (Recomendado) Activación one-shot schema + readiness:

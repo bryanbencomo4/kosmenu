@@ -1,10 +1,11 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **19/19**, Vitest **16**, tsc 0, CI verde).  
+**Estado:** supervisión implementada en rama `feature/chat-supervision-human` @ `f1e315e`; evidencias locales verdes (dual **19/19**, Vitest **16**, tsc 0, Site CI **SUCCESS**).  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
+**Preflight:** `node site/scripts/chat-supervision-preflight.mjs` (read-only).  
 **Luego:** deploy/merge + flags Trueno + smoke real. Matriz: `docs/chat-supervision-requirements-audit.md`.
 
 ## 1. Arquitectura existente (auditoría)
@@ -102,18 +103,18 @@ Objetivo 1–2s en red controlada tras Realtime publicado. Medición de carga ag
 
 ## 16. Vitest
 
-Supervisión: **10 passed** (helpers, memoria, privacy, backoff notify).
+Supervisión: **16 passed** (helpers, memoria, privacy, backoff notify, flags, reopen).
 
 ## 17. TypeScript
 
-`npx tsc --noEmit` — **exit 0**.
+`npx tsc --noEmit` — **exit 0**. Site CI typecheck/test **SUCCESS** on `f1e315e`.
 
 ## 18. Playwright dual
 
 `site/scripts/chat-supervision-dual-playwright.mjs` — dos contextos + UI panel.
 
-**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **14/14 passed**  
-incluye takeover UI, mensaje staff UI, feed consumidor con sesión correcta, aislamiento de sesión, return/close.  
+**Ejecutado localmente** (`127.0.0.1:3010`, memoria E2E, WaSender off): **19/19 passed**  
+incluye takeover UI, mensaje staff UI, feed consumidor, aislamiento de sesión, return/close, reopen, conflicto 409 dos empleados.  
 **No corre contra producción.**
 
 ## 19. Migraciones
@@ -158,9 +159,11 @@ Criterio principal (abrir enlace → historial → intervenir → devolver) veri
 1. Autorización para aplicar `20261123090000_chat_supervision_conversations.sql` (+ publication Realtime) — readiness read-only **SCHEMA_NOT_READY** (`chat_*` null, `take_rpc=false`; `comercio_members` + WaSender OK; Trueno `whatsapp=+584140821633`, sin `supervision_whatsapp`).
 2. Autorización de **deploy/merge** de esta rama: `elmenuxfa.com/api/panel/conversaciones` hoy responde **404**.
 3. Smoke con persistencia Supabase real (`chat-supervision-post-migration-smoke.mjs`: takeover → Gemini paused → staff → return → Gemini resumed → close).
-4. Dual MEMORY local **14/14** (último reinicio 3010). `HUMAN_TAKEOVER` gatea take/return/message (403 si off).
+4. Dual MEMORY local **19/19**. `HUMAN_TAKEOVER` gatea take/return/message (403 si off) en Next + Flutter.
 5. Aviso WaSender real + preferir `supervision_whatsapp` dedicado.
-6. Activación Trueno: `docs/chat-supervision-activation-trueno.md`.
+6. Activación Trueno: `docs/chat-supervision-activation-trueno.md` + `chat-supervision-preflight.mjs`.
+
+Readiness prod (2026-11-22, read-only): `chat_*` **null**, `take_rpc=false`, `comercio_members`+WaSender OK, Trueno `supervision_whatsapp` **MISSING**.
 
 Sin esos pasos el comerciante no puede supervisar conversaciones reales.  
 No hay merge ni deploy a producción sin tu autorización.  
