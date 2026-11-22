@@ -4,6 +4,7 @@ import {
   didEscalateToNeedsAttention,
   hashConsumerSession,
   merchantConversationHref,
+  newConversationNotifyDedupeKey,
   nextSupervisionRetryAt,
   pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
@@ -165,6 +166,19 @@ describe('chat supervision helpers', () => {
     expect(w).toMatch(/procesada por IA/i);
   });
 
+  it('versions new-conversation notify dedupe keys for reopen', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(newConversationNotifyDedupeKey(id, 1)).toBe(
+      `chat_supervision:new:${id}:v1`,
+    );
+    expect(newConversationNotifyDedupeKey(id, 2)).toBe(
+      `chat_supervision:new:${id}:v2`,
+    );
+    expect(newConversationNotifyDedupeKey(id, 1)).not.toBe(
+      newConversationNotifyDedupeKey(id, 2),
+    );
+  });
+
   it('blocks E2E panel bearer on production hosts', () => {
     expect(resolveE2ePanelBearer('e2e-token', '127.0.0.1')).toBe('e2e-token');
     expect(resolveE2ePanelBearer('e2e-token', 'localhost')).toBe('e2e-token');
@@ -252,17 +266,25 @@ describe('chat supervision memory store', () => {
       conversation_id: conv.id,
       comercio_id: COMERCIO,
       event_type: 'new_conversation',
-      dedupe_key: `chat_supervision:new:${conv.id}`,
+      dedupe_key: newConversationNotifyDedupeKey(conv.id, 1),
     });
     const e2 = memoryInsertEvent({
       conversation_id: conv.id,
       comercio_id: COMERCIO,
       event_type: 'new_conversation',
-      dedupe_key: `chat_supervision:new:${conv.id}`,
+      dedupe_key: newConversationNotifyDedupeKey(conv.id, 1),
     });
     expect(e1.ok).toBe(true);
     expect(e2.ok).toBe(false);
     expect(memoryListEvents()).toHaveLength(1);
+    const e3 = memoryInsertEvent({
+      conversation_id: conv.id,
+      comercio_id: COMERCIO,
+      event_type: 'new_conversation',
+      dedupe_key: newConversationNotifyDedupeKey(conv.id, 2),
+    });
+    expect(e3.ok).toBe(true);
+    expect(memoryListEvents()).toHaveLength(2);
   });
 
   it('atomic takeover and return; discards AI after version bump', () => {

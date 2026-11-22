@@ -19,6 +19,7 @@ import {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
   shouldRetrySupervisionNotify,
@@ -40,6 +41,7 @@ export {
   hashConsumerSession,
   merchantConversationHref,
   nextSupervisionRetryAt,
+  newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
@@ -120,9 +122,10 @@ export async function shouldSkipGemini(
   if (!conversation) return { skip: false, conversation: null };
   const cfg = getChatSupervisionConfig();
   if (!cfg.humanTakeover) return { skip: false, conversation };
-  const skip =
-    conversation.status === 'human_handling' ||
-    conversation.status === 'closed';
+  // Only pause Gemini while a human owns the thread. Closed threads reopen on
+  // the next consumer message (persistConsumerTurn); skipping here would show
+  // a false "staff is attending" handoff after archive.
+  const skip = conversation.status === 'human_handling';
   return { skip, conversation };
 }
 
@@ -185,6 +188,12 @@ export async function persistConsumerTurn(
         });
       } else {
         const wasClosed = conversation.status === 'closed';
+        const lastAt = conversation.last_message_at
+          ? new Date(conversation.last_message_at).getTime()
+          : 0;
+        const idleReopen =
+          wasClosed || (lastAt > 0 && now.getTime() - lastAt > reopenMs);
+        // Re-notify only after an explicit close (not mere idle), once per reopen.
         if (wasClosed) isNewConversation = true;
         const nextStatus = detectNeedsHuman(input.text)
           ? 'needs_attention'
@@ -206,7 +215,7 @@ export async function persistConsumerTurn(
                 }
               : {}),
           }) || conversation;
-        void reopenMs;
+        void idleReopen;
       }
       const clientMessageId =
         (input.clientMessageId || '').trim() ||
@@ -227,6 +236,7 @@ export async function persistConsumerTurn(
           conversationId: conversation.id,
           comercioId: input.comercioId,
           commerceName: input.commerceName,
+          attentionVersion: conversation.attention_version,
         }).catch(() => {});
       } else if (
         cfg.wasenderNotify &&
@@ -366,6 +376,7 @@ export async function persistConsumerTurn(
         conversationId,
         comercioId: input.comercioId,
         commerceName: input.commerceName,
+        attentionVersion: Number(conversation!.attention_version || 1),
       }).catch(() => {});
     } else if (
       cfg.wasenderNotify &&
@@ -594,10 +605,17 @@ async function enqueueNewConversationNotify(input: {
   conversationId: string;
   comercioId: string;
   commerceName: string;
+  /** Bumped on reopen after close so a second WaSender alert is allowed. */
+  attentionVersion?: number;
 }) {
   const cfg = getChatSupervisionConfig();
   if (!cfg.wasenderNotify) return;
-  const dedupeKey = `chat_supervision:new:${input.conversationId}`;
+  // Include attention version so reopen-after-close can notify again without
+  // colliding with the original unique dedupe_key for this conversation.
+  const dedupeKey = newConversationNotifyDedupeKey(
+    input.conversationId,
+    input.attentionVersion,
+  );
 
   if (isSupervisionMemoryEnabled()) {
     const inserted = memoryInsertEvent({

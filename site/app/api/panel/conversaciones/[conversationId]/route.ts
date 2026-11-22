@@ -236,15 +236,26 @@ export async function POST(
   }
 
   if (action === 'close') {
+    const closeVersion = Number(conversation.attention_version || 1) + 1;
     if (isSupervisionMemoryEnabled()) {
       const data = memoryUpdateConversation(conversationId, {
         status: 'closed',
         closed_at: new Date().toISOString(),
-        attention_version: Number(conversation.attention_version || 1) + 1,
+        attention_version: closeVersion,
+        assigned_user_id: null,
+        assigned_at: null,
       });
       if (!data) {
         return NextResponse.json({ error: 'close_failed' }, { status: 503 });
       }
+      await persistAssistantOrStaffMessage({
+        conversationId,
+        comercioId: access.comercioId,
+        role: 'system',
+        text: 'Esta conversación fue archivada por el restaurante. Si escribes de nuevo, el asistente virtual te atenderá.',
+        senderUserId: access.user.id,
+        clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
+      });
       return NextResponse.json({ ok: true, conversation: data, memory: true });
     }
     const { data, error } = await sb!
@@ -252,7 +263,9 @@ export async function POST(
       .update({
         status: 'closed',
         closed_at: new Date().toISOString(),
-        attention_version: Number(conversation.attention_version || 1) + 1,
+        attention_version: closeVersion,
+        assigned_user_id: null,
+        assigned_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId)
@@ -262,6 +275,14 @@ export async function POST(
     if (error) {
       return NextResponse.json({ error: 'close_failed' }, { status: 503 });
     }
+    await persistAssistantOrStaffMessage({
+      conversationId,
+      comercioId: access.comercioId,
+      role: 'system',
+      text: 'Esta conversación fue archivada por el restaurante. Si escribes de nuevo, el asistente virtual te atenderá.',
+      senderUserId: access.user.id,
+      clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
+    });
     void publishConversationEvent(access.comercioId, conversationId, {
       type: 'status_changed',
       status: 'closed',

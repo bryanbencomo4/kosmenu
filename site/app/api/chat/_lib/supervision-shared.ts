@@ -121,6 +121,15 @@ export const PLATFORM_SUPPORT_WHATSAPP_DIGITS = '584220451906';
  * diners, not staff alerts. Set config_negocio.supervision_whatsapp (preferred)
  * or notify_whatsapp / whatsapp_avisos.
  */
+/** Idempotent WaSender key; version rises when a closed thread is reopened. */
+export function newConversationNotifyDedupeKey(
+  conversationId: string,
+  attentionVersion = 1,
+) {
+  const version = Math.max(1, Number(attentionVersion) || 1);
+  return `chat_supervision:new:${conversationId}:v${version}`;
+}
+
 export function pickSupervisionNotifyPhone(
   configNegocio: Record<string, unknown> | null | undefined,
 ): string | null {

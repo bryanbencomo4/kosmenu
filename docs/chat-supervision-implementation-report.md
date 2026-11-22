@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **16/16** incl. `gemini_resumed` + latencia staff≤2s, Vitest **15**, tsc 0).  
+**Estado:** supervisión implementada en rama; evidencias locales verdes (dual **17/17** incl. reopen tras cerrar, Vitest **16**, tsc 0).  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
@@ -69,7 +69,7 @@ Modo `CHAT_SUPERVISION_MEMORY=1` permite probar sin migración.
 
 ## 8. Notificación una sola vez
 
-`dedupe_key = chat_supervision:new:{conversationId}` (unique). Apertura de página / welcome no dispara persistencia.
+`dedupe_key = chat_supervision:new:{conversationId}:v{attentionVersion}` (unique; reapertura tras cerrar usa nueva versión). Apertura de página / welcome no dispara persistencia. `closed` ya no pausa Gemini (solo `human_handling`).
 
 ## 9–11. Takeover / staff / return
 

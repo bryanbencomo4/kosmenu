@@ -338,6 +338,30 @@ async function main() {
       fail('close_conversation', closed.text.slice(0, 200));
     }
 
+    // After archive, next consumer message must reopen + resume assistant (not human_handoff).
+    const afterClose = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        messages: [{ role: 'user', text: 'Hola de nuevo, ¿siguen abiertos?' }],
+      }),
+    });
+    const afterCloseModel = String(afterClose.json?.model || '');
+    const afterCloseReply = String(afterClose.json?.reply || '');
+    if (
+      afterClose.res.ok &&
+      afterCloseModel !== 'human_handoff' &&
+      afterCloseReply.trim().length > 0
+    ) {
+      ok('reopen_after_close', afterCloseModel || 'ok');
+    } else {
+      fail(
+        'reopen_after_close',
+        `${afterClose.res.status} model=${afterCloseModel} ${afterCloseReply.slice(0, 120)}`,
+      );
+    }
+
     // Cross-commerce denial
     const other = await api(
       `/api/panel/conversaciones?comercioId=00000000-0000-4000-8000-000000000099`,
