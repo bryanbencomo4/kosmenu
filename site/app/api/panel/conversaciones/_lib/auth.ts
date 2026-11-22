@@ -28,7 +28,10 @@ function tryE2eAccess(
   const token = auth.toLowerCase().startsWith('bearer ')
     ? auth.slice(7).trim()
     : '';
-  if (!token || token !== expected) return null;
+  // Primary bearer, or `${bearer}:b` for a second employee (concurrency tests).
+  const isPrimary = token === expected;
+  const isSecondary = token === `${expected}:b`;
+  if (!token || (!isPrimary && !isSecondary)) return null;
   const pinned = (process.env.CHAT_SUPERVISION_E2E_COMERCIO_ID || '').trim();
   const requested = comercioId.trim();
   // When a commerce is pinned for e2e, reject other commerce IDs.
@@ -37,13 +40,19 @@ function tryE2eAccess(
   }
   const id = requested || pinned;
   if (!id) return null;
-  const userId =
+  const primaryUserId =
     (process.env.CHAT_SUPERVISION_E2E_USER_ID || '').trim() ||
     '00000000-0000-4000-8000-0000000000e2';
+  const secondaryUserId =
+    (process.env.CHAT_SUPERVISION_E2E_USER_ID_B || '').trim() ||
+    '00000000-0000-4000-8000-0000000000e3';
+  const userId = isSecondary ? secondaryUserId : primaryUserId;
   return {
     user: {
       id: userId,
-      email: 'e2e-supervision@elmenuxfa.local',
+      email: isSecondary
+        ? 'e2e-supervision-b@elmenuxfa.local'
+        : 'e2e-supervision@elmenuxfa.local',
       app_metadata: {},
       user_metadata: {},
       aud: 'authenticated',

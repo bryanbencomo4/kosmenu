@@ -1038,6 +1038,7 @@ export function ChatComposer({
               </label>
               <textarea
                 id="chatbot-composer-input"
+                data-testid="chat-composer-input"
                 ref={textareaRef}
                 rows={1}
                 value={value}
@@ -1133,6 +1134,7 @@ export function ChatComposer({
                 key="send"
                 type="submit"
                 disabled={!canSend}
+                data-testid="chat-composer-send"
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--chat-send)]"
                 style={{ backgroundColor: 'var(--chat-send)' }}
                 aria-label="Enviar mensaje"

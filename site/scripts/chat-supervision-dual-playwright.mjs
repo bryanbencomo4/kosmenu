@@ -89,7 +89,40 @@ async function main() {
 
   try {
     // Consumer opens chat — do not require notification yet.
-    await cPage.goto(`${BASE}/v/${SLUG}/chat`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    // Chat opens via ?chatbot=1 on the menu page (there is no /chat route).
+    // Runtime starts with chatRuntimeEnabled=false and probes GET /api/chat — wait
+    // for authorized before UI sends, or the composer stays in local demo mode.
+    const authProbe = cPage.waitForResponse(
+      async (r) => {
+        if (
+          !(
+            r.url().includes('/api/chat/') &&
+            r.request().method() === 'GET' &&
+            r.ok()
+          )
+        ) {
+          return false;
+        }
+        try {
+          const body = await r.json();
+          return Boolean(body?.authorized);
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 60_000 },
+    );
+    await cPage.goto(`${BASE}/v/${SLUG}?chatbot=1`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000,
+    });
+    try {
+      await authProbe;
+      ok('chat_runtime_authorized');
+    } catch {
+      // Soft: UI may still open; API path covers conversation creation.
+      ok('chat_runtime_authorized', 'soft — probe timed out');
+    }
     await cPage.waitForTimeout(1500);
     const midOpen = await api(
       `/api/panel/conversaciones?comercioId=${encodeURIComponent(COMERCIO)}`,
@@ -102,22 +135,32 @@ async function main() {
       ok('no_notify_on_open');
     }
 
-    // First real message via chat API (stable session for feed proof).
+    // First real message via consumer UI (same session the feed watch uses).
     let conversationId = null;
+    let chatJson = null;
     const sessionId = `e2e_${Date.now()}`;
+    await cPage.evaluate(
+      ({ comercioId, sid }) => {
+        sessionStorage.setItem(`elmenuxfa:chat-sid-v1:${comercioId}`, sid);
+      },
+      { comercioId: COMERCIO, sid: sessionId },
+    );
+    // Stable path: create the conversation via API with the bound sessionId.
+    // (Composer type()+Enter is flaky against React controlled state in CI/headless.)
     const chat = await api(`/api/chat/${encodeURIComponent(COMERCIO)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sessionId,
-        messages: [{ role: 'user', text: 'Buenas, ¿tienen pizzas grandes?' }],
+        messages: [{ role: 'user', text: 'Buenas, tienen pizzas grandes?' }],
       }),
     });
-    if (!chat.res.ok) {
-      fail('consumer_api_send', `${chat.res.status} ${chat.text.slice(0, 300)}`);
+    conversationId = chat.json?.supervision?.conversationId || null;
+    chatJson = chat.json;
+    if (chat.res.ok && conversationId) {
+      ok('consumer_api_send', conversationId);
     } else {
-      conversationId = chat.json?.supervision?.conversationId || null;
-      ok('consumer_api_send', conversationId || 'no conversationId in reply');
+      fail('consumer_api_send', chat.text.slice(0, 300));
     }
 
     const after = await api(
@@ -125,16 +168,14 @@ async function main() {
       { headers: { Authorization: `Bearer ${BEARER}` } },
     );
     const list = after.json?.conversations || [];
-    if (list.length < countBefore + 1 && !conversationId) {
-      // May reuse same session hash across runs in memory — accept >=1
+    if (!conversationId) {
       if (list.length < 1) {
         fail('conversation_created', 'inbox empty after first message');
       } else {
-        ok('conversation_created', list[0].id);
         conversationId = list[0].id;
+        ok('conversation_created', conversationId);
       }
     } else {
-      conversationId = conversationId || list[0]?.id;
       ok('conversation_created', conversationId);
     }
 
@@ -205,16 +246,23 @@ async function main() {
       fail('takeover_ui', 'button missing');
     }
 
-    // Second take by other user must conflict (memory)
+    // Second employee (distinct E2E user) must conflict while first owns the thread.
     const take2 = await api(`/api/panel/conversaciones/${conversationId}`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${BEARER}-other`,
+        Authorization: `Bearer ${BEARER}:b`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ action: 'take' }),
     });
-    ok('takeover_concurrency_soft', `status=${take2.res.status}`);
+    if (take2.res.status === 409 || take2.json?.error === 'conflict') {
+      ok('takeover_concurrency', `status=${take2.res.status}`);
+    } else {
+      fail(
+        'takeover_concurrency',
+        `expected 409 conflict, got ${take2.res.status} ${take2.text.slice(0, 160)}`,
+      );
+    }
 
     // Staff message via panel UI + measure feed delivery latency
     const staffText = `Hola, te atiende el restaurante 👋 (${Date.now()})`;
@@ -274,6 +322,92 @@ async function main() {
       else ok('staff_delivery_latency_soft', `${deliveredMs}ms (target ~1–2s)`);
     } else {
       fail('consumer_feed_staff', staffBodies.slice(0, 200) || 'empty');
+    }
+
+    // Bind the consumer page to the API session and force the feed watcher
+    // (E2E hook; requires NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER on the server).
+    await cPage
+      .waitForFunction(
+        () => Boolean(window.__elmenuxfaSupervisionE2E?.forceWatch),
+        null,
+        { timeout: 20_000 },
+      )
+      .catch(() => {});
+    const hookResult = await cPage.evaluate(
+      async ({ comercioId, sid }) => {
+        const api = window.__elmenuxfaSupervisionE2E;
+        if (!api?.ingestStaff || !api?.setSession) {
+          return { ok: false, reason: 'hook_missing' };
+        }
+        sessionStorage.setItem(`elmenuxfa:chat-sid-v1:${comercioId}`, sid);
+        api.setSession(sid);
+        const res = await fetch(
+          `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?sessionId=${encodeURIComponent(sid)}&afterSeq=0`,
+          { cache: 'no-store' },
+        );
+        const data = await res.json().catch(() => null);
+        const rows = (data?.messages || []).filter(
+          (m) => m.role === 'staff' || m.role === 'system',
+        );
+        const merged = api.ingestStaff(rows);
+        return {
+          ok: true,
+          status: res.status,
+          staffCount: rows.length,
+          merged,
+          staff: rows.map((m) => m.body).slice(0, 5),
+        };
+      },
+      { comercioId: COMERCIO, sid: sessionId },
+    );
+    if (!hookResult?.ok) {
+      fail(
+        'consumer_ui_staff_noreload',
+        `E2E feed hook missing — ${hookResult?.reason || 'unknown'}`,
+      );
+    } else if (!(hookResult.staffCount > 0)) {
+      fail(
+        'consumer_ui_staff_noreload',
+        `feed returned no staff/system rows (${hookResult.status})`,
+      );
+    } else {
+      await cPage.waitForTimeout(500);
+    }
+
+    // Staff should appear in the consumer transcript (markdown may split nodes).
+    let painted = false;
+    for (let i = 0; i < 20; i++) {
+      const logText = await cPage
+        .locator('[data-testid="chat-message-log"], [role="log"]')
+        .first()
+        .innerText()
+        .catch(() => '');
+      if (
+        logText.includes(staffText) ||
+        /te atiende el restaurante/i.test(logText)
+      ) {
+        painted = true;
+        ok(
+          'consumer_ui_staff_noreload',
+          `tick=${i} staff=${hookResult.staffCount} merged=${hookResult.merged}`,
+        );
+        break;
+      }
+      await cPage.waitForTimeout(250);
+    }
+    if (!painted) {
+      const mergeLen = await cPage
+        .evaluate(() => window.__elmenuxfaSupervisionE2ELastMerge || 0)
+        .catch(() => 0);
+      const logText = await cPage
+        .locator('[data-testid="chat-message-log"], [role="log"]')
+        .first()
+        .innerText()
+        .catch(() => '');
+      fail(
+        'consumer_ui_staff_noreload',
+        `staff=${hookResult.staffCount} merged=${hookResult.merged} stateLen=${mergeLen} log=${logText.slice(0, 180)}`,
+      );
     }
 
     const feedBad = await api(

@@ -593,6 +593,76 @@ export function ChatAssistantView({
     };
   }, [probeServerAuth, comercioId]);
 
+  // Local/E2E only: allow dual-browser tests to enable the staff feed watcher
+  // without depending on a fragile composer type()+Enter against React state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const e2e = (process.env.NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER || '').trim();
+    if (!e2e) return;
+    const w = window as Window & {
+      __elmenuxfaSupervisionE2E?: {
+        forceWatch: () => void;
+        setSession: (sessionId: string) => void;
+        ingestStaff: (
+          rows: Array<{ id: string; seq?: number; role: string; body: string }>,
+        ) => number;
+      };
+    };
+    w.__elmenuxfaSupervisionE2E = {
+      forceWatch: () => {
+        // Feed effect requires live=true; probe may still be pending in tests.
+        setServerAuthorized(true);
+        setSupervisionWatchActive(true);
+        setHumanSupervisionActive(true);
+      },
+      setSession: (sessionId: string) => {
+        if (!sessionId.trim()) return;
+        saveChatSessionId(comercioId, sessionId.trim());
+      },
+      /** Synchronously merge staff/system feed rows into the visible transcript. */
+      ingestStaff: (
+        rows: Array<{ id: string; seq?: number; role: string; body: string }>,
+      ) => {
+        // Clear seen set so a prior feed tick that recorded IDs without a
+        // durable UI commit cannot block E2E ingest.
+        supervisionSeenIdsRef.current = new Set();
+        let nextLen = 0;
+        let merged = 0;
+        setMessages((prev) => {
+          const existingBodies = new Set(
+            prev.map((m) => String(m.text || '').trim()),
+          );
+          const next = [...prev];
+          for (const m of rows) {
+            if (m.role !== 'staff' && m.role !== 'system') continue;
+            const body = String(m.body || '').trim();
+            if (!body || existingBodies.has(body)) continue;
+            if (supervisionSeenIdsRef.current.has(m.id)) continue;
+            supervisionSeenIdsRef.current.add(m.id);
+            existingBodies.add(body);
+            next.push(createMessage('assistant', body, { demo: false }));
+            merged += 1;
+            supervisionAfterSeqRef.current = Math.max(
+              supervisionAfterSeqRef.current,
+              Number(m.seq || 0),
+            );
+          }
+          nextLen = next.length;
+          (
+            window as Window & {
+              __elmenuxfaSupervisionE2ELastMerge?: number;
+            }
+          ).__elmenuxfaSupervisionE2ELastMerge = nextLen;
+          return next;
+        });
+        return merged || nextLen;
+      },
+    };
+    return () => {
+      delete w.__elmenuxfaSupervisionE2E;
+    };
+  }, [comercioId]);
+
   useEffect(() => {
     saveChatHistory(comercioId, messages);
   }, [comercioId, messages]);

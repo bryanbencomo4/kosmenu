@@ -335,6 +335,7 @@ export function ChatMessageList({
         role="log"
         aria-live="polite"
         aria-relevant="additions"
+        data-testid="chat-message-log"
         data-chat-scroll="1"
         data-chat-history-window={visibleCount}
         data-chat-history-more={hasOlder ? '1' : '0'}
