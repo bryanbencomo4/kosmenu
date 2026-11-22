@@ -2,7 +2,7 @@
 
 **Rama:** `feature/chat-supervision-human`  
 **Fecha evidencia:** 2026-11-22  
-**Veredicto:** **NO-GO** (migración remota no aplicada; sin smoke Supabase real ni WaSender real)
+**Veredicto:** **NO-GO** (migración remota no aplicada; sin smoke Supabase real ni WaSender real). Preflight: `node site/scripts/chat-supervision-preflight.mjs`.
 
 Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 
