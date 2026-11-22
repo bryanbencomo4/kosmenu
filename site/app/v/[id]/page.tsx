@@ -66,8 +66,18 @@ import {
   parseKioskHomeConfig,
   shouldForceCatalogModeFromQuery,
 } from '../../_lib/kiosk-home-config';
+import {
+  isChatbotPreviewEnabled,
+  shouldOpenChatbotFromQuery,
+} from '../../_lib/chatbot-preview';
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
+import { ChatAssistantView } from './_components/chat/ChatAssistantView';
+import { ChatModeSwitcher } from './_components/chat/ChatModeSwitcher';
+import type {
+  ChatAppliedAddNotice,
+  ChatCartActionData,
+} from './_components/chat/chat-types';
 import { parseDeliveryConfig, pointInPolygon, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   cashTenderValidity,
@@ -1958,6 +1968,19 @@ export default function PublicMenuPage() {
     modo: searchParams.get('modo'),
     qr: searchParams.get('qr'),
   });
+  const chatbotPreviewEnabled = isChatbotPreviewEnabled();
+  const chatbotDecision = shouldOpenChatbotFromQuery({
+    chatbot: searchParams.get('chatbot'),
+    mode: searchParams.get('mode'),
+    catalogForced: catalogFromUrl,
+    previewEnabled: chatbotPreviewEnabled,
+  });
+  const isChatbotMode = chatbotDecision.open;
+  const [chatIncomingProposal, setChatIncomingProposal] =
+    useState<ChatCartActionData | null>(null);
+  const [chatAppliedNotice, setChatAppliedNotice] =
+    useState<ChatAppliedAddNotice | null>(null);
+  const chatSheetAddLockRef = useRef(false);
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
@@ -5909,6 +5932,37 @@ export default function PublicMenuPage() {
     setIsConfirmOpen(true);
   }
 
+  /** Toggle assistant preview via ?chatbot=1 without dropping other query params. */
+  function setChatbotMode(enabled: boolean) {
+    if (enabled && !chatbotPreviewEnabled) return;
+    if (enabled && (isAssistedMode || catalogFromUrl)) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (enabled) {
+      params.set('chatbot', '1');
+    } else {
+      params.delete('chatbot');
+    }
+    const query = params.toString();
+    const href = `${pathname}${query ? `?${query}` : ''}`;
+    router.replace(href, { scroll: false });
+  }
+
+  function openChatbotFromMenu() {
+    setChatbotMode(true);
+  }
+
+  function openTraditionalMenuFromChat() {
+    setChatbotMode(false);
+  }
+
+  function openSharedCartFromChat() {
+    if (cartCount <= 0) {
+      openTraditionalMenuFromChat();
+      return;
+    }
+    openCheckoutSheet();
+  }
+
   function cartLinesForPreCheckoutUpsell(
     extra?: { productId: string; categoryId?: string | null },
   ) {
@@ -7074,7 +7128,115 @@ export default function PublicMenuPage() {
             Vista previa. Este menú aún no está publicado.
           </div>
         ) : null}
-        {catalogReady ? (
+        {isChatbotMode ? (
+          <ChatAssistantView
+            comercioId={resolvedComercioId || String(menuData.comercio.slug || commerceIdentifier)}
+            businessName={comercioNombre}
+            logoUrl={comercioLogoUrl || null}
+            initialLetter={comercioInitialLetter}
+            cartCount={cartCount}
+            cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
+            cartSnapshot={cartItems.map((item) => ({
+              productId: item.product.id,
+              quantity: item.quantity,
+              selection: item.selection,
+            }))}
+            // UI may probe /api/chat/:id; server authorization is independent of NEXT_PUBLIC_*.
+            chatRuntimeEnabled={false}
+            probeServerAuth
+            whatsappUrl={
+              whatsappNumber ? buildWhatsAppHref(whatsappNumber) : null
+            }
+            onOpenMenu={openTraditionalMenuFromChat}
+            onOpenCart={openSharedCartFromChat}
+            onOpenCheckout={() => {
+              openTraditionalMenuFromChat();
+              openCheckoutSheet();
+            }}
+            onShareLocationForDelivery={(location) => {
+              if (supportsDelivery) {
+                setDeliveryMode('delivery');
+                setKioskFulfillment('delivery');
+                try {
+                  window.sessionStorage.setItem(
+                    `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+                    'delivery',
+                  );
+                } catch {
+                  /* ignore */
+                }
+                setDeliveryPoint({ lat: location.lat, lng: location.lng });
+                setDeliveryPointSource('user');
+                setDeliveryAddress(
+                  location.label?.trim() ||
+                    `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
+                );
+              }
+              openTraditionalMenuFromChat();
+              openCheckoutSheet();
+            }}
+            incomingProposal={chatIncomingProposal}
+            onIncomingProposalConsumed={() => setChatIncomingProposal(null)}
+            incomingAppliedNotice={chatAppliedNotice}
+            onIncomingAppliedNoticeConsumed={() => setChatAppliedNotice(null)}
+            onConfigureProduct={(productId) => {
+              // Stay in chat — ProductOptionsSheet overlays the conversation.
+              setProductOptionsSheet({ open: true, productId });
+            }}
+            onAddSimpleProduct={(productId) => {
+              handleAddToCartFromGrid(productId);
+            }}
+            onApplyCartAction={(action) => {
+              if (action.type === 'propose_add') {
+                const product = productById.get(action.product_id);
+                if (!product || product.disponible === false) return false;
+                if (validateOptionGroupSelection(product, action.selection).length) {
+                  return 'stale';
+                }
+                const category = categoryByProductId.get(action.product_id) ?? null;
+                const unitPrice = menuLinePrice(
+                  product,
+                  category,
+                  action.selection,
+                  productById,
+                  categoryByProductId,
+                );
+                if (!(unitPrice > 0)) return false;
+                // Fase 0: never trust client/model unit_price — cart uses catalog calc.
+                addConfiguredProductToCart(
+                  action.product_id,
+                  action.selection,
+                  action.quantity,
+                );
+                return true;
+              }
+              if (action.type === 'propose_update_qty') {
+                const product = productById.get(action.product_id);
+                if (!product) return false;
+                setCart((prev) => {
+                  const next = { ...prev };
+                  if (action.quantity <= 0) {
+                    delete next[action.cart_key];
+                  } else {
+                    next[action.cart_key] = action.quantity;
+                  }
+                  return next;
+                });
+                return true;
+              }
+              if (action.type === 'propose_remove') {
+                removeProductFromCart(action.cart_key);
+                return true;
+              }
+              if (action.type === 'open_checkout') {
+                openTraditionalMenuFromChat();
+                openCheckoutSheet();
+                return true;
+              }
+              return false;
+            }}
+          />
+        ) : catalogReady ? (
           <KioskCatalogReady
             businessName={comercioNombre}
             logoUrl={comercioLogoUrl || null}
@@ -7165,6 +7327,19 @@ export default function PublicMenuPage() {
           onHistoryDepthChange={setKioskHistoryDepth}
         />
         )}
+
+        <ChatModeSwitcher
+          visible={
+            chatbotPreviewEnabled &&
+            !isChatbotMode &&
+            !isAssistedMode &&
+            !catalogFromUrl &&
+            !catalogReady &&
+            !kioskVoucher &&
+            !isConfirmOpen
+          }
+          onOpenAssistant={openChatbotFromMenu}
+        />
 
         <PreCheckoutUpsellSheet
           open={isPreCheckoutUpsellOpen}
@@ -7309,6 +7484,94 @@ export default function PublicMenuPage() {
             if (!productOptionsSheet.productId) return;
             const productId = productOptionsSheet.productId;
             const addedProduct = productById.get(productId);
+            const category = categoryByProductId.get(productId) ?? null;
+
+            // Chat mode: "Agregar al pedido" is enough — no second confirm card.
+            // Gemini proposals still use Confirmar on ChatCartActionCard.
+            if (isChatbotMode && addedProduct) {
+              if (chatSheetAddLockRef.current) return;
+              chatSheetAddLockRef.current = true;
+              try {
+                if (validateOptionGroupSelection(addedProduct, selection).length) {
+                  setProductOptionsSheet({ open: false, productId: null });
+                  setChatAppliedNotice({
+                    label:
+                      'No se pudo agregar: revisa las opciones obligatorias.',
+                  });
+                  return;
+                }
+                const unitPrice = menuLinePrice(
+                  addedProduct,
+                  category,
+                  selection,
+                  productById,
+                  categoryByProductId,
+                );
+                const sheetAvailable = addedProduct.disponible !== false;
+                if (!(unitPrice > 0) || !sheetAvailable) {
+                  setProductOptionsSheet({ open: false, productId: null });
+                  setChatAppliedNotice({
+                    label:
+                      'No se pudo agregar: precio o disponibilidad no válidos.',
+                  });
+                  return;
+                }
+                addConfiguredProductToCart(productId, selection, quantity);
+                const lineTotal = Math.round(unitPrice * quantity * 100) / 100;
+                const currency =
+                  (menuData?.comercio as { moneda?: string } | undefined)
+                    ?.moneda ||
+                  selectedCurrencyCode ||
+                  'USD';
+                const label = `${quantity}× ${menuLineLabel(addedProduct, selection, category, productById)}`;
+                const optionSummary =
+                  menuLineSummary(
+                    addedProduct,
+                    selection,
+                    category,
+                    productById,
+                    categoryByProductId,
+                  ) || '';
+                setChatAppliedNotice({
+                  label,
+                  productCard: {
+                    product_id: productId,
+                    name: addedProduct.nombre || '',
+                    description:
+                      (addedProduct.descripcion || '').slice(0, 160) || null,
+                    image_url:
+                      displayProductImage(
+                        addedProduct.imagen_url,
+                        comercioLogoUrl,
+                        160,
+                      ) || null,
+                    currency,
+                    price_base: Number(addedProduct.precio) || null,
+                    price_unit: unitPrice,
+                    price_label: formatUpsellPrice(unitPrice),
+                    line_total: lineTotal,
+                    line_total_label: formatUpsellPrice(lineTotal),
+                    available: sheetAvailable,
+                    requires_configuration: false,
+                    option_hints: [],
+                    selected_options: optionSummary
+                      ? optionSummary
+                          .split('·')
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                      : [],
+                    quantity,
+                  },
+                });
+                setProductOptionsSheet({ open: false, productId: null });
+              } finally {
+                window.setTimeout(() => {
+                  chatSheetAddLockRef.current = false;
+                }, 400);
+              }
+              return;
+            }
+
             addConfiguredProductToCart(productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
             if (tryOpenPreCheckoutUpsellAfterAdd(productId)) {

@@ -656,11 +656,21 @@ export function ProductOptionsSheet({
               }}
             >
               {imageUrl ? (
-                <button
-                  type="button"
+                // Use role=button (not <button>) so KioskImage's retry control
+                // is not nested inside another button (hydration / a11y).
+                <div
+                  role="button"
+                  tabIndex={0}
                   className="relative block h-full w-full cursor-zoom-in overflow-hidden border-0 bg-transparent p-0"
                   onClick={() => onExpandImage?.()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onExpandImage?.();
+                    }
+                  }}
                   aria-label={`Ver imagen ampliada de ${product.nombre}`}
+                  data-product-image-zoom="1"
                 >
                   <KioskImage
                     src={imageUrl}
@@ -673,7 +683,7 @@ export function ProductOptionsSheet({
                     showBlurFill
                     priority
                   />
-                </button>
+                </div>
               ) : (
                 <div className="grid h-full place-items-center text-sm font-semibold text-[var(--menu-text-muted)]">
                   Imagen no disponible
@@ -1160,6 +1170,7 @@ export function ProductOptionsSheet({
           {canAdd ? (
             <button
               type="button"
+              data-product-options-confirm="1"
               disabled={!canConfirm && !pendingGroupId}
               aria-disabled={!canConfirm || undefined}
               onClick={() => {

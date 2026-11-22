@@ -24,6 +24,17 @@ export async function OPTIONS(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const { isChatbotOrdersBlocked } = await import('../../_lib/staging-guards');
+  if (isChatbotOrdersBlocked()) {
+    return withAppCors(
+      request,
+      NextResponse.json(
+        { ok: false, error: 'orders_blocked_staging' },
+        { status: 403 },
+      ),
+      CORS,
+    );
+  }
   return withAppCors(request, await postUpload(request), CORS);
 }
 
@@ -35,6 +46,16 @@ async function postUpload(request: Request): Promise<NextResponse> {
       return NextResponse.json(
         { error: 'Too many requests.' },
         { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSec) } },
+      );
+    }
+
+    // Multipart only. JSON/empty bodies can hang inside request.formData() in
+    // some runtimes — reject early so probes and bad clients fail fast.
+    const contentType = (request.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json(
+        { error: 'Expected multipart/form-data.' },
+        { status: 415 },
       );
     }
 

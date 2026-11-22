@@ -69,7 +69,10 @@ describe('dispatchOrderNotification', () => {
     expect(result.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
     expect(url).toBe('https://example.supabase.co/functions/v1/notify-order');
     expect(init.method).toBe('POST');
     expect(init.headers).toMatchObject({

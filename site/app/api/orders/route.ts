@@ -78,6 +78,23 @@ export async function OPTIONS(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // Server-side staging / chatbot smoke block (not only Playwright interceptors).
+  const { isChatbotOrdersBlocked } = await import('../_lib/staging-guards');
+  if (isChatbotOrdersBlocked()) {
+    return withAppCors(
+      request,
+      NextResponse.json(
+        {
+          ok: false,
+          error: 'orders_blocked_staging',
+          message:
+            'La creación de pedidos está bloqueada en modo staging del chatbot.',
+        },
+        { status: 403 },
+      ),
+      ORDERS_CORS,
+    );
+  }
   return withAppCors(request, await postOrder(request), ORDERS_CORS);
 }
 

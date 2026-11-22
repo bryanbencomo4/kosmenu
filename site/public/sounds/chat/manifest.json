@@ -1,0 +1,24 @@
+{
+  "sourceZip": "elmenuxfa-sonidos-optimizados.zip",
+  "notes": [
+    "Mapped from silence-separated regions in All WhatsApp Sounds.mp3 (7 clips).",
+    "efecto-01 short blip → send; efecto-02 brighter mid pop → in-chat receive; efecto-03 short click → record stop; efecto-05 tiny beep → record start; efecto-06/07 longer → voice send / cancel.",
+    "efecto-04 (~1.7s) fingerprints to the long 'mensaje recibido' notification; unused in-chat to avoid fatigue (one short receive cue per assistant turn).",
+    "Default Web Audio gain ≈ 0.20; mute via header Sonidos del chat."
+  ],
+  "events": {
+    "messageSent": { "file": "message-sent.mp3", "source": "efecto-01.mp3" },
+    "messageReceived": { "file": "message-received.mp3", "source": "efecto-02.mp3" },
+    "recordingStart": { "file": "recording-start.mp3", "source": "efecto-05.mp3" },
+    "recordingStop": { "file": "recording-stop.mp3", "source": "efecto-03.mp3" },
+    "voiceSent": { "file": "voice-sent.mp3", "source": "efecto-06.mp3" },
+    "recordingCancel": { "file": "recording-cancel.mp3", "source": "efecto-07.mp3" }
+  },
+  "unused": [
+    {
+      "file": "_unused-notification-long.mp3",
+      "source": "efecto-04.mp3",
+      "reason": "Long notification (~1.7s); not wired to in-chat events"
+    }
+  ]
+}

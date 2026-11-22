@@ -18,7 +18,6 @@ describe('paymentMethodLabelFromRow', () => {
 describe('formatPaymentMethodDetails', () => {
   it('formats transfer account JSON from Flutter setup', () => {
     const details = formatPaymentMethodDetails({
-      nombre: 'Pago digital: Nequi',
       descripcion: 'Cuenta de pago digital',
       detalles: JSON.stringify({
         name: 'Nequi',
