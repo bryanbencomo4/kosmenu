@@ -462,6 +462,16 @@ class _ChatConversationDetailScreenState
                                 ),
                               ),
                               Text(m.body),
+                              if (m.productProposalLabels.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Propuestas: ${m.productProposalLabels.join(' · ')}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

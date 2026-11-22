@@ -30,6 +30,19 @@ function roleLabel(role: string) {
   return 'Sistema';
 }
 
+function productProposalLabels(payload?: Record<string, unknown>) {
+  const cards = payload?.product_cards;
+  if (!Array.isArray(cards) || cards.length === 0) return [] as string[];
+  return cards
+    .map((card) => {
+      if (!card || typeof card !== 'object') return '';
+      const row = card as Record<string, unknown>;
+      return String(row.name || row.nombre || row.title || '').trim();
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function ConversationDetailInner({
   paramsPromise,
   searchParamsPromise,
@@ -255,7 +268,9 @@ function ConversationDetailInner({
 
       <div className="rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
         <ul className="max-h-[55vh] space-y-2 overflow-y-auto" data-testid="message-list">
-          {messages.map((m) => (
+          {messages.map((m) => {
+            const proposals = productProposalLabels(m.payload);
+            return (
             <li
               key={m.id}
               data-role={m.role}
@@ -271,8 +286,14 @@ function ConversationDetailInner({
                 {roleLabel(m.role)}
               </p>
               <p className="whitespace-pre-wrap">{m.body}</p>
+              {proposals.length > 0 ? (
+                <p className="mt-1 text-[11px] text-stone-500">
+                  Propuestas: {proposals.join(' · ')}
+                </p>
+              ) : null}
             </li>
-          ))}
+            );
+          })}
         </ul>
         <div className="mt-3 flex gap-2">
           <input

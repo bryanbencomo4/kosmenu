@@ -44,6 +44,7 @@ class ChatMessageRow {
     required this.role,
     required this.body,
     required this.createdAt,
+    this.payload = const <String, dynamic>{},
   });
 
   final String id;
@@ -51,15 +52,36 @@ class ChatMessageRow {
   final String role;
   final String body;
   final String createdAt;
+  final Map<String, dynamic> payload;
 
   factory ChatMessageRow.fromJson(Map<String, dynamic> json) {
+    final rawPayload = json['payload'];
     return ChatMessageRow(
       id: (json['id'] ?? '').toString(),
       seq: int.tryParse('${json['seq'] ?? 0}') ?? 0,
       role: (json['role'] ?? '').toString(),
       body: (json['body'] ?? '').toString(),
       createdAt: (json['created_at'] ?? '').toString(),
+      payload: rawPayload is Map
+          ? Map<String, dynamic>.from(rawPayload)
+          : const <String, dynamic>{},
     );
+  }
+
+  List<String> get productProposalLabels {
+    final cards = payload['product_cards'];
+    if (cards is! List) return const [];
+    return cards
+        .whereType<Map>()
+        .map((card) {
+          final row = Map<String, dynamic>.from(card);
+          return (row['name'] ?? row['nombre'] ?? row['title'] ?? '')
+              .toString()
+              .trim();
+        })
+        .where((name) => name.isNotEmpty)
+        .take(8)
+        .toList(growable: false);
   }
 }
 

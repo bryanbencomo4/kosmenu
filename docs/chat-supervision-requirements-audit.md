@@ -13,7 +13,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 3 | Notificar solo primer mensaje real | DONE | `persistConsumerTurn` + dedupe `chat_supervision:new:{id}`; E2E `no_notify_on_open` |
 | 4 | Enlace seguro `/panel/conversaciones/[id]` | DONE | WaSender → `elmenuxfa.com/panel/...` (Next); Flutter inbox opcional; sin secretos en URL |
 | 5 | Auth comerciante (sin segundo sistema) | DONE | Bearer Supabase + membership; `/panel/login`; `/api/panel/conversaciones/me` |
-| 6 | Bandeja en panel existente | DONE | Next `/panel/conversaciones` + Flutter Configuración → Conversaciones (API + Realtime inbox/detail; prioridad `needs_attention`) |
+| 6 | Bandeja en panel existente | DONE | Next `/panel/conversaciones` + Flutter Configuración → Conversaciones (API + Realtime; prioridad `needs_attention`; propuestas de producto en payload) |
 | 7 | Persistencia servidor (no solo browser) | PARTIAL | Código + migración lista; **tablas null en prod/preview** (read-only) |
 | 8 | Realtime (no polling 1–5s) | PARTIAL | Cliente `postgres_changes` + broadcast best-effort; publication pendiente de apply |
 | 9 | Takeover IA→humano atómico | PARTIAL | RPC `chat_take_conversation` + `chat_user_can_supervise` (fix service-role); E2E memoria OK; **no probado en Postgres remoto** |
