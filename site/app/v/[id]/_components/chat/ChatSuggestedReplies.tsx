@@ -137,7 +137,7 @@ export function ChatSuggestedReplies({
   if (hidden || chips.length === 0) return null;
   return (
     <div
-      className="relative z-20 shrink-0 pt-1.5"
+      className="relative z-20 shrink-0 pt-1"
       style={{ backgroundColor: 'var(--chat-composer)' }}
       data-chat-suggested-replies="1"
     >

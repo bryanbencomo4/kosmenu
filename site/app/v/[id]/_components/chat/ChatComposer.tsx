@@ -768,10 +768,10 @@ export function ChatComposer({
 
   return (
     <form
-      className="relative z-20 shrink-0 px-2.5 pt-1.5"
+      className="relative z-20 shrink-0 px-1.5 pt-1"
       style={{
         backgroundColor: 'var(--chat-composer)',
-        paddingBottom: 'max(0.55rem, env(safe-area-inset-bottom))',
+        paddingBottom: 'max(0.35rem, env(safe-area-inset-bottom))',
       }}
       data-chat-composer="1"
       onSubmit={(event) => {
@@ -928,7 +928,7 @@ export function ChatComposer({
         </div>
       ) : null}
 
-      <div className="relative mx-auto flex w-full max-w-5xl items-end gap-2">
+      <div className="relative mx-auto flex w-full max-w-5xl items-center gap-1.5">
         {lockedRecording ? (
           // Locked (hands-free): Cancel → discard, Stop → voiceDraft preview, Send → send now.
           <>
@@ -1014,13 +1014,13 @@ export function ChatComposer({
             ) : (
             <div
               key="pane-input"
-              className="flex min-h-[44px] flex-1 items-end rounded-[24px] border-0 py-1 pl-1 pr-2 shadow-sm outline-none ring-0 focus-within:outline-none focus-within:ring-0"
-              style={{ backgroundColor: 'var(--chat-input)', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }}
+              className="flex min-h-[40px] flex-1 items-center rounded-full border-0 py-0 pl-0.5 pr-1 outline-none ring-0 focus-within:outline-none focus-within:ring-0"
+              style={{ backgroundColor: 'var(--chat-input)' }}
               data-chat-composer-input-shell="1"
             >
               <button
                 type="button"
-                className="mb-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
                 aria-label="Emojis"
                 aria-expanded={emojiOpen}
                 aria-controls={emojiPanelId}
@@ -1031,21 +1031,7 @@ export function ChatComposer({
                 }}
                 data-chat-emoji-toggle="1"
               >
-                <Smile className="h-[22px] w-[22px]" strokeWidth={1.85} aria-hidden />
-              </button>
-              <button
-                type="button"
-                className="mb-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-                aria-label="Adjuntar"
-                aria-expanded={attachOpen}
-                disabled={disabled || Boolean(voiceDraft)}
-                onClick={() => {
-                  setEmojiOpen(false);
-                  setAttachOpen((v) => !v);
-                }}
-                data-chat-attach-toggle="1"
-              >
-                <Paperclip className="h-[20px] w-[20px]" strokeWidth={1.85} aria-hidden />
+                <Smile className="h-[20px] w-[20px]" strokeWidth={1.85} aria-hidden />
               </button>
               <label className="sr-only" htmlFor="chatbot-composer-input">
                 Escribe un mensaje
@@ -1065,13 +1051,28 @@ export function ChatComposer({
                   setAttachOpen(false);
                 }}
                 placeholder="Escribe un mensaje"
-                className="max-h-[7.5rem] min-h-[28px] w-full resize-none bg-transparent py-2 text-[15.5px] leading-[1.35] text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
+                className="max-h-[7.5rem] min-h-[36px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-5 text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
                 style={{ outline: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                 enterKeyHint="send"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck
               />
+              {/* Attach sits on the right inside the pill, like WhatsApp. */}
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                aria-label="Adjuntar"
+                aria-expanded={attachOpen}
+                disabled={disabled || Boolean(voiceDraft)}
+                onClick={() => {
+                  setEmojiOpen(false);
+                  setAttachOpen((v) => !v);
+                }}
+                data-chat-attach-toggle="1"
+              >
+                <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.85} aria-hidden />
+              </button>
             </div>
             )}
 
@@ -1099,7 +1100,7 @@ export function ChatComposer({
                   type="button"
                   disabled={disabled}
                   className={[
-                    'relative z-10 inline-flex h-11 w-11 shrink-0 select-none items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition-colors enabled:hover:brightness-110 disabled:opacity-40',
+                    'relative z-10 inline-flex h-10 w-10 shrink-0 select-none items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition-colors enabled:hover:brightness-110 disabled:opacity-40',
                     // Only the mic opts out of browser panning, so chat scroll stays native elsewhere.
                     'touch-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]',
                   ].join(' ')}
@@ -1132,7 +1133,7 @@ export function ChatComposer({
                 key="send"
                 type="submit"
                 disabled={!canSend}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--chat-send)]"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--chat-send)]"
                 style={{ backgroundColor: 'var(--chat-send)' }}
                 aria-label="Enviar mensaje"
               >

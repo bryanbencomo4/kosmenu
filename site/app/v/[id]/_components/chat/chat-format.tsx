@@ -5,13 +5,20 @@ import { Fragment, type ReactNode } from 'react';
 /**
  * WhatsApp-like inline formatting for chat bubbles.
  *   *bold*  _italic_  ~strike~  `code`
+ * Also linkifies URLs, emails and phone numbers with WA-style color + underline.
  * Output is a React node tree (text is escaped by React) — never raw HTML.
- * URLs are left untouched so underscores / tildes inside links survive.
  */
 
 type Marker = '*' | '_' | '~' | '`';
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi;
+type LinkKind = 'url' | 'email' | 'phone';
+
+type LinkMatch = {
+  start: number;
+  end: number;
+  kind: LinkKind;
+  raw: string;
+};
 
 const MARKER_TAG: Record<Marker, 'strong' | 'em' | 's' | 'code'> = {
   '*': 'strong',
@@ -19,6 +26,9 @@ const MARKER_TAG: Record<Marker, 'strong' | 'em' | 's' | 'code'> = {
   '~': 's',
   '`': 'code',
 };
+
+const LINK_CLASS =
+  'break-all text-[var(--chat-link)] underline decoration-[var(--chat-link)] underline-offset-2';
 
 /** Characters that may sit right before an opening marker (word boundary-ish). */
 function isOpenBoundary(prev: string | undefined): boolean {
@@ -35,7 +45,6 @@ function findClose(text: string, marker: Marker, start: number): number {
   for (let j = start + 1; j < text.length; j++) {
     if (text[j] === '\n') return -1;
     if (text[j] !== marker) continue;
-    // Content must be non-empty and not start/end with a space (WhatsApp rule).
     if (j === start + 1) return -1;
     if (/\s/.test(text[start + 1]!) || /\s/.test(text[j - 1]!)) return -1;
     if (!isCloseBoundary(text[j + 1])) continue;
@@ -84,22 +93,97 @@ function renderInline(text: string, keyPrefix: string, depth = 0): ReactNode[] {
   return out;
 }
 
-/** Splits a line into URL / non-URL segments; only non-URL segments get formatted. */
+function digitsOnly(value: string): string {
+  return value.replace(/\D+/g, '');
+}
+
+function collectLinkMatches(line: string): LinkMatch[] {
+  const found: LinkMatch[] = [];
+
+  const pushAll = (re: RegExp, kind: LinkKind, ok?: (raw: string) => boolean) => {
+    re.lastIndex = 0;
+    for (const m of line.matchAll(re)) {
+      const raw = m[0];
+      const start = m.index ?? 0;
+      if (ok && !ok(raw)) continue;
+      found.push({ start, end: start + raw.length, kind, raw });
+    }
+  };
+
+  pushAll(/\bhttps?:\/\/[^\s<>"']+/gi, 'url');
+  pushAll(/\b(?:www\.)[a-z0-9][\w.-]*\.[a-z]{2,}(?:\/[^\s<>"']*)?/gi, 'url');
+  pushAll(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, 'email');
+  // +58 414-0821633, 0414-0821633, (0414) 082 1633 — require 10–15 digits.
+  pushAll(
+    /(?:\+\d{1,3}(?:[\s().-]*\d+){2,}|\b0\d{2,4}(?:[\s().-]*\d+){2,}\b)/g,
+    'phone',
+    (raw) => {
+      const d = digitsOnly(raw);
+      return d.length >= 10 && d.length <= 15;
+    },
+  );
+
+  found.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: LinkMatch[] = [];
+  let cursor = 0;
+  for (const m of found) {
+    if (m.start < cursor) continue;
+    merged.push(m);
+    cursor = m.end;
+  }
+  return merged;
+}
+
+function hrefFor(kind: LinkKind, raw: string): string {
+  if (kind === 'email') return `mailto:${raw}`;
+  if (kind === 'phone') {
+    const digits = digitsOnly(raw);
+    // Keep international "+" when the displayed number had a country code.
+    return raw.trim().startsWith('+') ? `tel:+${digits}` : `tel:${digits}`;
+  }
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function renderLink(
+  kind: LinkKind,
+  raw: string,
+  key: string,
+): ReactNode {
+  return (
+    <a
+      key={key}
+      href={hrefFor(kind, raw)}
+      className={LINK_CLASS}
+      data-chat-link={kind}
+      target={kind === 'url' ? '_blank' : undefined}
+      rel={kind === 'url' ? 'noreferrer noopener' : undefined}
+    >
+      {raw}
+    </a>
+  );
+}
+
+/** Splits a line into linkables / plain text; only plain segments get *bold* etc. */
 function renderLine(line: string, keyPrefix: string): ReactNode[] {
+  const matches = collectLinkMatches(line);
+  if (matches.length === 0) {
+    return renderInline(line, keyPrefix);
+  }
+
   const nodes: ReactNode[] = [];
   let last = 0;
   let n = 0;
-  for (const m of line.matchAll(URL_RE)) {
-    const idx = m.index ?? 0;
-    if (idx > last) {
+  for (const m of matches) {
+    if (m.start > last) {
       nodes.push(
         <Fragment key={`${keyPrefix}-t${n}`}>
-          {renderInline(line.slice(last, idx), `${keyPrefix}-t${n}`)}
+          {renderInline(line.slice(last, m.start), `${keyPrefix}-t${n}`)}
         </Fragment>,
       );
     }
-    nodes.push(<Fragment key={`${keyPrefix}-u${n}`}>{m[0]}</Fragment>);
-    last = idx + m[0].length;
+    nodes.push(renderLink(m.kind, m.raw, `${keyPrefix}-l${n}`));
+    last = m.end;
     n += 1;
   }
   if (last < line.length) {

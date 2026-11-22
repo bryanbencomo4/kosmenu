@@ -42,12 +42,22 @@ describe('formatChatText (WhatsApp-like)', () => {
     expect(out).toContain('<strong>ok</strong>');
   });
 
-  it('leaves URLs untouched', () => {
+  it('linkifies URLs without formatting their internals', () => {
     const out = html('mira https://x.com/a_b_c/~me/*y* ya');
-    expect(out).toContain('https://x.com/a_b_c/~me/*y*');
+    expect(out).toContain('href="https://x.com/a_b_c/~me/*y*"');
+    expect(out).toContain('data-chat-link="url"');
     expect(out).not.toContain('<em>');
     expect(out).not.toContain('<s>');
     expect(out).not.toContain('<strong>');
+  });
+
+  it('linkifies phones and emails like WhatsApp', () => {
+    const phone = html('WhatsApp: +58 414-0821633');
+    expect(phone).toContain('data-chat-link="phone"');
+    expect(phone).toContain('href="tel:+584140821633"');
+    const email = html('escribe a hola@negocio.com');
+    expect(email).toContain('data-chat-link="email"');
+    expect(email).toContain('href="mailto:hola@negocio.com"');
   });
 
   it('ignores unmatched, spaced and intra-word markers', () => {

@@ -1,5 +1,6 @@
 /**
- * Chat UI theme — messaging-app feel (light/dark), not WhatsApp branding.
+ * Chat UI theme — closely matches WhatsApp light/dark messaging colors
+ * (bubbles, composer, link blue) without copying WhatsApp branding assets.
  */
 
 export type ChatThemeMode = 'light' | 'dark';
@@ -14,6 +15,8 @@ export const CHAT_THEME_LIGHT = {
   bubbleOut: '#D9FDD3',
   text: '#111B21',
   textMuted: '#667781',
+  /** WhatsApp light link blue */
+  link: '#027EB5',
   composer: '#F0F2F5',
   input: '#FFFFFF',
   send: '#00A884',
@@ -29,9 +32,12 @@ export const CHAT_THEME_DARK = {
   header: '#1F2C34',
   headerBorder: 'rgba(255,255,255,0.06)',
   bubbleIn: '#202C33',
+  /** Official WA dark outgoing green */
   bubbleOut: '#005C4B',
   text: '#E9EDEF',
   textMuted: '#8696A0',
+  /** WhatsApp dark link cyan */
+  link: '#53BDEB',
   composer: '#1F2C34',
   input: '#2A3942',
   send: '#00A884',
@@ -85,6 +91,7 @@ export function chatThemeVars(mode: ChatThemeMode): Record<string, string> {
     '--chat-bubble-out': t.bubbleOut,
     '--chat-text': t.text,
     '--chat-text-muted': t.textMuted,
+    '--chat-link': t.link,
     '--chat-composer': t.composer,
     '--chat-input': t.input,
     '--chat-send': t.send,
