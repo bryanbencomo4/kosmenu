@@ -44,7 +44,17 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
    ```
 5. Smoke dual UI (consumidor + panel login real) **sin** `CHAT_SUPERVISION_MEMORY`.
 6. Confirmar **una** notificación WaSender al número de avisos (`CHAT_SUPERVISION_WASENDER=1`).
-7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto.
+7. Preferir `config_negocio.supervision_whatsapp` dedicado antes del piloto:
+   ```powershell
+   $env:CHAT_SUPERVISION_WHATSAPP_CONFIRM='I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP'
+   $env:CHAT_SUPERVISION_WHATSAPP_E164='+58XXXXXXXXXX'
+   node site/scripts/set-trueno-supervision-whatsapp.mjs
+   ```
+
+## Deep links
+
+- WaSender apunta a `https://elmenuxfa.com/panel/conversaciones/{id}` (Next).
+- Si el enlace cae en el host Flutter (`app.elmenuxfa.com/panel/...`), AuthGate recuerda el id y abre el panel Next tras login.
 
 Matriz de requisitos: `docs/chat-supervision-requirements-audit.md`.
 

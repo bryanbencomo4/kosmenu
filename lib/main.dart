@@ -254,6 +254,9 @@ class _KosmenuAppState extends State<KosmenuApp> {
         // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
         return '/';
       }
+      // Chat supervision links belong on the public Next panel; remember id
+      // so AuthGate can hand off after login if the Flutter host received them.
+      MerchantDeepLink.rememberConversationFromUri(uri);
       // Keep query (e.g. /invite?t=…) — path alone drops the token and AuthGate wins.
       final fromPath = _webDeepLinkRoute(uri.path, uri.query);
       if (fromPath != null) return fromPath;
@@ -407,6 +410,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
         uri.path.isEmpty ||
         uri.path == '/panel' ||
         uri.path.startsWith('/panel/')) {
+      MerchantDeepLink.rememberConversationFromUri(uri);
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => const AuthGate(),

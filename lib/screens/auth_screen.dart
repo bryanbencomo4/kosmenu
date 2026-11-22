@@ -448,7 +448,9 @@ class _AuthGateState extends State<AuthGate> {
 
                 switch (boot.destination) {
                   case PostAuthDestination.dashboard:
-                    return const AdminDashboardScreen();
+                    return const _ChatSupervisionLinkHandoff(
+                      child: AdminDashboardScreen(),
+                    );
                   case PostAuthDestination.billing:
                     return DeferredLibraryScreen(
                       key: const ValueKey<String>('deferred-billing'),
@@ -470,6 +472,44 @@ class _AuthGateState extends State<AuthGate> {
       },
     );
   }
+}
+
+/// After login, open pending `/panel/conversaciones/{id}` on the public Next
+/// site (WaSender links). Flutter host does not render that bandeja.
+class _ChatSupervisionLinkHandoff extends StatefulWidget {
+  const _ChatSupervisionLinkHandoff({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ChatSupervisionLinkHandoff> createState() =>
+      _ChatSupervisionLinkHandoffState();
+}
+
+class _ChatSupervisionLinkHandoffState
+    extends State<_ChatSupervisionLinkHandoff> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_openPendingConversation());
+    });
+  }
+
+  Future<void> _openPendingConversation() async {
+    final uri = MerchantDeepLink.publicConversationUri(
+      MerchantDeepLink.consumeConversation(),
+    );
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (error) {
+      debugPrint('Chat supervision deep link handoff failed: $error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class PasswordRecoveryScreen extends StatefulWidget {
