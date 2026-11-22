@@ -20,13 +20,20 @@ Recomendación antes del piloto: fijar `branding_ia.config_negocio.supervision_w
 `elmenuxfa.com/api/panel/conversaciones` aún **404** hasta merge/deploy de esta rama.
 
 1. Autorizar en el chat la frase exacta: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`
-2. Aplicar (script gated — no corre sin la frase):
+2. (Recomendado) Activación one-shot schema + readiness:
+   ```powershell
+   $env:CHAT_SUPERVISION_MIGRATE_CONFIRM='I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION'
+   $env:CHAT_SUPERVISION_ACTIVATE_CONFIRM='I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE'
+   $env:CHAT_SUPERVISION_MIGRATE_TARGET='prod'
+   node site/scripts/chat-supervision-activate-trueno.mjs
+   ```
+   O solo migración:
    ```powershell
    $env:CHAT_SUPERVISION_MIGRATE_CONFIRM='I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION'
    $env:CHAT_SUPERVISION_MIGRATE_TARGET='prod'
    node site/scripts/apply-chat-supervision-migration.mjs
    ```
-   - Incluye tablas/RPC + publication Realtime.
+   - Incluye tablas/RPC + publication Realtime (SQL vía `-f`, compatible Windows).
    - RPC takeover usa `chat_user_can_supervise(p_user_id)` (compatible con service_role del panel).
 3. Autorizar **deploy** de la rama (o merge) + variables de entorno app (solo Trueno), **sin** MEMORY/E2E:
    ```env

@@ -13,7 +13,8 @@
  * Does not deploy app code or flip feature flags.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -77,34 +78,58 @@ begin
 end $$;
 `;
 
+const verifySql = `
+select to_regclass('public.chat_conversations') as chat_conversations,
+       to_regclass('public.chat_messages') as chat_messages,
+       to_regclass('public.chat_supervision_events') as events,
+       exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+              where n.nspname='public' and p.proname='chat_take_conversation') as take_rpc;
+`;
+
 console.log(`Applying chat supervision migration to ${targetKey} (${projectRef})…`);
 
-function runQuery(query, label) {
-  const r = spawnSync(
-    'npx',
-    ['supabase', 'db', 'query', `--remote=${projectRef}`, '-o', 'json', query],
-    { cwd: root, encoding: 'utf8', shell: true },
-  );
-  if (r.status !== 0) {
-    console.error(label, 'failed');
-    console.error(r.stdout || '');
-    console.error(r.stderr || '');
-    process.exit(r.status || 1);
+function runQueryFile(sqlText, label) {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-sup-migrate-'));
+  const file = join(dir, 'q.sql');
+  writeFileSync(file, sqlText, 'utf8');
+  try {
+    const r = spawnSync(
+      'npx',
+      [
+        'supabase',
+        'db',
+        'query',
+        `--remote=${projectRef}`,
+        '-o',
+        'json',
+        '-f',
+        file,
+      ],
+      { cwd: root, encoding: 'utf8', shell: true },
+    );
+    if (r.status !== 0) {
+      console.error(label, 'failed');
+      console.error(r.stdout || '');
+      console.error(r.stderr || '');
+      process.exit(r.status || 1);
+    }
+    console.log(label, 'ok');
+    if ((r.stdout || '').trim()) {
+      console.log(r.stdout.trim());
+    }
+    return r.stdout;
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
-  console.log(label, 'ok');
-  return r.stdout;
 }
 
-runQuery(sql, 'migration');
-runQuery(realtimeSql, 'realtime_publication');
-runQuery(
-  `select to_regclass('public.chat_conversations') as chat_conversations,
-          to_regclass('public.chat_messages') as chat_messages,
-          to_regclass('public.chat_supervision_events') as events,
-          exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-                 where n.nspname='public' and p.proname='chat_take_conversation') as take_rpc;`,
-  'verify',
-);
+runQueryFile(sql, 'migration');
+runQueryFile(realtimeSql, 'realtime_publication');
+runQueryFile(verifySql, 'verify');
 
 console.log(`
 Next (still requires separate authorization / deploy):
@@ -113,4 +138,8 @@ Next (still requires separate authorization / deploy):
   CHAT_SUPERVISION_HUMAN_TAKEOVER=1
   CHAT_SUPERVISION_COMMERCE_IDS=0aa8c53b-07f1-446e-8b88-66c2b7ae89ea
   # unset CHAT_SUPERVISION_MEMORY and E2E bearer vars
+
+Then:
+  node site/scripts/chat-supervision-remote-readiness.mjs
+  # expect SCHEMA_READY
 `);
