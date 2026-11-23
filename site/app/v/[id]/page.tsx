@@ -39,6 +39,8 @@ import {
   type KioskMenuShellHandle,
 } from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
+import { ChatCheckoutShell } from './_components/chat/ChatCheckoutShell';
+import { ChatOrderComplete } from './_components/chat/ChatOrderComplete';
 import {
   allowMenuShellHistoryLeave,
   attachMenuShellHistory,
@@ -1956,6 +1958,8 @@ export default function PublicMenuPage() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  /** Checkout opened from chatbot — stay in ?chatbot=1 with ChatCheckoutShell. */
+  const [checkoutFromChat, setCheckoutFromChat] = useState(false);
   const [isPreCheckoutUpsellOpen, setIsPreCheckoutUpsellOpen] = useState(false);
   const [isCheckoutFooterExpanded, setIsCheckoutFooterExpanded] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -2097,8 +2101,6 @@ export default function PublicMenuPage() {
   const orderSubmitLockRef = useRef(false);
   /** True once the upsell sheet has seen a non-empty cart (avoids closing on the add→open race). */
   const preCheckoutHadCartRef = useRef(false);
-  /** Chat “listo para pagar” — survive ?chatbot=1 → menu replace racing checkout open. */
-  const pendingCheckoutFromChatRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -4882,6 +4884,10 @@ export default function PublicMenuPage() {
     if (shouldReturnToMenuOnEmptyCartRef.current) {
       shouldReturnToMenuOnEmptyCartRef.current = false;
       setIsConfirmOpen(false);
+      if (checkoutFromChat) {
+        setCheckoutFromChat(false);
+        return;
+      }
 
       window.setTimeout(() => {
         const target = stickySearchCardRef.current;
@@ -4891,7 +4897,7 @@ export default function PublicMenuPage() {
         window.scrollTo({ top: Math.max(0, targetTop), behavior: prefersReducedMotion ? 'auto' : 'smooth' });
       }, 120);
     }
-  }, [cartCount, isConfirmOpen, prefersReducedMotion]);
+  }, [cartCount, checkoutFromChat, isConfirmOpen, prefersReducedMotion]);
 
   useEffect(() => {
     if (!isConfirmOpen || checkoutStep !== 0) return;
@@ -5055,20 +5061,6 @@ export default function PublicMenuPage() {
     if (isConfirmOpen) return;
     deliveryAutoLocateKeyRef.current = null;
   }, [isConfirmOpen]);
-
-  // If chat pay handed off but router.replace cleared checkout state, reopen once on menu.
-  useEffect(() => {
-    if (isChatbotMode) return;
-    if (!pendingCheckoutFromChatRef.current) return;
-    if (isConfirmOpen) {
-      pendingCheckoutFromChatRef.current = false;
-      return;
-    }
-    pendingCheckoutFromChatRef.current = false;
-    openCheckoutSheet({ skipUpsell: true });
-    // openCheckoutSheet reads latest render closures; only re-run when leaving chat.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional leave-chat handoff
-  }, [isChatbotMode, isConfirmOpen]);
 
   // If GPS/map pin exists but reverse-geocode left address empty, keep a usable label.
   useEffect(() => {
@@ -6167,20 +6159,12 @@ export default function PublicMenuPage() {
   }
 
   /**
-   * Open shared checkout from the assistant.
-   * Open the sheet first (z-60 over chat), then clear ?chatbot=1 on the next
-   * tick so Next.js searchParams replace cannot drop isConfirmOpen.
+   * Open shared checkout from the assistant without leaving chatbot mode.
+   * Uses ChatCheckoutShell (same steps/persist as menu) over the chat thread.
    */
   function openCheckoutFromChat() {
-    pendingCheckoutFromChatRef.current = true;
-    openCheckoutSheet({ skipUpsell: true });
-    if (typeof window === 'undefined') {
-      openTraditionalMenuFromChat();
-      return;
-    }
-    window.setTimeout(() => {
-      openTraditionalMenuFromChat();
-    }, 0);
+    setCheckoutFromChat(true);
+    openCheckoutSheet({ skipUpsell: true, fromChat: true });
   }
 
   function openSharedCartFromChat() {
@@ -6226,8 +6210,11 @@ export default function PublicMenuPage() {
     return true;
   }
 
-  function openCheckoutSheet(opts?: { skipUpsell?: boolean }) {
+  function openCheckoutSheet(opts?: { skipUpsell?: boolean; fromChat?: boolean }) {
     if (kioskVoucher) return;
+    if (!opts?.fromChat) {
+      setCheckoutFromChat(false);
+    }
     if (isOwnerPreview) {
       window.alert(
         'Vista previa. Los pedidos estaran disponibles cuando el menu este publicado.',
@@ -8469,46 +8456,51 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isConfirmOpen && !kioskVoucher ? (
-          <KioskCheckout
-            fulfillment={kioskFulfillment}
-            fulfillmentOptions={checkoutFulfillmentOptions}
-            onFulfillmentChange={changeCheckoutFulfillment}
-            steps={checkoutFlowSteps}
-            currentStepId={checkoutStep}
-            title={
-              checkoutStep === 0
-                ? isAssistedMode
-                  ? 'Pedido en mesa'
-                  : 'Tu pedido'
-                : checkoutStep === 1
-                  ? clientStepTitle
-                  : checkoutStep === 2
-                    ? 'Direccion'
-                    : 'Pago'
-            }
-            subtitle={
-              checkoutStep === 0
-                ? isAssistedMode
-                  ? 'Revisa el pedido antes de enviarlo a cocina.'
-                  : 'Revisa cantidades antes de continuar.'
-                : checkoutStep === 1
+          (() => {
+            const closeCheckoutSurface = () => {
+              setIsOrderReviewOpen(false);
+              setIsConfirmOpen(false);
+              setCheckoutFromChat(false);
+            };
+            const sharedCheckoutProps = {
+              steps: checkoutFlowSteps,
+              currentStepId: checkoutStep,
+              title:
+                checkoutStep === 0
                   ? isAssistedMode
-                    ? 'Nombre, mesa y contacto opcional para el resumen.'
-                    : 'Te avisamos por WhatsApp cuando esté listo tu pedido.'
-                  : checkoutStep === 2
-                    ? prefersSelfPickup
-                      ? 'Confirma si retiras o deja la dirección de envío.'
-                      : 'Indica dónde enviamos el pedido.'
-                    : isAssistedMode
-                      ? 'Pagar ahora o dejar el pago para después.'
-                      : 'Elige como vas a pagar.'
-            }
-            totalLabel={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
-            itemsLabel={`${checkoutItemsCount} unid. · ${selectedCurrencyCode}`}
-            error={checkoutError}
-            backLabel={checkoutStep === 0 ? 'Seguir pidiendo' : 'Atras'}
-            nextLabel={
-              isSubmittingOrder
+                    ? 'Pedido en mesa'
+                    : 'Tu pedido'
+                  : checkoutStep === 1
+                    ? clientStepTitle
+                    : checkoutStep === 2
+                      ? 'Direccion'
+                      : 'Pago',
+              subtitle:
+                checkoutStep === 0
+                  ? isAssistedMode
+                    ? 'Revisa el pedido antes de enviarlo a cocina.'
+                    : 'Revisa cantidades antes de continuar.'
+                  : checkoutStep === 1
+                    ? isAssistedMode
+                      ? 'Nombre, mesa y contacto opcional para el resumen.'
+                      : 'Te avisamos por WhatsApp cuando esté listo tu pedido.'
+                    : checkoutStep === 2
+                      ? prefersSelfPickup
+                        ? 'Confirma si retiras o deja la dirección de envío.'
+                        : 'Indica dónde enviamos el pedido.'
+                      : isAssistedMode
+                        ? 'Pagar ahora o dejar el pago para después.'
+                        : 'Elige como vas a pagar.',
+              totalLabel: formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode),
+              itemsLabel: `${checkoutItemsCount} unid. · ${selectedCurrencyCode}`,
+              error: checkoutError,
+              backLabel:
+                checkoutStep === 0
+                  ? checkoutFromChat
+                    ? 'Volver al chat'
+                    : 'Seguir pidiendo'
+                  : 'Atras',
+              nextLabel: isSubmittingOrder
                 ? 'Guardando pedido...'
                 : checkoutStep === 3
                   ? 'Listo'
@@ -8516,30 +8508,34 @@ export default function PublicMenuPage() {
                     ? 'Ir a pagar'
                     : checkoutStep === 2
                       ? 'Ir a pagar'
-                      : 'Continuar'
-            }
-            nextDisabled={
-              isSubmittingOrder ||
-              scheduleClosed ||
-              (checkoutStep === 3 ? !canReadyForReview : !canAdvanceCurrentStep)
-            }
-            submitting={isSubmittingOrder}
-            onClose={() => {
-              setIsOrderReviewOpen(false);
-              setIsConfirmOpen(false);
-            }}
-            onBack={
-              checkoutStep === 0
-                ? () => {
-                    setIsOrderReviewOpen(false);
-                    setIsConfirmOpen(false);
-                  }
-                : () => {
-                    setIsOrderReviewOpen(false);
-                    goToPreviousStep();
-                  }
-            }
-            onNext={checkoutStep === 3 ? openOrderReview : goToNextStep}
+                      : 'Continuar',
+              nextDisabled:
+                isSubmittingOrder ||
+                scheduleClosed ||
+                (checkoutStep === 3 ? !canReadyForReview : !canAdvanceCurrentStep),
+              submitting: isSubmittingOrder,
+              onClose: closeCheckoutSurface,
+              onBack:
+                checkoutStep === 0
+                  ? closeCheckoutSurface
+                  : () => {
+                      setIsOrderReviewOpen(false);
+                      goToPreviousStep();
+                    },
+              onNext: checkoutStep === 3 ? openOrderReview : goToNextStep,
+            };
+            // One children tree for both surfaces — avoids duplicating ~1k lines of steps.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- shared step body; shells differ only on chrome props
+            const CheckoutSurface = (
+              checkoutFromChat ? ChatCheckoutShell : KioskCheckout
+            ) as any;
+            return (
+          <CheckoutSurface
+            fulfillment={kioskFulfillment}
+            fulfillmentOptions={checkoutFulfillmentOptions}
+            onFulfillmentChange={changeCheckoutFulfillment}
+            theme="light"
+            {...sharedCheckoutProps}
           >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
@@ -8631,6 +8627,8 @@ export default function PublicMenuPage() {
                                   type="button"
                                   onClick={() => {
                                     setIsConfirmOpen(false);
+                                    setCheckoutFromChat(false);
+                                    if (isChatbotMode) return;
                                     const target = stickySearchCardRef.current;
                                     const targetTop = target
                                       ? window.scrollY + target.getBoundingClientRect().top - (topTickerHeightPx + topAppBarHeightPx + 12)
@@ -8643,7 +8641,7 @@ export default function PublicMenuPage() {
                                     color: 'var(--text-on-primary)',
                                   }}
                                 >
-                                  Empezar a agregar
+                                  {checkoutFromChat || isChatbotMode ? 'Volver al chat' : 'Empezar a agregar'}
                                   <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
                                 </button>
                               </div>
@@ -9774,7 +9772,33 @@ export default function PublicMenuPage() {
                       </div>
                     </div>
                   ) : null}
-          </KioskCheckout>
+          </CheckoutSurface>
+            );
+          })()
+        ) : null}
+
+        {isChatbotMode && checkoutFromChat && kioskVoucher ? (
+          <ChatOrderComplete
+            orderId={kioskVoucher.orderId}
+            totalLabel={kioskVoucher.totalLabel}
+            whatsappUrl={kioskVoucher.whatsappUrl}
+            trackingUrl={kioskVoucher.orderUrl}
+            theme="light"
+            businessName={comercioNombre}
+            onBackToChat={() => {
+              try {
+                window.sessionStorage.removeItem(
+                  `${kioskVoucherStorageKeyPrefix}${commerceIdentifier}`,
+                );
+              } catch {
+                /* keep dismissing even if storage is blocked */
+              }
+              checkoutAttemptRef.current = null;
+              orderSubmitLockRef.current = false;
+              setKioskVoucher(null);
+              setCheckoutFromChat(false);
+            }}
+          />
         ) : null}
 
         {isConfirmOpen && isOrderReviewOpen && !kioskVoucher ? (
