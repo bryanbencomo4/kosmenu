@@ -1,3 +1,4 @@
+import { recoverReplyToFromPrefixedBody } from '../../v/[id]/_components/chat/chat-gestures';
 import type {
   ChatAttachment,
   ChatCartActionData,
@@ -311,13 +312,21 @@ export function toPanelChatMessages(rows: PanelMessageRow[]): ChatMessage[] {
       };
     }
     if (m.role === 'consumer') {
+      // Older turns leaked the model reply-prefix into body — recover quote UI.
+      const recovered =
+        !rich.replyTo
+          ? recoverReplyToFromPrefixedBody(m.body)
+          : { cleanText: m.body, replyTo: null };
       return {
         id: m.id,
         role: 'assistant' as const,
-        text: m.body,
+        text: recovered.cleanText,
         createdAt,
         senderLabel: 'Cliente',
         ...rich,
+        ...(recovered.replyTo && !rich.replyTo
+          ? { replyTo: recovered.replyTo }
+          : {}),
       };
     }
     return {

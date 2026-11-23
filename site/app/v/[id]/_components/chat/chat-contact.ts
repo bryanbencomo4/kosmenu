@@ -54,6 +54,10 @@ export type ChatContactCardData = {
   whatsappUrl: string;
   /** Digits or pretty label for display. */
   label: string;
+  /** Business display name (WhatsApp contact header). */
+  businessName: string;
+  /** Optional circular avatar (logo). */
+  avatarUrl?: string | null;
   phoneDisplay: string | null;
 };
 
@@ -61,13 +65,16 @@ export function buildRestaurantContactCard(input: {
   whatsappUrl: string | null | undefined;
   phoneDisplay?: string | null;
   businessName?: string | null;
+  avatarUrl?: string | null;
 }): ChatContactCardData | null {
   const url = (input.whatsappUrl || '').trim();
   if (!url) return null;
   const name = (input.businessName || '').trim() || 'el restaurante';
   return {
     whatsappUrl: url,
-    label: `WhatsApp de ${name}`,
+    label: name,
+    businessName: name,
+    avatarUrl: (input.avatarUrl || '').trim() || null,
     phoneDisplay: (input.phoneDisplay || '').trim() || null,
   };
 }

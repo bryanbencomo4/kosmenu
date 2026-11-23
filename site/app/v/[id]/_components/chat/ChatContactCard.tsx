@@ -1,43 +1,78 @@
 'use client';
 
-import { MessageCircle } from 'lucide-react';
-
 import type { ChatContactCardData } from './chat-contact';
 
 type ChatContactCardProps = {
   contact: ChatContactCardData;
 };
 
+/**
+ * WhatsApp Business–style contact share card:
+ * avatar + name + "Cuenta de empresa" + "Mensaje" (no "Ver la empresa").
+ */
 export function ChatContactCard({ contact }: ChatContactCardProps) {
+  const name = (contact.businessName || contact.label || 'Restaurante').trim();
+  const initial = name.charAt(0).toUpperCase() || 'R';
+
   return (
     <div
-      className="w-full max-w-[min(100%,22.5rem)] overflow-hidden rounded-xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] shadow-sm"
+      className="w-full max-w-[min(100%,18.5rem)] overflow-hidden rounded-xl shadow-sm"
       data-chat-contact="1"
+      style={{
+        backgroundColor: 'var(--chat-bubble-out)',
+        color: 'var(--chat-text)',
+      }}
     >
-      <div className="px-3 py-2.5">
-        <p className="text-[13px] font-semibold text-[var(--chat-text)]">
-          {contact.label}
-        </p>
-        {contact.phoneDisplay ? (
-          <p className="mt-0.5 text-[12px] text-[var(--chat-text-muted)]">
-            {contact.phoneDisplay}
-          </p>
+      <div className="flex items-center gap-3 px-3 py-3">
+        {contact.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={contact.avatarUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-full object-cover"
+            data-chat-contact-avatar="1"
+          />
         ) : (
-          <p className="mt-0.5 text-[12px] text-[var(--chat-text-muted)]">
-            Te conectamos con una persona del local por WhatsApp.
-          </p>
+          <span
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[18px] font-bold"
+            style={{
+              backgroundColor: 'var(--chat-send)',
+              color: 'var(--chat-send-fg)',
+            }}
+            aria-hidden
+          >
+            {initial}
+          </span>
         )}
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate text-[15px] font-semibold leading-tight"
+            style={{ color: 'var(--chat-send)' }}
+            data-chat-contact-name="1"
+          >
+            {name}
+          </p>
+          <p className="mt-0.5 text-[12.5px] leading-tight text-[var(--chat-text-muted)]">
+            Cuenta de empresa
+          </p>
+        </div>
       </div>
-      <div className="border-t border-[var(--chat-card-border)] p-2">
+
+      <div
+        className="border-t"
+        style={{
+          borderColor: 'color-mix(in srgb, var(--chat-text) 14%, transparent)',
+        }}
+      >
         <a
           href={contact.whatsappUrl}
           target="_blank"
           rel="noreferrer noopener"
           data-chat-contact-whatsapp="1"
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--chat-send)] px-3 py-2 text-[13px] font-semibold text-[var(--chat-send-fg)] active:opacity-90"
+          className="flex w-full items-center justify-center px-3 py-2.5 text-[15px] font-medium active:opacity-80"
+          style={{ color: 'var(--chat-send)' }}
         >
-          <MessageCircle className="h-4 w-4" strokeWidth={2.2} aria-hidden />
-          Abrir WhatsApp
+          Mensaje
         </a>
       </div>
     </div>

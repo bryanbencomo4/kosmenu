@@ -181,10 +181,15 @@ export function buildChatReplyRef(
 
 export const CHAT_API_TEXT_MAX = 2000;
 
+/** Matches the model-only reply prefix leaked into stored consumer bodies. */
+export const REPLY_CONTEXT_PREFIX_RE =
+  /^\(Respondiendo a \[([^\]]+)\]: "([\s\S]*?)"\)\s*/;
+
 /**
  * Context line prepended to the API copy of a user's reply, e.g.
  * `(Respondiendo a [assistant]: "La Hawaiana…")\n`. Prefers the text found in
  * history (by messageId) over the client preview; falls back to the preview.
+ * Never persist this prefix in supervision `body` — use `replyTo` payload instead.
  */
 export function buildReplyContextLine(
   reply: ChatReplyRef,
@@ -206,4 +211,38 @@ export function prefixTextWithReplyContext(
 ): string {
   if (!reply) return text;
   return `${buildReplyContextLine(reply, history)}${text}`.slice(0, maxLength);
+}
+
+/** Strip model-only reply prefix from a stored body (display / persistence). */
+export function stripReplyContextPrefix(text: string): string {
+  return (text || '').replace(REPLY_CONTEXT_PREFIX_RE, '').trimStart();
+}
+
+/**
+ * Recover a display reply quote from a leaked prefix when `payload.replyTo`
+ * was never stored (older turns).
+ */
+export function recoverReplyToFromPrefixedBody(
+  body: string,
+): { cleanText: string; replyTo: ChatReplyRef | null } {
+  const raw = body || '';
+  const match = REPLY_CONTEXT_PREFIX_RE.exec(raw);
+  if (!match) return { cleanText: raw, replyTo: null };
+  const roleRaw = (match[1] || '').trim();
+  const role =
+    roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system'
+      ? roleRaw
+      : 'assistant';
+  const preview = clampReplyPreview((match[2] || '').replace(/'/g, '"') || 'Mensaje');
+  const cleanText = raw.slice(match[0].length).trimStart();
+  return {
+    cleanText: cleanText || ' ',
+    replyTo: {
+      messageId: `recovered_${role}_${preview.slice(0, 24)}`,
+      role,
+      preview,
+      authorLabel:
+        role === 'user' ? 'Cliente' : role === 'system' ? 'Sistema' : 'Asistente',
+    },
+  };
 }

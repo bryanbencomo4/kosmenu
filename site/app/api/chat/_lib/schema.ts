@@ -47,6 +47,17 @@ export const pendingConfigurationSchema = z.object({
     .default([]),
 });
 
+export const chatReplyToSchema = z
+  .object({
+    messageId: z.string().trim().min(1).max(120),
+    role: z.enum(['user', 'assistant', 'system']),
+    preview: z.string().trim().min(1).max(280),
+    kind: z.enum(['text', 'image', 'audio', 'file', 'location']).optional(),
+    thumbUrl: z.string().trim().max(400_000).nullable().optional(),
+    authorLabel: z.string().trim().max(80).nullable().optional(),
+  })
+  .strict();
+
 export const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1).max(40),
   sessionId: z
@@ -70,6 +81,13 @@ export const chatRequestSchema = z.object({
     .optional(),
   /** Completes a pending combinación / size ask without Gemini. */
   pending_configuration: pendingConfigurationSchema.optional(),
+  /**
+   * Clean consumer text for supervision UI (without model-only reply prefix).
+   * Model still receives prefixed text in `messages`.
+   */
+  display_text: z.string().trim().min(1).max(2000).optional(),
+  /** Structured reply quote for WhatsApp-style rendering in the merchant panel. */
+  reply_to: chatReplyToSchema.optional(),
 });
 
 export type ChatRequestBody = z.infer<typeof chatRequestSchema>;

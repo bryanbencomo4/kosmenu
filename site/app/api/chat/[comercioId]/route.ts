@@ -251,12 +251,26 @@ export async function POST(
       shouldSkipGemini,
       mintSupervisionFeedToken,
     } = await import('../_lib/supervision');
+    // Model may receive a reply-context prefix; store clean body + replyTo for WA UI.
+    const { stripReplyContextPrefix } = await import(
+      '../../../v/[id]/_components/chat/chat-gestures'
+    );
+    const displayText = (
+      body.display_text ||
+      stripReplyContextPrefix(last.text) ||
+      last.text
+    ).trim();
+    const replyToPayload =
+      body.reply_to && typeof body.reply_to === 'object'
+        ? { replyTo: body.reply_to }
+        : {};
     const persisted = await persistConsumerTurn({
       comercioId: commerceId,
       commerceName: String(comercio.nombre || ''),
       sessionId,
-      text: last.text,
+      text: displayText,
       publicWhatsapp: comercio.whatsapp || null,
+      payload: replyToPayload,
     });
     if (persisted.ok && persisted.conversationId) {
       supervisionConversationId = persisted.conversationId;

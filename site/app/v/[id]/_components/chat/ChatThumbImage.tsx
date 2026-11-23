@@ -302,10 +302,15 @@ export function ChatThumbImage({
         <button
           type="button"
           data-chat-thumb-retry="1"
+          data-chat-no-swipe="1"
           aria-label="Reintentar carga de imagen"
-          className="inline-flex items-center gap-1 rounded-full bg-[var(--chat-send)] px-2 py-0.5 text-[10px] font-bold text-[var(--chat-send-fg)] shadow-sm"
+          className="relative z-10 inline-flex items-center gap-1 rounded-full bg-[var(--chat-send)] px-2 py-0.5 text-[10px] font-bold text-[var(--chat-send-fg)] shadow-sm pointer-events-auto"
           onClick={handleManualRetry}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => event.stopPropagation()}
         >
           <RefreshCw className="h-3 w-3" strokeWidth={2.4} aria-hidden />
           Reintentar

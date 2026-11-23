@@ -1320,6 +1320,7 @@ export function ChatAssistantView({
                   whatsappUrl,
                   phoneDisplay: whatsappDisplay,
                   businessName,
+                  avatarUrl: logoUrl,
                 }),
               }
             : undefined,
@@ -1353,6 +1354,7 @@ export function ChatAssistantView({
       whatsappUrl,
       whatsappDisplay,
       businessName,
+      logoUrl,
       playAssistantReceivedOnce,
       mirrorLocalTurn,
     ],
@@ -1368,6 +1370,7 @@ export function ChatAssistantView({
         whatsappUrl,
         phoneDisplay: whatsappDisplay,
         businessName,
+        avatarUrl: logoUrl,
       });
       if (!card) {
         const empty = createMessage(
@@ -1403,6 +1406,7 @@ export function ChatAssistantView({
       whatsappUrl,
       whatsappDisplay,
       businessName,
+      logoUrl,
       playAssistantReceivedOnce,
       mirrorLocalTurn,
     ],
@@ -1794,6 +1798,9 @@ export function ChatAssistantView({
         const sizeOnly =
           /^(normal|grande|mediana|familiar)$/i.test(userText.trim()) &&
           Boolean(pendingNow);
+        const lastUserForReply = [...history]
+          .reverse()
+          .find((m) => m.role === 'user');
         const res = await fetch(`/api/chat/${encodeURIComponent(comercioId)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1801,6 +1808,11 @@ export function ChatAssistantView({
             messages: apiMessages.slice(-24),
             sessionId,
             cart_snapshot: cartSnapshot.slice(0, 40),
+            // Clean body for merchant panel; model still gets prefixed text above.
+            display_text: userText,
+            ...(lastUserForReply?.replyTo
+              ? { reply_to: lastUserForReply.replyTo }
+              : {}),
             // Always attach pending so the Gemini simulator can complete size
             // even when it short-circuits deterministic_action.
             ...(pendingNow
