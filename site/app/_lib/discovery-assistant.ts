@@ -31,12 +31,19 @@ export function isDiscoveryAssistantApiEnabled(
   return envFlagOn(env.DISCOVERY_ASSISTANT_ENABLED);
 }
 
-/** Deterministic mock agent — never calls Google. Forced off in production. */
+/**
+ * Deterministic mock agent — never calls Google.
+ * Forced off in production. Default ON in test so Vitest/Playwright need no billed Gemini.
+ */
 export function isDiscoveryAssistantSimulate(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if ((env.NODE_ENV ?? '').trim().toLowerCase() === 'production') return false;
-  return envFlagOn(env.DISCOVERY_ASSISTANT_SIMULATE);
+  const nodeEnv = (env.NODE_ENV ?? '').trim().toLowerCase();
+  if (nodeEnv === 'production') return false;
+  const raw = (env.DISCOVERY_ASSISTANT_SIMULATE ?? '').trim().toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'no') return false;
+  if (raw === '1' || raw === 'true' || raw === 'yes') return true;
+  return nodeEnv === 'test';
 }
 
 /**
