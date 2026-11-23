@@ -25,6 +25,7 @@ import {
   clearSupervisionFeedToken,
   loadSupervisionAfterSeq,
   loadSupervisionFeedToken,
+  rotateChatSessionId,
   saveChatHistory,
   saveChatSessionId,
   saveSupervisionAfterSeq,
@@ -883,7 +884,7 @@ export function ChatAssistantView({
 
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
-    ensureChatSessionId(comercioId);
+    rotateChatSessionId(comercioId);
     setHumanSupervisionActive(false);
     setSupervisionClosed(false);
     setSupervisionWatchActive(false);
@@ -892,6 +893,7 @@ export function ChatAssistantView({
     supervisionFeedTokenRef.current = null;
     supervisionConversationIdRef.current = null;
     welcomeSyncedRef.current = false;
+    clearSupervisionFeedToken(comercioId);
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -2536,6 +2538,15 @@ export function ChatAssistantView({
           <p className="mx-auto max-w-5xl text-center text-[13.5px] leading-snug text-[var(--chat-text-muted)]">
             No puedes enviar mensajes porque esta conversación está archivada.
           </p>
+          <button
+            type="button"
+            className="mx-auto mt-2.5 inline-flex min-h-10 items-center justify-center rounded-full px-5 text-[13.5px] font-semibold text-[var(--chat-send-fg)]"
+            style={{ backgroundColor: 'var(--chat-send)' }}
+            onClick={resetConversation}
+            data-chat-new-conversation="1"
+          >
+            Nueva conversación
+          </button>
         </div>
       ) : (
         <ChatComposer

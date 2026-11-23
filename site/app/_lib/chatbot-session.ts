@@ -48,14 +48,26 @@ export function saveChatSessionId(comercioId: string, sessionId: string) {
   }
 }
 
+function mintChatSessionId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `s_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`
+    : `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function ensureChatSessionId(comercioId: string): string {
   const existing = loadChatSessionId(comercioId);
   if (existing) return existing;
-  const id =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? `s_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`
-      : `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const id = mintChatSessionId();
   saveChatSessionId(comercioId, id);
+  return id;
+}
+
+/** Start a fresh consumer session (new supervision conversation). */
+export function rotateChatSessionId(comercioId: string): string {
+  const id = mintChatSessionId();
+  saveChatSessionId(comercioId, id);
+  clearSupervisionFeedToken(comercioId);
+  saveSupervisionAfterSeq(comercioId, 0);
   return id;
 }
 
