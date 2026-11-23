@@ -35,7 +35,7 @@ describe('chat human timing', () => {
     );
     expect(view).toMatch(/humanTypingMinMs/);
     expect(view).toMatch(/humanReadBeatMs/);
-    expect(view).toMatch(/voicePending:\s*true/);
+    expect(view).toMatch(/voicePending:\s*!humanSupervisionActive/);
     expect(view).toMatch(/data-chat-shell/);
     expect(view).toMatch(/max-w-5xl/);
     expect(bubble).toMatch(/pending=\{message\.voicePending\}/);

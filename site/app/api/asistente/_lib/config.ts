@@ -33,6 +33,7 @@ export type DiscoveryAssistantConfig = {
   rateLimitPerIpPerMinute: number;
   maxRequestsPerSession: number;
   maxMonthlyRequests: number;
+  maxMonthlyTokens: number;
   defaultPageSize: number;
   usageDir: string;
 };
@@ -86,6 +87,7 @@ export function getDiscoveryAssistantConfig(
     rateLimitPerIpPerMinute: envInt('DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN', 30, env),
     maxRequestsPerSession: envInt('DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION', 40, env),
     maxMonthlyRequests: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS', 2_000, env),
+    maxMonthlyTokens: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS', 2_000_000, env),
     defaultPageSize: envInt('DISCOVERY_ASSISTANT_PAGE_SIZE', 24, env),
     usageDir:
       (env.DISCOVERY_ASSISTANT_USAGE_DIR ?? '').trim() ||

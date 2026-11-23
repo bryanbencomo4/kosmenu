@@ -19,12 +19,16 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type { DiscoveryAssistantConfig } from './config';
 
 export type DiscoveryUsagePeriod = {
   agent: 'discovery';
   periodMonth: string;
   requests: number;
+  tokensInput?: number;
+  tokensOutput?: number;
   updatedAt: string;
 };
 
@@ -185,13 +189,76 @@ function reserveFilesystem(params: {
   });
 }
 
+async function reservePostgres(params: {
+  config: DiscoveryAssistantConfig;
+  sessionId: string;
+  supabase: SupabaseClient;
+}): Promise<{ period: DiscoveryUsagePeriod; session: DiscoverySessionUsage }> {
+  const periodMonth = currentPeriodMonth();
+  const { data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
+    p_session_id: params.sessionId,
+    p_max_session_requests: params.config.maxRequestsPerSession,
+    p_period_month: periodMonth,
+    p_max_monthly_requests: params.config.maxMonthlyRequests,
+    p_max_monthly_tokens: params.config.maxMonthlyTokens,
+    p_model: params.config.model,
+  });
+
+  if (error) {
+    const msg = error.message || 'discovery quota rpc failed';
+    if (/session request limit/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 429, 'session_request_limit');
+    }
+    if (/monthly request limit/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 429, 'monthly_request_limit');
+    }
+    if (/monthly token limit/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 429, 'monthly_token_limit');
+    }
+    if (/killed/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 503, 'discovery_killed');
+    }
+    if (/Could not find the function|schema cache|does not exist/i.test(msg)) {
+      throw new DiscoveryQuotaError(
+        'Discovery postgres quota RPC missing — apply migration first',
+        503,
+        'postgres_quota_not_ready',
+      );
+    }
+    throw new DiscoveryQuotaError(msg, 503, 'quota_unavailable');
+  }
+
+  const payload = (data ?? {}) as {
+    session?: Record<string, unknown>;
+    period?: Record<string, unknown>;
+  };
+  const session = payload.session ?? {};
+  const period = payload.period ?? {};
+  return {
+    session: {
+      sessionId: String(session.session_id ?? params.sessionId),
+      requests: Number(session.requests ?? 0),
+      updatedAt: String(session.updated_at ?? new Date().toISOString()),
+    },
+    period: {
+      agent: 'discovery',
+      periodMonth: String(period.period_month ?? periodMonth),
+      requests: Number(period.requests ?? 0),
+      tokensInput: Number(period.tokens_input ?? 0),
+      tokensOutput: Number(period.tokens_output ?? 0),
+      updatedAt: String(period.updated_at ?? new Date().toISOString()),
+    },
+  };
+}
+
 /**
  * Reserve one request against the configured backend.
- * Postgres path is a stub until RPCs exist — throws quota_unavailable.
+ * Postgres uses reserve_ai_discovery_quota (isolated from restaurant chatbot tables).
  */
 export async function reserveDiscoveryRequest(params: {
   config: DiscoveryAssistantConfig;
   sessionId: string;
+  supabase?: SupabaseClient | null;
 }): Promise<{ period: DiscoveryUsagePeriod; session: DiscoverySessionUsage }> {
   const { config, sessionId } = params;
   if (config.quotaBackend === 'none') {
@@ -204,10 +271,16 @@ export async function reserveDiscoveryRequest(params: {
   if (config.quotaBackend === 'filesystem') {
     return reserveFilesystem({ config, sessionId });
   }
-  // postgres reserved for future atomic RPCs — not implemented in this phase.
-  throw new DiscoveryQuotaError(
-    'Discovery postgres quota is not ready',
-    503,
-    'postgres_quota_not_ready',
-  );
+  if (!params.supabase) {
+    throw new DiscoveryQuotaError(
+      'Discovery postgres quota requires Supabase client',
+      503,
+      'quota_unavailable',
+    );
+  }
+  return reservePostgres({
+    config,
+    sessionId,
+    supabase: params.supabase,
+  });
 }

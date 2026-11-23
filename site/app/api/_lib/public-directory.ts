@@ -785,7 +785,10 @@ function sortClientDirectory(
     if (right.ratingCount !== left.ratingCount) {
       return right.ratingCount - left.ratingCount;
     }
-    return left.nombre.localeCompare(right.nombre, 'es');
+    const byName = left.nombre.localeCompare(right.nombre, 'es');
+    if (byName !== 0) return byName;
+    // Stable pagination: same filters/order never reshuffle across offset pages.
+    return left.id.localeCompare(right.id);
   });
 }
 
@@ -833,7 +836,9 @@ function sortByDiscoveryRelevance(
     .sort((left, right) => {
       if (left._openRank !== right._openRank) return left._openRank - right._openRank;
       if (right._rank !== left._rank) return right._rank - left._rank;
-      return left.nombre.localeCompare(right.nombre, 'es');
+      const byName = left.nombre.localeCompare(right.nombre, 'es');
+      if (byName !== 0) return byName;
+      return left.id.localeCompare(right.id);
     })
     .map(({ _rank: _ignored, _openRank: _openIgnored, ...entry }) => entry);
 }

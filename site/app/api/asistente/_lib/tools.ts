@@ -4,13 +4,10 @@
  */
 
 import {
-  buildDiscoveryChatUrl,
-  canOfferDiscoveryChatLink,
-} from '../../../_lib/discovery-assistant';
-import {
   listClientDirectory,
   type ClientDirectoryBusiness,
 } from '../../_lib/public-directory';
+import { buildServerDiscoveryChatUrl } from './chat-links';
 
 export type DiscoveryRestaurantCard = {
   id: string;
@@ -135,8 +132,9 @@ export function toDiscoveryRestaurantCard(
     paymentChannels: entry.paymentChannels ?? [],
     acceptsVesBcv: entry.acceptsVesBcv === true,
   };
-  if (options?.includeChatLink !== false && canOfferDiscoveryChatLink(entry.slug)) {
-    card.chatUrl = buildDiscoveryChatUrl(entry.slug);
+  if (options?.includeChatLink !== false) {
+    const chatUrl = buildServerDiscoveryChatUrl(entry.slug, entry.id);
+    if (chatUrl) card.chatUrl = chatUrl;
   }
   return card;
 }
@@ -310,13 +308,20 @@ export async function executeDiscoveryTool(
 
   if (name === 'prepare_restaurant_links') {
     const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+    const commerceId =
+      typeof args.id === 'string'
+        ? args.id.trim()
+        : typeof args.commerce_id === 'string'
+          ? args.commerce_id.trim()
+          : '';
     if (!slug) {
       return { ok: false, tool: name, error: 'missing_slug' };
     }
-    const menuUrl = `/v/${encodeURIComponent(slug)}`;
-    const chatUrl = canOfferDiscoveryChatLink(slug)
-      ? buildDiscoveryChatUrl(slug)
-      : null;
+    const menuUrl =
+      typeof args.menuUrl === 'string' && args.menuUrl.trim()
+        ? args.menuUrl.trim()
+        : `/v/${encodeURIComponent(slug)}`;
+    const chatUrl = buildServerDiscoveryChatUrl(slug, commerceId || null);
     return {
       ok: true,
       tool: name,

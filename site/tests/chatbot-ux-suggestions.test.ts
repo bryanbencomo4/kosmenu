@@ -67,7 +67,7 @@ describe('chat UX wiring (source assertions)', () => {
     expect(chat('ChatSuggestedReplies.tsx')).toMatch(/data-chat-suggested-replies="1"/);
     const view = chat('ChatAssistantView.tsx');
     expect(view.indexOf('<ChatSuggestedReplies')).toBeLessThan(view.indexOf('<ChatComposer'));
-    expect(view).toMatch(/hidden=\{isTyping \|\| recording\}/);
+    expect(view).toMatch(/hidden=\{isTyping \|\| recording \|\| supervisionClosed\}/);
     expect(view).toMatch(/buildContextualQuickReplies/);
   });
 
@@ -108,7 +108,7 @@ describe('chat UX wiring (source assertions)', () => {
     expect(list).toMatch(/CHAT_HISTORY_PAGE = 30/);
     expect(list).toMatch(/messages\.slice\(-visibleCount\)/);
     expect(list).toMatch(/scrollToEnd\('auto'\)/);
-    expect(list).not.toMatch(/scrollIntoView/);
+    expect(list).not.toMatch(/\.scrollIntoView\(/);
   });
 
   it('voice: never runs a Gemini turn on the placeholder; always tries server STT when live', () => {

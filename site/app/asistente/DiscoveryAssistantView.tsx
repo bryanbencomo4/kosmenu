@@ -558,11 +558,12 @@ export function DiscoveryAssistantView({
       </div>
 
       <div
-        className="shrink-0 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1"
+        className="relative z-20 shrink-0 border-t px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1"
         style={{
           background: 'var(--chat-composer)',
           borderColor: 'var(--chat-header-border)',
         }}
+        data-discovery-composer-shell="1"
       >
         <DiscoveryComposer
           value={draft}

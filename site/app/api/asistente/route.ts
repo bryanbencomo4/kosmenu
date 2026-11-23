@@ -13,6 +13,7 @@ import {
   getDiscoveryAssistantConfig,
   isDiscoveryGeminiLiveAllowed,
 } from './_lib/config';
+import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { DiscoveryQuotaError, reserveDiscoveryRequest } from './_lib/quota';
 
 export const runtime = 'nodejs';
@@ -130,7 +131,12 @@ export async function POST(request: Request) {
   const live = isDiscoveryGeminiLiveAllowed(config);
   if (live.ok) {
     try {
-      await reserveDiscoveryRequest({ config, sessionId });
+      await reserveDiscoveryRequest({
+        config,
+        sessionId,
+        supabase:
+          config.quotaBackend === 'postgres' ? getServiceSupabaseClient() : null,
+      });
     } catch (err) {
       if (err instanceof DiscoveryQuotaError) {
         // Soft fallback — client can still fetch directory.

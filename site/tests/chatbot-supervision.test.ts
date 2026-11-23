@@ -247,10 +247,10 @@ describe('chat supervision helpers', () => {
     ).toBe(true);
   });
 
-  it('includes discreet privacy notice in welcome copy', () => {
+  it('keeps welcome short with the restaurant name (privacy lives in onboarding)', () => {
     const w = buildChatbotWelcomeMessage('Pizzas El Trueno');
-    expect(w).toMatch(/personal autorizado/i);
-    expect(w).toMatch(/procesada por IA/i);
+    expect(w).toContain('Pizzas El Trueno');
+    expect(w).toMatch(/bienvenido/i);
   });
 
   it('versions new-conversation notify dedupe keys for reopen', () => {

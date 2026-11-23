@@ -60,7 +60,7 @@ export function DiscoveryComposer({
         disabled={!canSend}
         data-testid={sendTestId}
         aria-label="Enviar"
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--chat-send)] text-[var(--chat-send-fg)] disabled:opacity-40"
+        className="relative z-30 grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--chat-send)] text-[var(--chat-send-fg)] disabled:opacity-40"
       >
         <SendHorizontal className="h-4 w-4" aria-hidden />
       </button>

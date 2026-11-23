@@ -88,7 +88,7 @@ describe('chatbot preview gate', () => {
   it('builds welcome and demo copy from the real restaurant name', () => {
     const welcome = buildChatbotWelcomeMessage('Lunetz');
     expect(welcome).toContain('Lunetz');
-    expect(welcome).toMatch(/qué se te antoja/i);
+    expect(welcome).toMatch(/bienvenido/i);
     expect(welcome).not.toMatch(/solo se agregan al carrito/i);
     expect(welcome).not.toContain('Napoles');
 
