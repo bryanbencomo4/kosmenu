@@ -486,6 +486,8 @@ export function ChatAssistantView({
   pendingConfigurationRef.current = pendingConfiguration;
   /** Merchant is actively handling — skip expecting Gemini replies; speeds feed. */
   const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
+  /** Merchant archived the thread — lock composer like WhatsApp until reopen. */
+  const [supervisionClosed, setSupervisionClosed] = useState(false);
   /** Watch feed after server created a supervised conversation (idle takeover). */
   const [supervisionWatchActive, setSupervisionWatchActive] = useState(false);
   const supervisionAfterSeqRef = useRef(loadSupervisionAfterSeq(comercioId));
@@ -661,7 +663,11 @@ export function ChatAssistantView({
           if (supervisionSeenIdsRef.current.has(m.id)) continue;
           supervisionSeenIdsRef.current.add(m.id);
           existingBodies.add(body);
-          next.push(createMessage('assistant', body, { demo: false }));
+          next.push(
+            createMessage(m.role === 'system' ? 'system' : 'assistant', body, {
+              senderLabel: m.role === 'staff' ? 'Restaurante' : undefined,
+            }),
+          );
           merged += 1;
           supervisionAfterSeqRef.current = Math.max(
             supervisionAfterSeqRef.current,
@@ -789,8 +795,13 @@ export function ChatAssistantView({
         const status = data.conversation?.status;
         if (status === 'human_handling' || status === 'needs_attention') {
           setHumanSupervisionActive(true);
-        } else if (status === 'ai_handling' || status === 'closed') {
+          setSupervisionClosed(false);
+        } else if (status === 'closed') {
           setHumanSupervisionActive(false);
+          setSupervisionClosed(true);
+        } else if (status === 'ai_handling') {
+          setHumanSupervisionActive(false);
+          setSupervisionClosed(false);
         }
         const incoming = (data.messages || []).filter(
           (m) => m.role === 'staff' || m.role === 'system',
@@ -804,12 +815,16 @@ export function ChatAssistantView({
             supervisionSeenIdsRef.current.add(m.id);
             const rich = chatRichFieldsFromPayload(m.payload);
             next.push(
-              createMessage('assistant', m.body, {
-                id: m.id,
-                demo: m.role === 'system',
-                senderLabel: m.role === 'staff' ? 'Restaurante' : undefined,
-                ...rich,
-              }),
+              createMessage(
+                m.role === 'system' ? 'system' : 'assistant',
+                m.body,
+                {
+                  id: m.id,
+                  senderLabel:
+                    m.role === 'staff' ? 'Restaurante' : undefined,
+                  ...rich,
+                },
+              ),
             );
             supervisionAfterSeqRef.current = Math.max(
               supervisionAfterSeqRef.current,
@@ -870,6 +885,7 @@ export function ChatAssistantView({
     clearChatHistory(comercioId);
     ensureChatSessionId(comercioId);
     setHumanSupervisionActive(false);
+    setSupervisionClosed(false);
     setSupervisionWatchActive(false);
     supervisionAfterSeqRef.current = 0;
     supervisionSeenIdsRef.current = new Set();
@@ -2489,11 +2505,11 @@ export function ChatAssistantView({
 
       <ChatSuggestedReplies
         chips={suggestedChips}
-        hidden={isTyping || recording}
+        hidden={isTyping || recording || supervisionClosed}
         onPick={onPickSuggestion}
       />
 
-      {humanSupervisionActive ? (
+      {humanSupervisionActive && !supervisionClosed ? (
         <div
           className="shrink-0 border-t px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
           style={{
@@ -2506,34 +2522,59 @@ export function ChatAssistantView({
         </div>
       ) : null}
 
-      <ChatComposer
-        onRecordingChange={setRecording}
-        value={draft}
-        disabled={isTyping}
-        replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
-        onChange={setDraft}
-        onSend={() => {
-          void sendMessage();
-        }}
-        onSendVoice={
-          humanSupervisionActive
-            ? undefined
-            : (payload) => {
-                void sendVoice(payload);
-              }
-        }
-        onSendFile={
-          humanSupervisionActive
-            ? undefined
-            : (payload) => {
-                void sendFile(payload);
-              }
-        }
-        onShareLocation={(location) => {
-          void shareLocation(location);
-        }}
-      />
+      {supervisionClosed ? (
+        <div
+          className="shrink-0 border-t px-4 py-3.5"
+          style={{
+            backgroundColor: 'var(--chat-composer)',
+            borderColor: 'var(--chat-header-border)',
+            paddingBottom: 'max(0.85rem, env(safe-area-inset-bottom))',
+          }}
+          role="status"
+          data-chat-composer-locked="1"
+        >
+          <p className="mx-auto max-w-5xl text-center text-[13.5px] leading-snug text-[var(--chat-text-muted)]">
+            No puedes enviar mensajes porque esta conversación está archivada.
+          </p>
+          <button
+            type="button"
+            className="mx-auto mt-2 block text-[13px] font-semibold text-[var(--chat-send)]"
+            onClick={() => setSupervisionClosed(false)}
+            data-chat-reopen="1"
+          >
+            Escribir de nuevo
+          </button>
+        </div>
+      ) : (
+        <ChatComposer
+          onRecordingChange={setRecording}
+          value={draft}
+          disabled={isTyping}
+          replyTo={replyTo}
+          onClearReply={() => setReplyTo(null)}
+          onChange={setDraft}
+          onSend={() => {
+            void sendMessage();
+          }}
+          onSendVoice={
+            humanSupervisionActive
+              ? undefined
+              : (payload) => {
+                  void sendVoice(payload);
+                }
+          }
+          onSendFile={
+            humanSupervisionActive
+              ? undefined
+              : (payload) => {
+                  void sendFile(payload);
+                }
+          }
+          onShareLocation={(location) => {
+            void shareLocation(location);
+          }}
+        />
+      )}
       </div>
 
       {catalog ? (

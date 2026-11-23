@@ -267,14 +267,15 @@ export function ChatMessageBubble({
     const cards = message.productCards || [];
     return (
       <div
-        className="flex flex-col items-center gap-1.5 px-3 py-1"
+        className="flex flex-col items-center gap-1.5 px-4 py-1.5"
         role="status"
         data-chat-role="system"
         data-chat-applied={cards.length ? '1' : '0'}
       >
         <p
-          className="max-w-[min(100%,18rem)] rounded-md px-2.5 py-1 text-center text-[11.5px] font-medium leading-snug text-[var(--chat-text-muted)] shadow-sm"
+          className="max-w-[min(100%,22rem)] rounded-lg px-3 py-1.5 text-center text-[12px] font-medium leading-snug text-[var(--chat-text-muted)] shadow-sm"
           style={{ backgroundColor: 'var(--chat-system)' }}
+          data-chat-system-notice="1"
         >
           {message.text}
         </p>
