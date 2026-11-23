@@ -26,27 +26,12 @@ import {
   type DiscoveryAssistantConfig,
 } from './config';
 
-/** In-process idempotency for token posts (same requestId must not double-count). */
+/** In-process fast-path; durable idempotency lives in Postgres ledger / filesystem ledger. */
 const recordedTokenRequestIds = new Map<string, number>();
 const TOKEN_IDEMPOTENCY_TTL_MS = 15 * 60_000;
 
-function rememberTokenRecord(requestId: string) {
-  const now = Date.now();
-  for (const [id, at] of recordedTokenRequestIds) {
-    if (now - at > TOKEN_IDEMPOTENCY_TTL_MS) recordedTokenRequestIds.delete(id);
-  }
-  recordedTokenRequestIds.set(requestId, now);
-}
-
-function alreadyRecordedTokens(requestId: string): boolean {
-  const at = recordedTokenRequestIds.get(requestId);
-  if (at == null) return false;
-  if (Date.now() - at > TOKEN_IDEMPOTENCY_TTL_MS) {
-    recordedTokenRequestIds.delete(requestId);
-    return false;
-  }
-  return true;
-}
+/** Server-issued request ids: `r_` + 8–40 alphanumerics (see createRequestId). */
+export const DISCOVERY_REQUEST_ID_RE = /^r_[a-zA-Z0-9]{8,40}$/;
 
 export type DiscoveryUsagePeriod = {
   agent: 'discovery';
@@ -74,6 +59,53 @@ export class DiscoveryQuotaError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+export function assertValidDiscoveryRequestId(requestId: string): string {
+  const id = (requestId || '').trim();
+  if (!DISCOVERY_REQUEST_ID_RE.test(id)) {
+    throw new DiscoveryQuotaError(
+      'Invalid discovery request id',
+      400,
+      'invalid_request_id',
+    );
+  }
+  return id;
+}
+
+function rememberTokenRecord(requestId: string) {
+  const now = Date.now();
+  for (const [id, at] of recordedTokenRequestIds) {
+    if (now - at > TOKEN_IDEMPOTENCY_TTL_MS) recordedTokenRequestIds.delete(id);
+  }
+  recordedTokenRequestIds.set(requestId, now);
+}
+
+function alreadyRecordedTokens(requestId: string): boolean {
+  const at = recordedTokenRequestIds.get(requestId);
+  if (at == null) return false;
+  if (Date.now() - at > TOKEN_IDEMPOTENCY_TTL_MS) {
+    recordedTokenRequestIds.delete(requestId);
+    return false;
+  }
+  return true;
+}
+
+type FilesystemRequestLedger = {
+  requestId: string;
+  sessionId: string;
+  periodMonth: string;
+  reservedAt: string;
+  tokensRecordedAt?: string | null;
+  tokensInput?: number;
+  tokensOutput?: number;
+};
+
+function requestLedgerPath(dir: string, requestId: string) {
+  return join(
+    dir,
+    `request_${requestId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}.json`,
+  );
 }
 
 export function currentPeriodMonth(now = new Date()): string {
@@ -183,10 +215,25 @@ function loadSessionUsage(
 function reserveFilesystem(params: {
   config: DiscoveryAssistantConfig;
   sessionId: string;
+  requestId?: string | null;
 }): { period: DiscoveryUsagePeriod; session: DiscoverySessionUsage } {
   assertFilesystemAllowed();
   const { config, sessionId } = params;
+  const requestId = params.requestId
+    ? assertValidDiscoveryRequestId(params.requestId)
+    : null;
   return withFileLock(config.usageDir, `discovery_${sessionId}`, () => {
+    if (requestId) {
+      const ledgerFile = requestLedgerPath(config.usageDir, requestId);
+      const existing = readJson<FilesystemRequestLedger | null>(ledgerFile, null);
+      if (existing?.reservedAt) {
+        return {
+          period: loadPeriodUsage(config, existing.periodMonth),
+          session: loadSessionUsage(config, existing.sessionId),
+        };
+      }
+    }
+
     const period = loadPeriodUsage(config);
     if (period.requests >= config.maxMonthlyRequests) {
       throw new DiscoveryQuotaError(
@@ -211,6 +258,16 @@ function reserveFilesystem(params: {
     session.updatedAt = new Date().toISOString();
     writeJsonAtomic(sessionPath(config.usageDir, sessionId), session);
 
+    if (requestId) {
+      writeJsonAtomic(requestLedgerPath(config.usageDir, requestId), {
+        requestId,
+        sessionId,
+        periodMonth: period.periodMonth,
+        reservedAt: new Date().toISOString(),
+        tokensRecordedAt: null,
+      } satisfies FilesystemRequestLedger);
+    }
+
     return { period, session };
   });
 }
@@ -218,17 +275,35 @@ function reserveFilesystem(params: {
 async function reservePostgres(params: {
   config: DiscoveryAssistantConfig;
   sessionId: string;
+  requestId?: string | null;
   supabase: SupabaseClient;
 }): Promise<{ period: DiscoveryUsagePeriod; session: DiscoverySessionUsage }> {
   const periodMonth = currentPeriodMonth();
-  const { data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
+  const requestId = params.requestId
+    ? assertValidDiscoveryRequestId(params.requestId)
+    : null;
+  const baseArgs = {
     p_session_id: params.sessionId,
     p_max_session_requests: params.config.maxRequestsPerSession,
     p_period_month: periodMonth,
     p_max_monthly_requests: params.config.maxMonthlyRequests,
     p_max_monthly_tokens: params.config.maxMonthlyTokens,
     p_model: params.config.model,
+  };
+
+  let { data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
+    ...baseArgs,
+    ...(requestId ? { p_request_id: requestId } : {}),
   });
+
+  // Migration 20261123180000 not applied yet — retry legacy 6-arg signature.
+  if (
+    error &&
+    requestId &&
+    /Could not find the function|schema cache|does not exist/i.test(error.message || '')
+  ) {
+    ({ data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', baseArgs));
+  }
 
   if (error) {
     const msg = error.message || 'discovery quota rpc failed';
@@ -243,6 +318,9 @@ async function reservePostgres(params: {
     }
     if (/killed/i.test(msg)) {
       throw new DiscoveryQuotaError(msg, 503, 'discovery_killed');
+    }
+    if (/invalid discovery request/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 400, 'invalid_request_id');
     }
     if (/Could not find the function|schema cache|does not exist/i.test(msg)) {
       throw new DiscoveryQuotaError(
@@ -280,10 +358,12 @@ async function reservePostgres(params: {
 /**
  * Reserve one request against the configured backend.
  * Postgres uses reserve_ai_discovery_quota (isolated from restaurant chatbot tables).
+ * Pass server-issued requestId for durable cross-instance idempotency.
  */
 export async function reserveDiscoveryRequest(params: {
   config: DiscoveryAssistantConfig;
   sessionId: string;
+  requestId?: string | null;
   supabase?: SupabaseClient | null;
 }): Promise<{ period: DiscoveryUsagePeriod; session: DiscoverySessionUsage }> {
   const { config, sessionId } = params;
@@ -295,7 +375,11 @@ export async function reserveDiscoveryRequest(params: {
     );
   }
   if (config.quotaBackend === 'filesystem') {
-    return reserveFilesystem({ config, sessionId });
+    return reserveFilesystem({
+      config,
+      sessionId,
+      requestId: params.requestId,
+    });
   }
   if (!params.supabase) {
     throw new DiscoveryQuotaError(
@@ -307,25 +391,49 @@ export async function reserveDiscoveryRequest(params: {
   return reservePostgres({
     config,
     sessionId,
+    requestId: params.requestId,
     supabase: params.supabase,
   });
 }
 
 function recordFilesystemTokens(params: {
   config: DiscoveryAssistantConfig;
+  requestId: string;
   tokensInput: number;
   tokensOutput: number;
   estimatedCost: number | null;
   model: string;
-}): DiscoveryUsagePeriod {
+}): DiscoveryUsagePeriod | null {
   assertFilesystemAllowed();
   const periodMonth = currentPeriodMonth();
+  const requestId = assertValidDiscoveryRequestId(params.requestId);
   return withFileLock(params.config.usageDir, `discovery_tokens_${periodMonth}`, () => {
+    const ledgerFile = requestLedgerPath(params.config.usageDir, requestId);
+    const ledger = readJson<FilesystemRequestLedger | null>(ledgerFile, null);
+    if (!ledger?.reservedAt) {
+      throw new DiscoveryQuotaError(
+        'Discovery request not reserved',
+        503,
+        'request_not_reserved',
+      );
+    }
+    if (ledger.tokensRecordedAt) {
+      return null;
+    }
+
     const period = loadPeriodUsage(params.config, periodMonth);
     period.tokensInput = (period.tokensInput ?? 0) + Math.max(0, params.tokensInput);
     period.tokensOutput = (period.tokensOutput ?? 0) + Math.max(0, params.tokensOutput);
     period.updatedAt = new Date().toISOString();
     writeJsonAtomic(periodPath(params.config.usageDir, periodMonth), period);
+
+    writeJsonAtomic(ledgerFile, {
+      ...ledger,
+      tokensRecordedAt: new Date().toISOString(),
+      tokensInput: params.tokensInput,
+      tokensOutput: params.tokensOutput,
+    } satisfies FilesystemRequestLedger);
+
     return {
       ...period,
       estimatedCost: params.estimatedCost,
@@ -333,30 +441,10 @@ function recordFilesystemTokens(params: {
   });
 }
 
-async function recordPostgresTokens(params: {
-  config: DiscoveryAssistantConfig;
-  supabase: SupabaseClient;
-  tokensInput: number;
-  tokensOutput: number;
-  estimatedCost: number | null;
-  model: string;
-}): Promise<DiscoveryUsagePeriod> {
-  const periodMonth = currentPeriodMonth();
-  const { data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', {
-    p_period_month: periodMonth,
-    p_tokens_input: Math.max(0, Math.floor(params.tokensInput)),
-    p_tokens_output: Math.max(0, Math.floor(params.tokensOutput)),
-    p_estimated_cost: params.estimatedCost,
-    p_model: params.model,
-  });
-  if (error) {
-    throw new DiscoveryQuotaError(
-      error.message || 'discovery token rpc failed',
-      503,
-      'quota_unavailable',
-    );
-  }
-  const period = (data ?? {}) as Record<string, unknown>;
+function mapPeriodRow(
+  period: Record<string, unknown>,
+  periodMonth: string,
+): DiscoveryUsagePeriod {
   return {
     agent: 'discovery',
     periodMonth: String(period.period_month ?? periodMonth),
@@ -369,10 +457,54 @@ async function recordPostgresTokens(params: {
   };
 }
 
+async function recordPostgresTokens(params: {
+  config: DiscoveryAssistantConfig;
+  supabase: SupabaseClient;
+  requestId: string;
+  tokensInput: number;
+  tokensOutput: number;
+  estimatedCost: number | null;
+  model: string;
+}): Promise<DiscoveryUsagePeriod | null> {
+  const periodMonth = currentPeriodMonth();
+  const requestId = assertValidDiscoveryRequestId(params.requestId);
+  const args = {
+    p_period_month: periodMonth,
+    p_tokens_input: Math.max(0, Math.floor(params.tokensInput)),
+    p_tokens_output: Math.max(0, Math.floor(params.tokensOutput)),
+    p_estimated_cost: params.estimatedCost,
+    p_model: params.model,
+  };
+
+  // Prefer ledger-aware RPC (migration 20261123180000). Fall back if not yet applied.
+  let { data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', {
+    ...args,
+    p_request_id: requestId,
+  });
+
+  if (error && /Could not find the function|schema cache|does not exist/i.test(error.message || '')) {
+    ({ data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', args));
+  }
+
+  if (error) {
+    const msg = error.message || 'discovery token rpc failed';
+    if (/not reserved/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 503, 'request_not_reserved');
+    }
+    if (/invalid discovery request/i.test(msg)) {
+      throw new DiscoveryQuotaError(msg, 400, 'invalid_request_id');
+    }
+    throw new DiscoveryQuotaError(msg, 503, 'quota_unavailable');
+  }
+
+  return mapPeriodRow((data ?? {}) as Record<string, unknown>, periodMonth);
+}
+
 /**
  * Post-turn token accounting. Call once per HTTP requestId after live Gemini.
  * Does not authorize Gemini by itself; reserve must have succeeded first.
  * Token posting is best-effort for cost visibility — request caps remain the hard stop.
+ * With postgres ledger migration applied, same requestId never double-counts across instances.
  */
 export async function recordDiscoveryTokens(params: {
   config: DiscoveryAssistantConfig;
@@ -386,18 +518,19 @@ export async function recordDiscoveryTokens(params: {
   const tout = Math.max(0, Math.floor(params.tokensOutput || 0));
   if (tin === 0 && tout === 0) return null;
 
-  const requestId = (params.requestId || '').trim();
-  if (requestId.length >= 8 && alreadyRecordedTokens(requestId)) {
+  const requestId = assertValidDiscoveryRequestId(params.requestId);
+  if (alreadyRecordedTokens(requestId)) {
     return null;
   }
 
   const cost = estimateDiscoveryCostUsd(tin, tout);
   const { config } = params;
 
-  let period: DiscoveryUsagePeriod;
+  let period: DiscoveryUsagePeriod | null;
   if (config.quotaBackend === 'filesystem') {
     period = recordFilesystemTokens({
       config,
+      requestId,
       tokensInput: tin,
       tokensOutput: tout,
       estimatedCost: cost,
@@ -414,6 +547,7 @@ export async function recordDiscoveryTokens(params: {
     period = await recordPostgresTokens({
       config,
       supabase: params.supabase,
+      requestId,
       tokensInput: tin,
       tokensOutput: tout,
       estimatedCost: cost,
@@ -423,7 +557,7 @@ export async function recordDiscoveryTokens(params: {
     return null;
   }
 
-  if (requestId.length >= 8) rememberTokenRecord(requestId);
+  rememberTokenRecord(requestId);
   return period;
 }
 

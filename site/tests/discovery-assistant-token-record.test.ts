@@ -39,11 +39,12 @@ describe('discovery token recording', () => {
     await reserveDiscoveryRequest({
       config,
       sessionId: 'session-token-test-001',
+      requestId: 'r_tokenTest001abcdef12',
     });
 
     const first = await recordDiscoveryTokens({
       config,
-      requestId: 'request-token-test-001',
+      requestId: 'r_tokenTest001abcdef12',
       model: 'test-model',
       tokensInput: 100,
       tokensOutput: 40,
@@ -51,24 +52,57 @@ describe('discovery token recording', () => {
     expect(first?.tokensInput).toBe(100);
     expect(first?.tokensOutput).toBe(40);
 
+    // Same requestId must not double-count (durable filesystem ledger + in-process).
     const second = await recordDiscoveryTokens({
       config,
-      requestId: 'request-token-test-001',
+      requestId: 'r_tokenTest001abcdef12',
       model: 'test-model',
       tokensInput: 100,
       tokensOutput: 40,
     });
     expect(second).toBeNull();
 
+    await reserveDiscoveryRequest({
+      config,
+      sessionId: 'session-token-test-001',
+      requestId: 'r_tokenTest002abcdef34',
+    });
+    // Clear in-process map so durable ledger is the source of truth for the next assert path.
+    __resetDiscoveryTokenIdempotencyForTests();
     const third = await recordDiscoveryTokens({
       config,
-      requestId: 'request-token-test-002',
+      requestId: 'r_tokenTest002abcdef34',
       model: 'test-model',
       tokensInput: 10,
       tokensOutput: 5,
     });
     expect(third?.tokensInput).toBe(110);
     expect(third?.tokensOutput).toBe(45);
+
+    // Idempotent reserve: same requestId does not burn another session/month slot.
+    const before = await reserveDiscoveryRequest({
+      config,
+      sessionId: 'session-token-test-001',
+      requestId: 'r_tokenTest002abcdef34',
+    });
+    expect(before.session.requests).toBe(2);
+    expect(before.period.requests).toBe(2);
+  });
+
+  it('rejects invalid server request ids', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'disc-quota-bad-'));
+    const config = getDiscoveryAssistantConfig({
+      NODE_ENV: 'test',
+      DISCOVERY_ASSISTANT_QUOTA_BACKEND: 'filesystem',
+      DISCOVERY_ASSISTANT_USAGE_DIR: dir,
+    } as NodeJS.ProcessEnv);
+    await expect(
+      reserveDiscoveryRequest({
+        config,
+        sessionId: 'session-token-test-001',
+        requestId: 'client-forged-id',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_request_id' });
   });
 
   it('pilot budget defaults match Paso C', () => {

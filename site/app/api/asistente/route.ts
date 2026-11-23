@@ -141,6 +141,7 @@ export async function POST(request: Request) {
       await reserveDiscoveryRequest({
         config,
         sessionId,
+        requestId,
         supabase,
       });
     } catch (err) {
