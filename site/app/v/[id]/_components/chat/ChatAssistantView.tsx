@@ -1070,6 +1070,7 @@ export function ChatAssistantView({
   const reactToMessage = useCallback(
     async (message: ChatMessage, emoji: string) => {
       const party = 'consumer' as const;
+      const prevSnapshot = message.reactions || [];
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id !== message.id) return m;
@@ -1087,17 +1088,42 @@ export function ChatAssistantView({
       const token = supervisionFeedTokenRef.current;
       if (!token || !live) return;
       try {
-        await fetch(`/api/chat/${encodeURIComponent(comercioId)}/react`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Chat-Supervision-Feed-Token': token,
+        const res = await fetch(
+          `/api/chat/${encodeURIComponent(comercioId)}/react`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Chat-Supervision-Feed-Token': token,
+            },
+            body: JSON.stringify({ messageId: message.id, emoji }),
+            cache: 'no-store',
           },
-          body: JSON.stringify({ messageId: message.id, emoji }),
-          cache: 'no-store',
-        });
+        );
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          reactions?: ChatMessage['reactions'];
+        } | null;
+        if (!res.ok || !data?.ok) {
+          // Roll back optimistic toggle when the server rejected the react.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === message.id ? { ...m, reactions: prevSnapshot } : m,
+            ),
+          );
+          return;
+        }
+        if (Array.isArray(data.reactions)) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === message.id
+                ? { ...m, reactions: data.reactions }
+                : m,
+            ),
+          );
+        }
       } catch {
-        /* best-effort */
+        /* keep optimistic local state if the network blips */
       }
     },
     [comercioId, live],

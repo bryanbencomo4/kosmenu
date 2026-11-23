@@ -262,6 +262,8 @@ export function panelMessageRichness(row: PanelMessageRow): number {
 /**
  * Merge incremental rows into the open thread.
  * Prefer the richer payload when the same id arrives twice (Realtime lean vs REST).
+ * Reactions are an exception: if incoming defines `reactions` (even `[]`), take it
+ * so a cleared/toggled reaction is not stuck behind a richer stale payload.
  */
 export function mergePanelMessages(
   prev: PanelMessageRow[],
@@ -276,10 +278,26 @@ export function mergePanelMessages(
       byId.set(m.id, m);
       continue;
     }
-    byId.set(
-      m.id,
-      panelMessageRichness(m) >= panelMessageRichness(existing) ? m : existing,
-    );
+    const preferIncoming =
+      panelMessageRichness(m) >= panelMessageRichness(existing);
+    let chosen = preferIncoming ? m : existing;
+    const inPayload =
+      m.payload && typeof m.payload === 'object' && !Array.isArray(m.payload)
+        ? (m.payload as Record<string, unknown>)
+        : null;
+    if (inPayload && Array.isArray(inPayload.reactions)) {
+      const basePayload =
+        chosen.payload &&
+        typeof chosen.payload === 'object' &&
+        !Array.isArray(chosen.payload)
+          ? (chosen.payload as Record<string, unknown>)
+          : {};
+      chosen = {
+        ...chosen,
+        payload: { ...basePayload, reactions: inPayload.reactions },
+      };
+    }
+    byId.set(m.id, chosen);
   }
   const merged = Array.from(byId.values());
   merged.sort((a, b) => (a.seq || 0) - (b.seq || 0));
