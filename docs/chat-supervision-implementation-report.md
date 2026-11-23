@@ -1,8 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama `feature/chat-supervision-human` (HEAD reciente incluye remint feed, race WaSender, discard determinístico, broadcast alineado). Evidencias locales: dual **21/21**, Vitest **19**, tsc 0.  
-Hardening: allowlist dedicada, feed HMAC + remint POST, takeover lock, await persist, resume feed, inbox recovery 20s, escalation hold, broadcast `commerce:{id}:chat` + postgres_changes.  
+**Estado:** supervisión en `feature/chat-supervision-human` @ `8aa2360`+ (remint feed, race WaSender, discard determinístico, broadcast panel/consumidor, `REPLICA IDENTITY FULL`). Evidencias locales: dual **21/21**, Vitest **19**, tsc 0.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
@@ -162,7 +161,7 @@ Criterio principal (abrir enlace → historial → intervenir → devolver) veri
 1. Autorización para aplicar `20261123090000_chat_supervision_conversations.sql` (+ publication Realtime) — readiness read-only **SCHEMA_NOT_READY** (`chat_*` null, `take_rpc=false`; `comercio_members` + WaSender OK; Trueno `whatsapp=+584140821633`, sin `supervision_whatsapp`).
 2. Autorización de **deploy/merge** de esta rama: `elmenuxfa.com/api/panel/conversaciones` hoy responde **404**.
 3. Smoke con persistencia Supabase real (`chat-supervision-post-migration-smoke.mjs`: takeover → Gemini paused → staff → return → Gemini resumed → close).
-4. Dual MEMORY local **19/19**. `HUMAN_TAKEOVER` gatea take/return/message (403 si off) en Next + Flutter.
+4. Dual MEMORY local **21/21**. `HUMAN_TAKEOVER` gatea take/return/message (403 si off) en Next + Flutter.
 5. Aviso WaSender real + preferir `supervision_whatsapp` dedicado.
 6. Activación Trueno: `docs/chat-supervision-activation-trueno.md` + `chat-supervision-preflight.mjs`.
 

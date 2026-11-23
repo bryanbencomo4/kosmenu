@@ -178,6 +178,10 @@ export async function POST(
         senderUserId: access.user.id,
         clientMessageId: `sys_take_${conversationId}_${data.attention_version}`,
       });
+      void publishConversationEvent(access.comercioId, conversationId, {
+        type: 'status_changed',
+        status: 'human_handling',
+      });
       return NextResponse.json({ ok: true, conversation: data, memory: true });
     }
     const { data, error } = await sb!.rpc('chat_take_conversation', {
@@ -218,6 +222,10 @@ export async function POST(
         text: 'El asistente virtual vuelve a atender esta conversación.',
         senderUserId: access.user.id,
         clientMessageId: `sys_return_${conversationId}_${data.attention_version}`,
+      });
+      void publishConversationEvent(access.comercioId, conversationId, {
+        type: 'status_changed',
+        status: 'ai_handling',
       });
       return NextResponse.json({ ok: true, conversation: data, memory: true });
     }
@@ -266,6 +274,10 @@ export async function POST(
         text: 'Esta conversación fue archivada por el restaurante. Si escribes de nuevo, el asistente virtual te atenderá.',
         senderUserId: access.user.id,
         clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
+      });
+      void publishConversationEvent(access.comercioId, conversationId, {
+        type: 'status_changed',
+        status: 'closed',
       });
       return NextResponse.json({ ok: true, conversation: data, memory: true });
     }

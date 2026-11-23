@@ -240,6 +240,10 @@ grant execute on function public.chat_return_to_assistant(uuid, uuid) to authent
 comment on table public.chat_conversations is
   'Supervised chatbot conversations. consumer_session_hash binds anonymous sessions; merchants access via membership RLS.';
 
+-- Required for Realtime filters on non-PK columns (comercio_id / conversation_id).
+alter table public.chat_conversations replica identity full;
+alter table public.chat_messages replica identity full;
+
 -- Realtime publication for merchant postgres_changes (idempotent).
 -- apply-chat-supervision-migration.mjs also runs this block after the file.
 do $$

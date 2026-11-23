@@ -65,6 +65,8 @@ if (!existsSync(migrationPath)) {
 
 const sql = readFileSync(migrationPath, 'utf8');
 const realtimeSql = `
+alter table public.chat_conversations replica identity full;
+alter table public.chat_messages replica identity full;
 do $$
 begin
   begin

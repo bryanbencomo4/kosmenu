@@ -43,6 +43,8 @@ const required = [
   // Publication may be applied by apply script; SQL must document both tables.
   ['realtime chat_conversations note', /supabase_realtime[\s\S]*chat_conversations|chat_conversations[\s\S]*supabase_realtime/i],
   ['realtime chat_messages note', /supabase_realtime[\s\S]*chat_messages|chat_messages[\s\S]*supabase_realtime/i],
+  ['replica identity conversations', /chat_conversations\s+replica identity full/i],
+  ['replica identity messages', /chat_messages\s+replica identity full/i],
 ];
 
 let failed = 0;
