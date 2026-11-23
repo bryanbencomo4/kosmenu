@@ -304,17 +304,14 @@ function createMessage(
   };
 }
 
-/** Post-add close-sale prompt — CTAs first; complements only after “sí”. */
-function buildCloseSaleMessage(
+/** Close-sale CTAs after suggestions (or alone when there are no complements). */
+function buildCloseSaleCtaMessage(
   pendingProducts: ChatProductCardData[],
-  opts?: { combinedLabel?: string | null },
+  opts?: { hasSuggestions?: boolean },
 ): ChatMessage {
-  const combined = (opts?.combinedLabel || '').trim();
-  const text = combined
-    ? `¡Listo! Ya agregué ${combined}. ¿Quieres algo de tomar o pasamos a pagar?`
-    : pendingProducts.length > 0
-      ? '¡Listo! Ya está en tu pedido. ¿Seguimos o pasamos a pagar?'
-      : '¡Listo! Ya está en tu pedido. Cuando quieras, pasamos a pagar.';
+  const text = opts?.hasSuggestions
+    ? '¿Te gustaría agregar alguno de estos productos a tu pedido, o vamos a pagar?'
+    : '¿Seguimos pidiendo o pasamos a pagar?';
   return createMessage('assistant', text, {
     closeSale: {
       id: `close_${Date.now().toString(36)}`,
@@ -955,6 +952,7 @@ export function ChatAssistantView({
           typing?: boolean;
           staffLastReadSeq?: number;
           messageId?: string;
+          clientMessageId?: string;
           reactions?: Array<{ emoji: string; party: string; at: number }>;
         };
         if (
@@ -980,9 +978,14 @@ export function ChatAssistantView({
           Array.isArray(payload.reactions)
         ) {
           const mid = payload.messageId;
+          const clientMid = payload.clientMessageId || null;
           const reactions = payload.reactions as ChatMessage['reactions'];
           setMessages((prev) =>
-            prev.map((m) => (m.id === mid ? { ...m, reactions } : m)),
+            prev.map((m) =>
+              m.id === mid || (clientMid && m.id === clientMid)
+                ? { ...m, reactions }
+                : m,
+            ),
           );
         }
         supervisionFeedTickRef.current?.();
@@ -1799,9 +1802,11 @@ export function ChatAssistantView({
   }, [incomingProposal, onIncomingProposalConsumed, playAssistantReceivedOnce]);
 
   /**
-   * Always offer pay after a successful add. Complement suggestions are optional
-   * and capped — never suppress the pay CTA (that left guests stranded).
-   * Multiple confirms in a burst share ONE commercial close-sale message.
+   * After a successful add:
+   * 1) suggested complements (product carousel),
+   * 2) ask whether to add any or pay,
+   * 3) pay / keep-ordering CTAs.
+   * Multiple confirms in a burst share ONE commercial sequence.
    */
   const offerCloseSaleAfterAdd = useCallback(
     (extraProductIds: string[] = [], label?: string | null) => {
@@ -1834,14 +1839,53 @@ export function ChatAssistantView({
             : batch.labels.length > 1
               ? 'tus productos'
               : null;
-        const closeMsg = buildCloseSaleMessage(suggestions, {
-          combinedLabel,
-        });
-        setMessages((prev) => [...clearPendingCloseSales(prev), closeMsg]);
-        if (allowComplements) {
-          setComplementsShownCount((n) => n + 1);
-        }
-        playAssistantReceivedOnce(closeMsg);
+
+        void (async () => {
+          setMessages((prev) => clearPendingCloseSales(prev));
+
+          if (suggestions.length > 0) {
+            setIsTyping(true);
+            await sleep(humanLocalReplyMs());
+            const suggestMsg = createMessage(
+              'assistant',
+              combinedLabel
+                ? `¡Listo! Ya agregué ${combinedLabel}. Mira estas sugerencias:`
+                : '¡Listo! Ya está en tu pedido. Mira estas sugerencias:',
+              { catalogProducts: suggestions },
+            );
+            setMessages((prev) => [...prev, suggestMsg]);
+            playAssistantReceivedOnce(suggestMsg);
+            setComplementsShownCount((n) => n + 1);
+            setIsTyping(false);
+
+            await sleep(480 + Math.floor(Math.random() * 220));
+            setIsTyping(true);
+            await sleep(humanLocalReplyMs());
+            const closeMsg = buildCloseSaleCtaMessage(suggestions, {
+              hasSuggestions: true,
+            });
+            setMessages((prev) => [
+              ...clearPendingCloseSales(prev),
+              closeMsg,
+            ]);
+            playAssistantReceivedOnce(closeMsg);
+            setIsTyping(false);
+            return;
+          }
+
+          setIsTyping(true);
+          await sleep(humanLocalReplyMs());
+          const closeMsg = buildCloseSaleCtaMessage([], {
+            hasSuggestions: false,
+          });
+          // Personalize the bare pay prompt when we know what was added.
+          if (combinedLabel) {
+            closeMsg.text = `¡Listo! Ya agregué ${combinedLabel}. ¿Seguimos pidiendo o pasamos a pagar?`;
+          }
+          setMessages((prev) => [...clearPendingCloseSales(prev), closeMsg]);
+          playAssistantReceivedOnce(closeMsg);
+          setIsTyping(false);
+        })();
       }, 280);
     },
     [

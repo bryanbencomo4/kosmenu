@@ -128,6 +128,7 @@ function ConversationDetailInner({
   // Merchant panel matches the consumer WhatsApp dark shell by default.
   const [theme, setTheme] = useState<ChatThemeMode>('dark');
   const [soundsEnabled, setSoundsEnabled] = useState(true);
+  const [composerFocusTick, setComposerFocusTick] = useState(0);
   const [frameStyle, setFrameStyle] = useState<CSSProperties>({
     position: 'fixed',
     inset: 0,
@@ -154,6 +155,7 @@ function ConversationDetailInner({
     };
   }, []);
 
+  // Same keyboard shell as the consumer chat: pin top:0, shrink height only.
   useEffect(() => {
     const sync = () => {
       const vv = window.visualViewport;
@@ -167,12 +169,15 @@ function ConversationDetailInner({
         });
         return;
       }
+      if (window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
       setFrameStyle({
         position: 'fixed',
         left: 0,
         right: 0,
+        top: 0,
         width: '100%',
-        top: `${vv.offsetTop}px`,
         height: `${vv.height}px`,
         maxHeight: `${vv.height}px`,
       });
@@ -299,6 +304,7 @@ function ConversationDetailInner({
       party?: string;
       typing?: boolean;
       messageId?: string;
+      clientMessageId?: string;
       reactions?: unknown;
     }) => {
       if (hint?.type === 'presence' && hint.party === 'consumer') {
@@ -310,21 +316,37 @@ function ConversationDetailInner({
         Array.isArray(hint.reactions)
       ) {
         const mid = hint.messageId;
+        const clientMid =
+          typeof hint.clientMessageId === 'string' ? hint.clientMessageId : null;
         const reactions = hint.reactions;
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === mid
-              ? {
-                  ...m,
-                  payload: {
-                    ...(m.payload && typeof m.payload === 'object'
-                      ? m.payload
-                      : {}),
-                    reactions,
-                  },
-                }
-              : m,
-          ),
+          prev.map((m) => {
+            const clientId =
+              m.payload &&
+              typeof m.payload === 'object' &&
+              typeof (m.payload as { client_message_id?: unknown })
+                .client_message_id === 'string'
+                ? String(
+                    (m.payload as { client_message_id?: string })
+                      .client_message_id,
+                  )
+                : null;
+            if (
+              m.id !== mid &&
+              !(clientMid && (m.id === clientMid || clientId === clientMid))
+            ) {
+              return m;
+            }
+            return {
+              ...m,
+              payload: {
+                ...(m.payload && typeof m.payload === 'object'
+                  ? m.payload
+                  : {}),
+                reactions,
+              },
+            };
+          }),
         );
       }
       void load(lastSeqRef.current, { silent: true });
@@ -365,8 +387,9 @@ function ConversationDetailInner({
   ) {
     if (!token || !conversationId) return;
     const isMessage = action === 'message';
-    // Keep take/return/close gated; message sends stay responsive (WhatsApp-like).
-    if (!isMessage || !options?.optimistic) setBusy(true);
+    const isReact = action === 'react';
+    // Keep take/return/close gated; message/react stay responsive (WhatsApp-like).
+    if ((!isMessage && !isReact) || !options?.optimistic) setBusy(true);
     setError(null);
     const res = await fetch(
       `/api/panel/conversaciones/${encodeURIComponent(conversationId)}`,
@@ -380,7 +403,7 @@ function ConversationDetailInner({
       },
     );
     const data = await res.json().catch(() => ({}));
-    if (!isMessage || !options?.optimistic) setBusy(false);
+    if ((!isMessage && !isReact) || !options?.optimistic) setBusy(false);
     if (!res.ok) {
       setError(friendlyPanelError(String(data.error || ''), res.status));
       if (res.status === 401) {
@@ -393,6 +416,13 @@ function ConversationDetailInner({
     if (isMessage) {
       setDraft('');
       setReplyTo(null);
+    }
+    if (isReact) {
+      // Reactions already applied optimistically + via broadcast; light refresh.
+      await load(lastSeqRef.current > 0 ? lastSeqRef.current : 0, {
+        silent: true,
+      });
+      return;
     }
     await load(lastSeqRef.current > 0 ? lastSeqRef.current : 0, {
       silent: true,
@@ -454,6 +484,28 @@ function ConversationDetailInner({
 
   function toggleStaffReaction(message: ChatMessage, emoji: string) {
     if (!canCompose && conversation?.status !== 'human_handling') return;
+    const party = 'staff';
+    // Optimistic local update so the seller sees the reaction immediately.
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== message.id) return m;
+        const payload =
+          m.payload && typeof m.payload === 'object' && !Array.isArray(m.payload)
+            ? { ...(m.payload as Record<string, unknown>) }
+            : {};
+        const prevReactions = Array.isArray(payload.reactions)
+          ? (payload.reactions as Array<{ emoji: string; party: string; at: number }>)
+          : [];
+        const without = prevReactions.filter((r) => r.party !== party);
+        const existing = prevReactions.find(
+          (r) => r.party === party && r.emoji === emoji,
+        );
+        const next = existing
+          ? without
+          : [...without, { emoji, party, at: Date.now() }];
+        return { ...m, payload: { ...payload, reactions: next } };
+      }),
+    );
     void act(
       'react',
       undefined,
@@ -798,6 +850,7 @@ function ConversationDetailInner({
             onRefresh={() => void load(0)}
             voiceAvatarLetter="C"
             cartActionsReadOnly
+            composerFocusTick={composerFocusTick}
             onReply={
               canCompose
                 ? (m) =>
@@ -839,6 +892,7 @@ function ConversationDetailInner({
             replyTo={replyTo}
             onClearReply={() => setReplyTo(null)}
             replyAuthorFallback={customerTitle}
+            onComposerFocus={() => setComposerFocusTick((t) => t + 1)}
             onTypingActivity={
               canCompose ? () => onStaffTypingActivity() : undefined
             }

@@ -86,14 +86,6 @@ export function ChatCloseSaleCard({
       data-chat-close-sale="pending"
       data-close-sale-id={prompt.id}
     >
-      <div className="border-b px-3.5 py-2.5" style={{ borderColor: 'var(--chat-card-border)' }}>
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--chat-text-muted)]">
-          Tu pedido
-        </p>
-        <p className="mt-0.5 text-[14px] font-semibold leading-snug text-[var(--chat-text)]">
-          ¿Seguimos o pasamos a pagar?
-        </p>
-      </div>
       <div className="flex flex-col gap-2 p-2.5">
         <button
           type="button"
@@ -108,7 +100,7 @@ export function ChatCloseSaleCard({
           }}
         >
           <CheckCircle2 className="h-[18px] w-[18px]" strokeWidth={2.4} aria-hidden />
-          Estoy listo para pagar
+          Pagar ahora
         </button>
         <button
           type="button"
@@ -123,7 +115,7 @@ export function ChatCloseSaleCard({
           }}
         >
           <Sparkles className="h-4 w-4 text-[var(--chat-send)]" strokeWidth={2.3} aria-hidden />
-          Sí, quiero algo más
+          Seguir pidiendo
         </button>
       </div>
     </div>

@@ -121,6 +121,8 @@ export async function applyMessageReaction(input: {
 }) {
   const emoji = input.emoji.trim().slice(0, 8);
   if (!emoji) return { ok: false as const, error: 'empty_emoji' };
+  const lookupId = input.messageId.trim();
+  if (!lookupId) return { ok: false as const, error: 'empty_message_id' };
 
   if (isSupervisionMemoryEnabled()) {
     const conv = memoryGetConversation(input.conversationId);
@@ -128,7 +130,10 @@ export async function applyMessageReaction(input: {
       return { ok: false as const, error: 'not_found' };
     }
     const rows = memoryListMessages(input.conversationId, 0);
-    const msg = rows.find((m) => m.id === input.messageId);
+    // Consumer UI uses client ids; staff uses DB ids — accept either.
+    const msg =
+      rows.find((m) => m.id === lookupId) ||
+      rows.find((m) => m.client_message_id === lookupId);
     if (!msg) return { ok: false as const, error: 'message_not_found' };
     const prev = Array.isArray(msg.payload?.reactions)
       ? (msg.payload.reactions as Array<Record<string, unknown>>)
@@ -143,22 +148,48 @@ export async function applyMessageReaction(input: {
     msg.payload = { ...msg.payload, reactions: next };
     void publishConversationEvent(input.comercioId, input.conversationId, {
       type: 'reaction',
-      messageId: input.messageId,
+      messageId: msg.id,
+      clientMessageId: msg.client_message_id || lookupId,
       reactions: next,
     });
-    return { ok: true as const, reactions: next };
+    return {
+      ok: true as const,
+      reactions: next,
+      messageId: msg.id,
+      clientMessageId: msg.client_message_id || null,
+    };
   }
 
   try {
     const sb = getServiceSupabaseClient();
-    const { data: row, error } = await sb
-      .from('chat_messages')
-      .select('id,payload')
-      .eq('id', input.messageId)
-      .eq('conversation_id', input.conversationId)
-      .eq('comercio_id', input.comercioId)
-      .maybeSingle();
-    if (error || !row) {
+    // Resolve by primary id first, then by client_message_id (consumer local ids).
+    let row: {
+      id: string;
+      payload: unknown;
+      client_message_id?: string | null;
+    } | null = null;
+    {
+      const byId = await sb
+        .from('chat_messages')
+        .select('id,payload,client_message_id')
+        .eq('id', lookupId)
+        .eq('conversation_id', input.conversationId)
+        .eq('comercio_id', input.comercioId)
+        .maybeSingle();
+      if (byId.data) {
+        row = byId.data as typeof row;
+      } else {
+        const byClient = await sb
+          .from('chat_messages')
+          .select('id,payload,client_message_id')
+          .eq('client_message_id', lookupId)
+          .eq('conversation_id', input.conversationId)
+          .eq('comercio_id', input.comercioId)
+          .maybeSingle();
+        if (byClient.data) row = byClient.data as typeof row;
+      }
+    }
+    if (!row) {
       return { ok: false as const, error: 'message_not_found' };
     }
     const payload =
@@ -178,15 +209,24 @@ export async function applyMessageReaction(input: {
     const { error: upErr } = await sb
       .from('chat_messages')
       .update({ payload: { ...payload, reactions: next } })
-      .eq('id', input.messageId)
+      .eq('id', row.id)
       .eq('conversation_id', input.conversationId);
     if (upErr) return { ok: false as const, error: 'update_failed' };
+    const clientMessageId =
+      (typeof row.client_message_id === 'string' && row.client_message_id) ||
+      null;
     void publishConversationEvent(input.comercioId, input.conversationId, {
       type: 'reaction',
-      messageId: input.messageId,
+      messageId: row.id,
+      clientMessageId: clientMessageId || lookupId,
       reactions: next,
     });
-    return { ok: true as const, reactions: next };
+    return {
+      ok: true as const,
+      reactions: next,
+      messageId: row.id,
+      clientMessageId,
+    };
   } catch {
     return { ok: false as const, error: 'update_failed' };
   }
