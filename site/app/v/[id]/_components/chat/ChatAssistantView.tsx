@@ -30,6 +30,8 @@ import {
   saveSupervisionAfterSeq,
   saveSupervisionFeedToken,
 } from '../../../../_lib/chatbot-session';
+import { commerceChatChannelName } from '../../../../_lib/chat-supervision-realtime';
+import { getAnonRealtimeSupabase } from '../../../../_lib/supabase-browser';
 import {
   ChatComposer,
   type ChatFilePayload,
@@ -484,6 +486,8 @@ export function ChatAssistantView({
   const supervisionFeedTokenRef = useRef<string | null>(
     loadSupervisionFeedToken(comercioId),
   );
+  const supervisionConversationIdRef = useRef<string | null>(null);
+  const supervisionFeedTickRef = useRef<(() => void) | null>(null);
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -806,6 +810,9 @@ export function ChatAssistantView({
         /* ignore */
       }
     };
+    supervisionFeedTickRef.current = () => {
+      void tick();
+    };
     void tick();
     const onVis = () => {
       if (document.visibilityState === 'visible') void tick();
@@ -815,10 +822,36 @@ export function ChatAssistantView({
     const id = window.setInterval(() => void tick(), intervalMs);
     return () => {
       cancelled = true;
+      supervisionFeedTickRef.current = null;
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [supervisionWatchActive, live, comercioId, humanSupervisionActive]);
+
+  // Realtime broadcast hint → authorized REST feed (bodies never on the wire).
+  useEffect(() => {
+    if (!supervisionWatchActive || !live) return;
+    const conversationId = supervisionConversationIdRef.current;
+    if (!conversationId) return;
+    const sb = getAnonRealtimeSupabase();
+    if (!sb) return;
+    const channel = sb
+      .channel(commerceChatChannelName(comercioId))
+      .on('broadcast', { event: 'chat' }, (msg) => {
+        const payload = (msg?.payload || {}) as { conversationId?: string };
+        if (
+          payload.conversationId &&
+          payload.conversationId !== conversationId
+        ) {
+          return;
+        }
+        supervisionFeedTickRef.current?.();
+      })
+      .subscribe();
+    return () => {
+      void sb.removeChannel(channel);
+    };
+  }, [supervisionWatchActive, live, comercioId]);
 
   const resetConversation = useCallback(() => {
     clearChatHistory(comercioId);
@@ -828,6 +861,7 @@ export function ChatAssistantView({
     supervisionAfterSeqRef.current = 0;
     supervisionSeenIdsRef.current = new Set();
     supervisionFeedTokenRef.current = null;
+    supervisionConversationIdRef.current = null;
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -1522,6 +1556,7 @@ export function ChatAssistantView({
           saveSupervisionFeedToken(comercioId, data.supervision.feedToken);
         }
         if (data?.supervision?.conversationId) {
+          supervisionConversationIdRef.current = data.supervision.conversationId;
           setSupervisionWatchActive(true);
         }
         if (

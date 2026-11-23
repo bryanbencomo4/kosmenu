@@ -2,8 +2,9 @@
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
 
-import { usePanelSession } from '../_lib/usePanelSession';
+import { commerceChatChannelName } from '../../_lib/chat-supervision-realtime';
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
+import { usePanelSession } from '../_lib/usePanelSession';
 
 type ConversationRow = {
   id: string;
@@ -183,7 +184,7 @@ function ConversationsInboxInner({
 
     // Same topic as server publishConversationEvent (light ids/types only).
     const hint = sb
-      .channel(`commerce:${cid}:chat`)
+      .channel(commerceChatChannelName(cid))
       .on('broadcast', { event: 'chat' }, () => {
         void loadInbox();
       })

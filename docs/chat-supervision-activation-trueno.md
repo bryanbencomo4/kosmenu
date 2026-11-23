@@ -26,7 +26,7 @@ $env:BASE_URL='https://elmenuxfa.com'; node site/scripts/chat-supervision-prefli
 
 **Nota (evidencia read-only 2026-11-22):** prod tiene `comercio_members` + WaSender RPC; `chat_*` = **null**. Preview **no** sirve (sin `comercio_members`). Piloto = **prod** + flags Trueno.  
 `elmenuxfa.com/api/panel/conversaciones` aún **404** hasta merge/deploy de esta rama.  
-HEAD de trabajo: `feature/chat-supervision-human` (CI verde).
+HEAD de trabajo: `feature/chat-supervision-human` @ `64b37d7`+ (broadcast consumidor + remint).
 
 1. Autorizar en el chat la frase exacta: `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION`
 2. (Recomendado) Activación one-shot schema + readiness:

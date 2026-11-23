@@ -2,12 +2,10 @@
 
 import { useEffect } from 'react';
 
+import { commerceChatChannelName } from '../../_lib/chat-supervision-realtime';
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
 
-/** Same topic as server `publishConversationEvent` (light hints only). */
-export function commerceChatChannelName(comercioId: string) {
-  return `commerce:${comercioId}:chat`;
-}
+export { commerceChatChannelName };
 
 /**
  * Merchant conversation delivery:

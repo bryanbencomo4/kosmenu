@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { after } from 'next/server';
 
+import { commerceChatChannelName } from '../../../_lib/chat-supervision-realtime';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import { sendWhatsappText } from '../../_lib/send-order-whatsapp';
 import { resolveMerchantContacts } from '../../_lib/notify-merchant-new-order';
@@ -612,6 +613,12 @@ export async function persistAssistantOrStaffMessage(input: {
         last_message_at: new Date().toISOString(),
         last_message_preview: previewText(input.text),
       });
+      scheduleAfterResponse(() =>
+        publishConversationEvent(input.comercioId, input.conversationId, {
+          type: 'message_created',
+          role: input.role,
+        }),
+      );
       return { ok: true, messageId: msg.id };
     }
 
@@ -1071,7 +1078,7 @@ export async function publishConversationEvent(
     // Public topic name + light payload (ids/types only). Message bodies stay in DB;
     // merchants still authorize via session + RLS/REST. Avoid private:true until
     // Realtime Authorization policies exist for this project.
-    const channel = sb.channel(`commerce:${comercioId}:chat`);
+    const channel = sb.channel(commerceChatChannelName(comercioId));
     await channel.subscribe();
     await channel.send({
       type: 'broadcast',
