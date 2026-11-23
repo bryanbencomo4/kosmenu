@@ -49,9 +49,27 @@ function req(key) {
   return v;
 }
 
-if (req('PLATFORM_WA_INBOUND') !== '0' || req('PLATFORM_WA_ROUTER') !== '0') {
-  console.error('Refused: inbound/router must be 0 for this deploy.');
+const inbound = req('PLATFORM_WA_INBOUND');
+const router = req('PLATFORM_WA_ROUTER');
+const armedReception = inbound === '1' && router === '1';
+const idle = inbound === '0' && router === '0';
+if (!armedReception && !idle) {
+  console.error('Refused: inbound/router must both be 0 (idle) or both 1 (reception arm).');
   process.exit(1);
+}
+if (armedReception) {
+  if (req('PLATFORM_WA_ENFORCE_ALLOWLIST') !== '1') {
+    console.error('Refused: reception arm requires PLATFORM_WA_ENFORCE_ALLOWLIST=1');
+    process.exit(1);
+  }
+  const allow = (map.PLATFORM_WA_ALLOWLIST_DIGITS || '')
+    .split(/[,\s]+/)
+    .map((d) => d.replace(/\D/g, ''))
+    .filter(Boolean);
+  if (allow.length === 0) {
+    console.error('Refused: reception arm requires non-empty PLATFORM_WA_ALLOWLIST_DIGITS');
+    process.exit(1);
+  }
 }
 if (req('PLATFORM_WA_ALLOW_REAL_WASENDER') !== '0') {
   console.error('Refused: real Wasender must be off.');
@@ -87,7 +105,9 @@ for (const line of lines) {
 }
 
 console.log('Deploying Vercel Preview (NOT production)…');
-console.log('Flags: INBOUND=0 ROUTER=0 ADAPTER=preview_isolated STORE=supabase_preview');
+console.log(
+  `Mode: ${armedReception ? 'reception_arm' : 'idle'} INBOUND=${inbound} ROUTER=${router} ADAPTER=preview_isolated STORE=supabase_preview REAL_WA=0`,
+);
 console.log('Preview ref:', PREVIEW);
 console.log('Webhook secret fingerprint:', secretFp);
 
@@ -121,8 +141,9 @@ const meta = {
   deployedAt: new Date().toISOString(),
   previewProjectRef: PREVIEW,
   webhookSecretFingerprint: secretFp,
-  inboundEnabled: false,
-  routerEnabled: false,
+  mode: armedReception ? 'reception_arm' : 'idle',
+  inboundEnabled: armedReception,
+  routerEnabled: armedReception,
   adapter: 'preview_isolated',
   storeKind: 'supabase_preview',
   realWasenderEnabled: false,
