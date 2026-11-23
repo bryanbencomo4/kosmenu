@@ -122,136 +122,164 @@ async function runLiveDiscoveryGemini(params: {
     geminiHttpCalls,
   });
 
-  for (let round = 0; round <= config.maxToolRounds; round++) {
-    // Hard stop BEFORE any network call (per-turn + durable budget).
-    if (geminiHttpCalls >= maxHttp) {
-      return withUsage({
-        text: restaurants.length
-          ? DISCOVERY_FALLBACK_MSG
-          : DISCOVERY_FALLBACK_MSG,
-        model: modelUsed,
-        restaurants,
-        toolCalls,
-        fallback: true,
-        stopReason: 'http_per_request_cap',
-      });
-    }
-
-    const slot = await consumeDiscoveryGeminiHttpSlot({
-      config,
-      supabase: params.supabase,
-    });
-    if (slot.ok === false) {
-      return withUsage({
-        text: DISCOVERY_FALLBACK_MSG,
-        model: modelUsed,
-        restaurants,
-        toolCalls,
-        fallback: true,
-        stopReason: slot.reason,
-      });
-    }
-
-    const body = {
-      systemInstruction: { parts: [{ text: buildDiscoverySystemPrompt() }] },
-      contents,
-      tools,
-      generationConfig: {
-        maxOutputTokens: config.maxOutputTokens,
-        temperature: 0.4,
-      },
-    };
-
-    // Count every attempt (success, HTTP error, network failure, model fallback).
-    geminiHttpCalls += 1;
-
-    let res: Response;
-    try {
-      res = await callDiscoveryGemini({
-        apiKey,
-        model: modelUsed,
-        body,
-        timeoutMs: config.timeoutMs,
-      });
-    } catch {
-      if (modelUsed !== config.modelFallback) {
-        modelUsed = config.modelFallback;
-        continue;
+  try {
+    for (let round = 0; round <= config.maxToolRounds; round++) {
+      // Hard stop BEFORE any network call (per-turn + durable budget).
+      if (geminiHttpCalls >= maxHttp) {
+        return withUsage({
+          text: DISCOVERY_FALLBACK_MSG,
+          model: modelUsed,
+          restaurants,
+          toolCalls,
+          fallback: true,
+          stopReason: 'http_per_request_cap',
+        });
       }
-      return withUsage({
-        text: DISCOVERY_FALLBACK_MSG,
-        model: modelUsed,
-        restaurants,
-        toolCalls,
-        fallback: true,
-        stopReason: 'gemini_network_error',
-      });
-    }
 
-    if (!res.ok) {
-      if (modelUsed !== config.modelFallback) {
-        modelUsed = config.modelFallback;
-        continue;
+      const slot = await consumeDiscoveryGeminiHttpSlot({
+        config,
+        supabase: params.supabase,
+      });
+      if (slot.ok === false) {
+        return withUsage({
+          text: DISCOVERY_FALLBACK_MSG,
+          model: modelUsed,
+          restaurants,
+          toolCalls,
+          fallback: true,
+          stopReason: slot.reason,
+        });
       }
-      return withUsage({
-        text: DISCOVERY_FALLBACK_MSG,
-        model: modelUsed,
-        restaurants,
-        toolCalls,
-        fallback: true,
-        stopReason: 'gemini_http_error',
-      });
-    }
 
-    const json = (await res.json()) as GeminiResponseJson;
-    const usage = extractDiscoveryGeminiUsage(json);
-    tokensInput += usage.in;
-    tokensOutput += usage.out;
+      const body = {
+        systemInstruction: { parts: [{ text: buildDiscoverySystemPrompt() }] },
+        contents,
+        tools,
+        generationConfig: {
+          maxOutputTokens: config.maxOutputTokens,
+          temperature: 0.4,
+        },
+      };
 
-    const parts = json?.candidates?.[0]?.content?.parts ?? [];
-    const fnCalls = parts.filter((p) => p.functionCall?.name);
+      // Count every attempt (success, HTTP error, network failure, model fallback).
+      geminiHttpCalls += 1;
 
-    if (fnCalls.length === 0) {
-      const text = parts
-        .map((p) => p.text || '')
-        .filter(Boolean)
-        .join('\n')
-        .trim();
-      return withUsage({
-        text: text || DISCOVERY_FALLBACK_MSG,
-        model: modelUsed,
-        restaurants,
-        toolCalls,
-      });
-    }
+      let res: Response;
+      try {
+        res = await callDiscoveryGemini({
+          apiKey,
+          model: modelUsed,
+          body,
+          timeoutMs: config.timeoutMs,
+        });
+      } catch {
+        if (modelUsed !== config.modelFallback) {
+          modelUsed = config.modelFallback;
+          continue;
+        }
+        return withUsage({
+          text: DISCOVERY_FALLBACK_MSG,
+          model: modelUsed,
+          restaurants,
+          toolCalls,
+          fallback: true,
+          stopReason: 'gemini_network_error',
+        });
+      }
 
-    contents.push({ role: 'model', parts });
-    const responseParts: GeminiPart[] = [];
-    for (const part of fnCalls) {
-      const name = part.functionCall!.name;
-      const args = (part.functionCall!.args ?? {}) as Record<string, unknown>;
-      toolCalls += 1;
-      const result = await executeDiscoveryTool(name, args, ctx);
-      if (result.restaurants?.length) {
-        for (const r of result.restaurants) {
-          if (!restaurants.some((x) => x.id === r.id)) restaurants.push(r);
+      if (!res.ok) {
+        let detail = `http_${res.status}`;
+        try {
+          const errBody = (await res.text()).slice(0, 240);
+          if (errBody) detail = `${detail}:${errBody.replace(/\s+/g, ' ')}`;
+        } catch {
+          // ignore body read errors
+        }
+        if (modelUsed !== config.modelFallback) {
+          modelUsed = config.modelFallback;
+          continue;
+        }
+        return withUsage({
+          text: DISCOVERY_FALLBACK_MSG,
+          model: modelUsed,
+          restaurants,
+          toolCalls,
+          fallback: true,
+          stopReason: `gemini_http_error:${detail}`.slice(0, 180),
+        });
+      }
+
+      const json = (await res.json()) as GeminiResponseJson;
+      const usage = extractDiscoveryGeminiUsage(json);
+      tokensInput += usage.in;
+      tokensOutput += usage.out;
+
+      const parts = json?.candidates?.[0]?.content?.parts ?? [];
+      const fnCalls = parts.filter((p) => p.functionCall?.name);
+
+      if (fnCalls.length === 0) {
+        const text = parts
+          .map((p) => p.text || '')
+          .filter(Boolean)
+          .join('\n')
+          .trim();
+        return withUsage({
+          text: text || DISCOVERY_FALLBACK_MSG,
+          model: modelUsed,
+          restaurants,
+          toolCalls,
+        });
+      }
+
+      contents.push({ role: 'model', parts });
+      const responseParts: GeminiPart[] = [];
+      for (const part of fnCalls) {
+        const name = part.functionCall!.name;
+        const args = (part.functionCall!.args ?? {}) as Record<string, unknown>;
+        toolCalls += 1;
+        try {
+          const result = await executeDiscoveryTool(name, args, ctx);
+          if (result.restaurants?.length) {
+            for (const r of result.restaurants) {
+              if (!restaurants.some((x) => x.id === r.id)) restaurants.push(r);
+            }
+          }
+          responseParts.push({
+            functionResponse: { name, response: result },
+          });
+        } catch (toolErr) {
+          const msg =
+            toolErr instanceof Error ? toolErr.message : 'tool_failed';
+          responseParts.push({
+            functionResponse: {
+              name,
+              response: { ok: false, tool: name, error: msg.slice(0, 160) },
+            },
+          });
         }
       }
-      responseParts.push({
-        functionResponse: { name, response: result },
-      });
+      contents.push({ role: 'user', parts: responseParts });
     }
-    contents.push({ role: 'user', parts: responseParts });
-  }
 
-  return withUsage({
-    text: DISCOVERY_FALLBACK_MSG,
-    model: modelUsed,
-    restaurants,
-    toolCalls,
-    fallback: true,
-    stopReason: 'tool_rounds_exhausted',
-  });
+    return withUsage({
+      text: DISCOVERY_FALLBACK_MSG,
+      model: modelUsed,
+      restaurants,
+      toolCalls,
+      fallback: true,
+      stopReason: 'tool_rounds_exhausted',
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'live_agent_error';
+    return withUsage({
+      text: DISCOVERY_FALLBACK_MSG,
+      model: modelUsed,
+      restaurants,
+      toolCalls,
+      fallback: true,
+      stopReason: `live_exception:${msg}`.slice(0, 180),
+    });
+  }
 }
 
 /**
