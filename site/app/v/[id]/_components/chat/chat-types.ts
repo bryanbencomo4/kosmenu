@@ -100,6 +100,9 @@ export type ChatCatalogCategory = {
   availableCount: number;
 };
 
+/** Media kind for WhatsApp-style reply quotes (icon / thumbnail). */
+export type ChatReplyKind = 'text' | 'image' | 'audio' | 'file' | 'location';
+
 /**
  * Lightweight pointer to the message being quoted/replied to.
  * `preview` is already clamped plain text (see `buildChatReplyRef`).
@@ -108,6 +111,18 @@ export type ChatReplyRef = {
   messageId: string;
   role: ChatRole;
   preview: string;
+  kind?: ChatReplyKind;
+  /** Small image preview when quoting a photo (data URL or http). */
+  thumbUrl?: string | null;
+  /** Optional author label override (e.g. "Cliente" / business name). */
+  authorLabel?: string | null;
+};
+
+/** One party's reaction on a message (WhatsApp: one emoji per party). */
+export type ChatReaction = {
+  emoji: string;
+  party: 'consumer' | 'staff' | 'assistant';
+  at: number;
 };
 
 export type ChatMessage = {
@@ -122,6 +137,8 @@ export type ChatMessage = {
   senderLabel?: string;
   /** Quoted message this bubble replies to (rendered as a mini quote above the text). */
   replyTo?: ChatReplyRef | null;
+  /** WhatsApp-style emoji reactions on this bubble. */
+  reactions?: ChatReaction[];
   /** Marks demo / non-AI copy so UI can style it without pretending it is live AI. */
   demo?: boolean;
   /** First assistant bubble; refreshed when welcome copy/version changes. */

@@ -148,6 +148,11 @@ export async function GET(
     return NextResponse.json({ error: 'missing_session' }, { status: 400 });
   }
 
+  const { loadConversationPresence } = await import(
+    '../../_lib/chat-presence-persist'
+  );
+  const { isPeerTyping } = await import('../../_lib/chat-presence');
+
   if (isSupervisionMemoryEnabled()) {
     const conversation = memoryGetBySession(commerceId, sessionId);
     if (!conversation) {
@@ -164,6 +169,10 @@ export async function GET(
       Number.isFinite(afterSeq) ? afterSeq : 0,
       ['staff', 'system', 'assistant'],
     ).slice(0, 50);
+    const presence = await loadConversationPresence({
+      conversationId: conversation.id,
+      comercioId: commerceId,
+    });
     return NextResponse.json({
       ok: true,
       enabled: true,
@@ -173,6 +182,9 @@ export async function GET(
         attention_version: conversation.attention_version,
       },
       messages,
+      peerTyping: isPeerTyping(presence, 'consumer'),
+      staffLastReadSeq: presence.staffLastReadSeq,
+      consumerLastReadSeq: presence.consumerLastReadSeq,
       memory: true,
     });
   }
@@ -204,6 +216,10 @@ export async function GET(
     .limit(50);
   if (Number.isFinite(afterSeq) && afterSeq > 0) q = q.gt('seq', afterSeq);
   const { data: messages } = await q;
+  const presence = await loadConversationPresence({
+    conversationId: conversation.id,
+    comercioId: commerceId,
+  });
 
   return NextResponse.json({
     ok: true,
@@ -214,5 +230,8 @@ export async function GET(
       attention_version: conversation.attention_version,
     },
     messages: messages || [],
+    peerTyping: isPeerTyping(presence, 'consumer'),
+    staffLastReadSeq: presence.staffLastReadSeq,
+    consumerLastReadSeq: presence.consumerLastReadSeq,
   });
 }

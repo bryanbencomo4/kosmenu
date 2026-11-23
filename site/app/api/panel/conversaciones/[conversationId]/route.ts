@@ -325,6 +325,62 @@ export async function POST(
     return NextResponse.json({ ok: true, conversation: data });
   }
 
+  if (action === 'presence') {
+    const typing =
+      typeof (body as { typing?: unknown }).typing === 'boolean'
+        ? Boolean((body as { typing?: boolean }).typing)
+        : undefined;
+    const readUpToSeq = Number(
+      (body as { readUpToSeq?: unknown }).readUpToSeq,
+    );
+    const { applyConversationPresence } = await import(
+      '../../../chat/_lib/chat-presence-persist'
+    );
+    const state = await applyConversationPresence({
+      conversationId,
+      comercioId: access.comercioId,
+      party: 'staff',
+      typing,
+      readUpToSeq: Number.isFinite(readUpToSeq) ? readUpToSeq : undefined,
+    });
+    return NextResponse.json({
+      ok: true,
+      peerTyping: state.consumerTypingUntil > Date.now(),
+      consumerLastReadSeq: state.consumerLastReadSeq,
+      staffLastReadSeq: state.staffLastReadSeq,
+    });
+  }
+
+  if (action === 'react') {
+    const messageId = String(
+      (body.payload as { messageId?: unknown } | undefined)?.messageId ||
+        (body as { messageId?: unknown }).messageId ||
+        '',
+    ).trim();
+    const emoji = String(
+      (body.payload as { emoji?: unknown } | undefined)?.emoji ||
+        (body as { emoji?: unknown }).emoji ||
+        '',
+    ).trim();
+    if (!messageId || !emoji) {
+      return NextResponse.json({ error: 'invalid_react' }, { status: 400 });
+    }
+    const { applyMessageReaction } = await import(
+      '../../../chat/_lib/chat-presence-persist'
+    );
+    const result = await applyMessageReaction({
+      conversationId,
+      comercioId: access.comercioId,
+      messageId,
+      party: 'staff',
+      emoji,
+    });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, reactions: result.reactions });
+  }
+
   if (action === 'message') {
     const text = String(body.text || '').trim();
     const payload =

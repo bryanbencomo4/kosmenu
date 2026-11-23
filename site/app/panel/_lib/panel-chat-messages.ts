@@ -4,6 +4,8 @@ import type {
   ChatCatalogCategory,
   ChatMessage,
   ChatProductCardData,
+  ChatReaction,
+  ChatReplyRef,
 } from '../../v/[id]/_components/chat/chat-types';
 import type { ChatContactCardData } from '../../v/[id]/_components/chat/chat-contact';
 import type { ChatHoursSnapshot } from '../../v/[id]/_components/chat/chat-hours';
@@ -92,6 +94,63 @@ function asLocation(
  * Structured UI fields stored on supervision `chat_messages.payload`
  * (products, media, location) → ChatMessage options.
  */
+function asReplyTo(value: unknown): ChatReplyRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const r = value as Record<string, unknown>;
+  const messageId = typeof r.messageId === 'string' ? r.messageId.trim() : '';
+  const preview = typeof r.preview === 'string' ? r.preview.trim() : '';
+  const role = r.role;
+  if (!messageId || !preview) return null;
+  if (role !== 'user' && role !== 'assistant' && role !== 'system') return null;
+  const kindRaw = typeof r.kind === 'string' ? r.kind : undefined;
+  const kind =
+    kindRaw === 'text' ||
+    kindRaw === 'image' ||
+    kindRaw === 'audio' ||
+    kindRaw === 'file' ||
+    kindRaw === 'location'
+      ? kindRaw
+      : undefined;
+  const thumbUrl =
+    typeof r.thumbUrl === 'string' && r.thumbUrl.trim()
+      ? r.thumbUrl.trim()
+      : null;
+  const authorLabel =
+    typeof r.authorLabel === 'string' && r.authorLabel.trim()
+      ? r.authorLabel.trim()
+      : null;
+  return {
+    messageId,
+    role,
+    preview,
+    ...(kind ? { kind } : {}),
+    ...(thumbUrl ? { thumbUrl } : {}),
+    ...(authorLabel ? { authorLabel } : {}),
+  };
+}
+
+function asReactions(value: unknown): ChatReaction[] {
+  if (!Array.isArray(value)) return [];
+  const out: ChatReaction[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const emoji = typeof r.emoji === 'string' ? r.emoji.trim() : '';
+    const party = r.party;
+    const at = Number(r.at);
+    if (!emoji) continue;
+    if (party !== 'consumer' && party !== 'staff' && party !== 'assistant') {
+      continue;
+    }
+    out.push({
+      emoji: emoji.slice(0, 8),
+      party,
+      at: Number.isFinite(at) ? at : Date.now(),
+    });
+  }
+  return out;
+}
+
 export function chatRichFieldsFromPayload(
   payload?: Record<string, unknown> | null,
 ): Partial<
@@ -109,6 +168,8 @@ export function chatRichFieldsFromPayload(
     | 'paymentMethods'
     | 'hoursSchedule'
     | 'contactCard'
+    | 'replyTo'
+    | 'reactions'
   >
 > {
   if (!payload || typeof payload !== 'object') return {};
@@ -131,6 +192,8 @@ export function chatRichFieldsFromPayload(
       : attachments.find((a) => a.kind === 'audio')?.url || undefined;
   const voiceDurationMs = Number(payload.voiceDurationMs);
   const location = asLocation(payload.location);
+  const replyTo = asReplyTo(payload.replyTo ?? payload.reply_to);
+  const reactions = asReactions(payload.reactions);
   const paymentRaw = payload.payment_methods ?? payload.paymentMethods;
   const paymentMethods = Array.isArray(paymentRaw)
     ? (paymentRaw as ChatPaymentMethod[])
@@ -161,6 +224,8 @@ export function chatRichFieldsFromPayload(
       ? { voiceDurationMs }
       : {}),
     ...(location ? { location } : {}),
+    ...(replyTo ? { replyTo } : {}),
+    ...(reactions.length ? { reactions } : {}),
     ...(paymentMethods.length ? { paymentMethods } : {}),
     ...(hoursSchedule ? { hoursSchedule } : {}),
     ...(contactCard ? { contactCard } : {}),
@@ -182,12 +247,14 @@ export function panelMessageRichness(row: PanelMessageRow): number {
     'catalog_products',
     'catalogProducts',
     'attachments',
+    'reactions',
   ]) {
     const v = p[key];
     if (Array.isArray(v)) n += v.length;
   }
   if (typeof p.voiceUrl === 'string' && p.voiceUrl) n += 1;
   if (p.location && typeof p.location === 'object') n += 1;
+  if (p.replyTo || p.reply_to) n += 1;
   return n;
 }
 
@@ -238,7 +305,8 @@ export function toPanelChatMessages(rows: PanelMessageRow[]): ChatMessage[] {
         role: 'user' as const,
         text: m.body,
         createdAt,
-        deliveryStatus: 'read' as const,
+        // Start as delivered; blue ticks advance when consumer_last_read catches up.
+        deliveryStatus: 'delivered' as const,
         ...rich,
       };
     }

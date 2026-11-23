@@ -23,6 +23,8 @@ export function chatMessageToSupervisionPayload(
   if (msg.voiceUrl) payload.voiceUrl = msg.voiceUrl;
   if (msg.voiceDurationMs) payload.voiceDurationMs = msg.voiceDurationMs;
   if (msg.location) payload.location = msg.location;
+  if (msg.replyTo) payload.replyTo = msg.replyTo;
+  if (msg.reactions?.length) payload.reactions = msg.reactions;
   if (msg.paymentMethods?.length) {
     payload.payment_methods = msg.paymentMethods;
   }

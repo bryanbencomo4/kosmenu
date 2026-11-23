@@ -43,7 +43,11 @@ import { ChatCatalogSheet } from './ChatCatalogSheet';
 import { buildDeliveryLocationReply } from './chat-delivery-quote';
 import { ChatHeader } from './ChatHeader';
 import { chatRichFieldsFromPayload } from '../../../../panel/_lib/panel-chat-messages';
-import { fileToPersistedDataUrl } from './chat-media-persist';
+import {
+  blobToDataUrl,
+  fileToPersistedDataUrl,
+} from './chat-media-persist';
+import { chatMessageToSupervisionPayload } from './chat-supervision-payload';
 import { syncLocalSupervisionTurn } from './chat-supervision-sync';
 import {
   ChatMediaLightbox,
@@ -487,6 +491,11 @@ export function ChatAssistantView({
   pendingConfigurationRef.current = pendingConfiguration;
   /** Merchant is actively handling — skip expecting Gemini replies; speeds feed. */
   const [humanSupervisionActive, setHumanSupervisionActive] = useState(false);
+  /** Staff is typing (from presence / feed). */
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [staffLastReadSeq, setStaffLastReadSeq] = useState(0);
+  const typingIdleRef = useRef<number | null>(null);
+  const lastTypingSentRef = useRef(0);
   /** Merchant archived the thread — lock composer like WhatsApp until reopen. */
   const [supervisionClosed, setSupervisionClosed] = useState(false);
   /** Watch feed after server created a supervised conversation (idle takeover). */
@@ -791,8 +800,19 @@ export function ChatAssistantView({
             body: string;
             payload?: Record<string, unknown> | null;
           }>;
+          peerTyping?: boolean;
+          staffLastReadSeq?: number;
         } | null;
         if (cancelled || !data) return;
+        if (typeof data.peerTyping === 'boolean') {
+          setPeerTyping(data.peerTyping);
+        }
+        if (
+          typeof data.staffLastReadSeq === 'number' &&
+          Number.isFinite(data.staffLastReadSeq)
+        ) {
+          setStaffLastReadSeq(data.staffLastReadSeq);
+        }
         const status = data.conversation?.status;
         if (status === 'human_handling' || status === 'needs_attention') {
           setHumanSupervisionActive(true);
@@ -867,12 +887,42 @@ export function ChatAssistantView({
     const channel = sb
       .channel(commerceChatChannelName(comercioId))
       .on('broadcast', { event: 'chat' }, (msg) => {
-        const payload = (msg?.payload || {}) as { conversationId?: string };
+        const payload = (msg?.payload || {}) as {
+          conversationId?: string;
+          type?: string;
+          party?: string;
+          typing?: boolean;
+          staffLastReadSeq?: number;
+          messageId?: string;
+          reactions?: Array<{ emoji: string; party: string; at: number }>;
+        };
         if (
           payload.conversationId &&
           payload.conversationId !== conversationId
         ) {
           return;
+        }
+        if (payload.type === 'presence') {
+          if (payload.party === 'staff' && typeof payload.typing === 'boolean') {
+            setPeerTyping(payload.typing);
+          }
+          if (
+            typeof payload.staffLastReadSeq === 'number' &&
+            Number.isFinite(payload.staffLastReadSeq)
+          ) {
+            setStaffLastReadSeq(payload.staffLastReadSeq);
+          }
+        }
+        if (
+          payload.type === 'reaction' &&
+          payload.messageId &&
+          Array.isArray(payload.reactions)
+        ) {
+          const mid = payload.messageId;
+          const reactions = payload.reactions as ChatMessage['reactions'];
+          setMessages((prev) =>
+            prev.map((m) => (m.id === mid ? { ...m, reactions } : m)),
+          );
         }
         supervisionFeedTickRef.current?.();
       })
@@ -916,11 +966,101 @@ export function ChatAssistantView({
     setCatalogSheetOpen(true);
   }, []);
 
+  const sendConsumerPresence = useCallback(
+    async (input: { typing?: boolean; readUpToSeq?: number }) => {
+      const token = supervisionFeedTokenRef.current;
+      if (!token || !live) return;
+      try {
+        await fetch(
+          `/api/chat/${encodeURIComponent(comercioId)}/presence`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Chat-Supervision-Feed-Token': token,
+            },
+            body: JSON.stringify(input),
+            cache: 'no-store',
+          },
+        );
+      } catch {
+        /* presence best-effort */
+      }
+    },
+    [comercioId, live],
+  );
+
+  const onConsumerTypingActivity = useCallback(() => {
+    if (!humanSupervisionActive) return;
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 1600) {
+      lastTypingSentRef.current = now;
+      void sendConsumerPresence({ typing: true });
+    }
+    if (typingIdleRef.current) window.clearTimeout(typingIdleRef.current);
+    typingIdleRef.current = window.setTimeout(() => {
+      void sendConsumerPresence({ typing: false });
+    }, 2800);
+  }, [humanSupervisionActive, sendConsumerPresence]);
+
+  const reactToMessage = useCallback(
+    async (message: ChatMessage, emoji: string) => {
+      const party = 'consumer' as const;
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== message.id) return m;
+          const prevReactions = m.reactions || [];
+          const without = prevReactions.filter((r) => r.party !== party);
+          const existing = prevReactions.find(
+            (r) => r.party === party && r.emoji === emoji,
+          );
+          const next = existing
+            ? without
+            : [...without, { emoji, party, at: Date.now() }];
+          return { ...m, reactions: next };
+        }),
+      );
+      const token = supervisionFeedTokenRef.current;
+      if (!token || !live) return;
+      try {
+        await fetch(`/api/chat/${encodeURIComponent(comercioId)}/react`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Chat-Supervision-Feed-Token': token,
+          },
+          body: JSON.stringify({ messageId: message.id, emoji }),
+          cache: 'no-store',
+        });
+      } catch {
+        /* best-effort */
+      }
+    },
+    [comercioId, live],
+  );
+
+  // Blue ticks when staff has read up to a seq (human mode).
+  useEffect(() => {
+    if (!humanSupervisionActive || staffLastReadSeq <= 0) return;
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.role !== 'user') return m;
+        // Local ids have no seq — treat delivered/sent as read once staff is caught up.
+        if (m.deliveryStatus === 'read') return m;
+        if (m.deliveryStatus === 'delivered' || m.deliveryStatus === 'sent') {
+          return { ...m, deliveryStatus: 'read' as const };
+        }
+        return m;
+      }),
+    );
+  }, [staffLastReadSeq, humanSupervisionActive]);
+
   /** Mirror deterministic UI turns so the merchant panel sees the same cards. */
   const mirrorLocalTurn = useCallback(
     (opts: {
       consumerText?: string;
       consumerMessageId?: string;
+      consumerPayload?: Record<string, unknown>;
       assistant: ChatMessage;
     }) => {
       void (async () => {
@@ -933,6 +1073,7 @@ export function ChatAssistantView({
           },
           consumerText: opts.consumerText,
           consumerMessageId: opts.consumerMessageId,
+          consumerPayload: opts.consumerPayload,
           assistant: opts.assistant,
           onWatch: () => {
             setSupervisionWatchActive(true);
@@ -1974,12 +2115,6 @@ export function ChatAssistantView({
   const sendVoice = useCallback(
     async (payload: ChatVoicePayload) => {
       if (isTyping) return;
-      if (humanSupervisionActive) {
-        setErrorText(
-          'Mientras el restaurante atiende, envía solo texto. Las notas de voz no llegan al personal.',
-        );
-        return;
-      }
       setErrorText(null);
       const secs = Math.max(1, Math.round(payload.durationMs / 1000));
       const placeholder = `🎤 Nota de voz (${secs}s)`;
@@ -1997,8 +2132,8 @@ export function ChatAssistantView({
         deliveryStatus: 'sent',
         voiceUrl: payload.url,
         voiceDurationMs: payload.durationMs,
-        // Spinner in the bubble until STT finishes (avoids native audio "0").
-        voicePending: true,
+        // Spinner only while AI STT runs; human mode shows playable note immediately.
+        voicePending: !humanSupervisionActive,
         attachments: [
           {
             id: attachmentId,
@@ -2007,11 +2142,47 @@ export function ChatAssistantView({
             mime: audioMime,
             size: payload.blob.size,
             url: payload.url,
-            analysis: null,
+            analysis: browserTranscript || null,
           },
         ],
       });
       setMessages((prev) => [...prev, userMsg]);
+
+      // While staff is attending, sync the note immediately (no STT / bot lock).
+      if (humanSupervisionActive) {
+        let dataUrl = payload.url;
+        try {
+          dataUrl = await blobToDataUrl(payload.blob);
+        } catch {
+          /* keep blob url */
+        }
+        const synced: ChatMessage = {
+          ...userMsg,
+          voiceUrl: dataUrl,
+          voicePending: false,
+          attachments: userMsg.attachments?.map((a) =>
+            a.id === attachmentId ? { ...a, url: dataUrl } : a,
+          ),
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === userMsg.id ? synced : m)),
+        );
+        void syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          consumerText: placeholder,
+          consumerMessageId: userMsg.id,
+          consumerPayload: chatMessageToSupervisionPayload(synced),
+          onWatch: () => setSupervisionWatchActive(true),
+        });
+        setMessages((prev) => markLatestUserMessage(prev, 'delivered'));
+        return;
+      }
+
       // Header shows "escribiendo…" and the composer locks while we transcribe.
       setIsTyping(true);
 
@@ -2140,17 +2311,10 @@ export function ChatAssistantView({
 
   const sendFile = useCallback(
     async (payload: ChatFilePayload) => {
-      if (humanSupervisionActive) {
-        setErrorText(
-          'Mientras el restaurante atiende, envía solo texto. Los archivos no llegan al personal.',
-        );
-        return;
-      }
       if (isTyping) return;
       setErrorText(null);
 
-      // Images in chat are not payment proofs — steer the customer to checkout.
-      if (payload.kind === 'image') {
+      const persistImage = async () => {
         let persistedUrl = payload.url;
         try {
           persistedUrl = await fileToPersistedDataUrl(payload.file);
@@ -2164,6 +2328,12 @@ export function ChatAssistantView({
         } catch {
           persistedUrl = payload.url;
         }
+        return persistedUrl;
+      };
+
+      // Images in chat are not payment proofs — steer the customer to checkout.
+      if (payload.kind === 'image') {
+        const persistedUrl = await persistImage();
         const label = `📷 ${payload.file.name || 'Imagen'}`;
         const attachment: ChatAttachment = {
           id: `file-${Date.now()}`,
@@ -2181,10 +2351,28 @@ export function ChatAssistantView({
           deliveryStatus: 'sent',
           attachments: [attachment],
         });
-        setIsTyping(true);
         const withUser = [...messages, userMsg];
         setMessages(withUser);
         saveChatHistory(comercioId, withUser);
+
+        if (humanSupervisionActive) {
+          void syncLocalSupervisionTurn({
+            comercioId,
+            businessName,
+            refs: {
+              feedTokenRef: supervisionFeedTokenRef,
+              conversationIdRef: supervisionConversationIdRef,
+            },
+            consumerText: label,
+            consumerMessageId: userMsg.id,
+            consumerPayload: chatMessageToSupervisionPayload(userMsg),
+            onWatch: () => setSupervisionWatchActive(true),
+          });
+          setMessages((prev) => markLatestUserMessage(prev, 'delivered'));
+          return;
+        }
+
+        setIsTyping(true);
         await sleep(humanLocalReplyMs());
         const notice = createMessage(
           'assistant',
@@ -2212,13 +2400,19 @@ export function ChatAssistantView({
       }
 
       const label = `📎 ${payload.file.name || 'Archivo'}`;
+      let fileUrl = payload.url;
+      try {
+        fileUrl = await blobToDataUrl(payload.file);
+      } catch {
+        fileUrl = payload.url;
+      }
       const attachment: ChatAttachment = {
         id: `file-${Date.now()}`,
         kind: 'file',
         name: payload.file.name || label,
         mime: payload.file.type || 'application/octet-stream',
         size: payload.file.size,
-        url: payload.url,
+        url: fileUrl,
         analysis: null,
       };
       const reply = replyToRef.current;
@@ -2228,9 +2422,27 @@ export function ChatAssistantView({
         deliveryStatus: 'sent',
         attachments: [attachment],
       });
-      setIsTyping(true);
       const withUser = [...messages, userMsg];
       setMessages(withUser);
+
+      if (humanSupervisionActive) {
+        void syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          consumerText: label,
+          consumerMessageId: userMsg.id,
+          consumerPayload: chatMessageToSupervisionPayload(userMsg),
+          onWatch: () => setSupervisionWatchActive(true),
+        });
+        setMessages((prev) => markLatestUserMessage(prev, 'delivered'));
+        return;
+      }
+
+      setIsTyping(true);
       await sleep(humanLocalReplyMs());
       const notice = createMessage(
         'assistant',
@@ -2259,6 +2471,7 @@ export function ChatAssistantView({
       humanSupervisionActive,
       messages,
       comercioId,
+      businessName,
       cartCount,
       onOpenCheckout,
       playAssistantReceivedOnce,
@@ -2452,7 +2665,12 @@ export function ChatAssistantView({
         onOpenCheckout={onOpenCheckout}
         whatsappUrl={whatsappUrl}
         showCheckoutHint={cartCount > 0 && Boolean(onOpenCheckout)}
-        isTyping={isTyping}
+        isTyping={isTyping || (humanSupervisionActive && peerTyping)}
+        subtitle={
+          humanSupervisionActive && !peerTyping && !isTyping
+            ? 'en línea'
+            : undefined
+        }
         soundsEnabled={soundsEnabled}
         onToggleSounds={() => {
           const next = !soundsEnabled;
@@ -2484,7 +2702,7 @@ export function ChatAssistantView({
 
       <ChatMessageList
         messages={messages}
-        isTyping={isTyping}
+        isTyping={isTyping || (humanSupervisionActive && peerTyping)}
         errorText={errorText}
         theme={theme}
         confirmedProposalIds={confirmedProposalIds}
@@ -2493,7 +2711,19 @@ export function ChatAssistantView({
         onConfigureProduct={onConfigureProduct}
         onAddSimpleProduct={onAddSimpleProduct}
         cartActionBusy={cartBusy}
-        onReply={(m) => setReplyTo(buildChatReplyRef(m))}
+        onReply={(m) =>
+          setReplyTo(
+            buildChatReplyRef(
+              m,
+              m.senderLabel === 'Restaurante'
+                ? businessName
+                : m.role === 'user'
+                  ? 'Tú'
+                  : m.senderLabel || businessName,
+            ),
+          )
+        }
+        onReact={(m, emoji) => void reactToMessage(m, emoji)}
         onSelectCategory={catalog ? onSelectCategory : undefined}
         onSeeAllCatalog={catalog ? openCatalogSheet : undefined}
         onOpenCheckout={onOpenCheckout}
@@ -2519,8 +2749,7 @@ export function ChatAssistantView({
             borderColor: 'var(--chat-header-border)',
           }}
         >
-          El restaurante está atendiendo. Por ahora solo texto — voz y archivos
-          no llegan al personal.
+          El restaurante está atendiendo esta conversación.
         </div>
       ) : null}
 
@@ -2554,24 +2783,20 @@ export function ChatAssistantView({
           disabled={isTyping}
           replyTo={replyTo}
           onClearReply={() => setReplyTo(null)}
+          replyAuthorFallback={businessName}
+          onTypingActivity={
+            humanSupervisionActive ? () => onConsumerTypingActivity() : undefined
+          }
           onChange={setDraft}
           onSend={() => {
             void sendMessage();
           }}
-          onSendVoice={
-            humanSupervisionActive
-              ? undefined
-              : (payload) => {
-                  void sendVoice(payload);
-                }
-          }
-          onSendFile={
-            humanSupervisionActive
-              ? undefined
-              : (payload) => {
-                  void sendFile(payload);
-                }
-          }
+          onSendVoice={(payload) => {
+            void sendVoice(payload);
+          }}
+          onSendFile={(payload) => {
+            void sendFile(payload);
+          }}
           onShareLocation={(location) => {
             void shareLocation(location);
           }}

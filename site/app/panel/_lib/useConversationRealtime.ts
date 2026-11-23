@@ -25,12 +25,32 @@ export function useConversationRealtime(
     created_at: string;
     payload?: Record<string, unknown> | null;
   }) => void,
-  onBroadcastHint?: () => void,
+  onBroadcastHint?: (hint?: Record<string, unknown>) => void,
 ) {
   useEffect(() => {
     if (!conversationId) return;
     const sb = getBrowserSupabase();
     if (!sb) return;
+
+    const upsertRow = (row: {
+      id?: string;
+      seq?: number;
+      role?: string;
+      body?: string;
+      created_at?: string;
+      payload?: Record<string, unknown> | null;
+    }) => {
+      if (!row?.id) return;
+      onInsert({
+        id: String(row.id),
+        seq: Number(row.seq || 0),
+        role: String(row.role || ''),
+        body: String(row.body || ''),
+        created_at: String(row.created_at || new Date().toISOString()),
+        payload:
+          row.payload && typeof row.payload === 'object' ? row.payload : {},
+      });
+    };
 
     const channel = sb
       .channel(`chat_messages:${conversationId}`)
@@ -42,28 +62,17 @@ export function useConversationRealtime(
           table: 'chat_messages',
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload) => {
-          const row = payload.new as {
-            id?: string;
-            seq?: number;
-            role?: string;
-            body?: string;
-            created_at?: string;
-            payload?: Record<string, unknown> | null;
-          };
-          if (!row?.id) return;
-          onInsert({
-            id: String(row.id),
-            seq: Number(row.seq || 0),
-            role: String(row.role || ''),
-            body: String(row.body || ''),
-            created_at: String(row.created_at || new Date().toISOString()),
-            payload:
-              row.payload && typeof row.payload === 'object'
-                ? row.payload
-                : {},
-          });
+        (payload) => upsertRow(payload.new as Parameters<typeof upsertRow>[0]),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `conversation_id=eq.${conversationId}`,
         },
+        (payload) => upsertRow(payload.new as Parameters<typeof upsertRow>[0]),
       )
       .subscribe();
 
@@ -80,7 +89,7 @@ export function useConversationRealtime(
     const channel = sb
       .channel(commerceChatChannelName(comercioId.trim()))
       .on('broadcast', { event: 'chat' }, (msg) => {
-        const payload = (msg?.payload || {}) as {
+        const payload = (msg?.payload || {}) as Record<string, unknown> & {
           conversationId?: string;
         };
         if (
@@ -89,7 +98,7 @@ export function useConversationRealtime(
         ) {
           return;
         }
-        onBroadcastHint();
+        onBroadcastHint(payload);
       })
       .subscribe();
 

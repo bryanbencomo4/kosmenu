@@ -43,8 +43,10 @@ type ChatMessageListProps = {
   onConfigureProduct?: (productId: string) => void;
   onAddSimpleProduct?: (productId: string) => void;
   cartActionBusy?: boolean;
-  /** Swipe / long-press / button reply on a bubble. */
+  /** Swipe / button reply on a bubble. */
   onReply?: (message: ChatMessage) => void;
+  /** Long-press emoji reaction on a bubble. */
+  onReact?: (message: ChatMessage, emoji: string) => void;
   /** Tap a category card in a welcome/category carousel. */
   onSelectCategory?: (categoryId: string) => void;
   /** "Ver todos" under a product carousel (null = whole catalog). */
@@ -75,6 +77,7 @@ export function ChatMessageList({
   onAddSimpleProduct,
   cartActionBusy = false,
   onReply,
+  onReact,
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
@@ -377,6 +380,7 @@ export function ChatMessageList({
                 onAddSimpleProduct={onAddSimpleProduct}
                 cartActionBusy={cartActionBusy}
                 onReply={onReply}
+                onReact={onReact}
                 onSelectCategory={onSelectCategory}
                 onSeeAllCatalog={onSeeAllCatalog}
                 onOpenCheckout={onOpenCheckout}

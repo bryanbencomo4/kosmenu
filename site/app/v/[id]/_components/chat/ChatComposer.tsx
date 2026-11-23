@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  Camera,
+  FileText,
   ImagePlus,
   Lock,
   MapPin,
@@ -70,8 +72,12 @@ type ChatComposerProps = {
   replyTo?: ChatReplyRef | null;
   /** Called when the user dismisses the reply bar (X). */
   onClearReply?: () => void;
+  /** Label for who is being replied to (panel: "Cliente" / "Tú"). */
+  replyAuthorFallback?: string;
   /** Fires when mic recording starts/stops (e.g. to hide suggested replies). */
   onRecordingChange?: (recording: boolean) => void;
+  /** Optional: notify parent that the user is typing (presence). */
+  onTypingActivity?: () => void;
   /** Override textarea data-testid (merchant panel uses staff-draft). */
   inputTestId?: string;
   /** Override send button data-testid (merchant panel uses staff-send). */
@@ -132,7 +138,9 @@ export function ChatComposer({
   onShareLocation,
   replyTo = null,
   onClearReply,
+  replyAuthorFallback,
   onRecordingChange,
+  onTypingActivity,
   inputTestId = 'chat-composer-input',
   sendTestId = 'chat-composer-send',
   placeholder = 'Escribe un mensaje',
@@ -140,6 +148,7 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPanelId = useId();
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -800,6 +809,15 @@ export function ChatComposer({
         onChange={(e) => handleFileChosen(e, 'image')}
       />
       <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => handleFileChosen(e, 'image')}
+        data-chat-camera-input="1"
+      />
+      <input
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
@@ -812,15 +830,32 @@ export function ChatComposer({
           className="mx-auto mb-1.5 flex w-full max-w-5xl items-center gap-2 overflow-hidden rounded-xl border-l-[3px] border-[var(--chat-send)] bg-[var(--chat-input)] py-1 pl-2.5 pr-1 shadow-sm"
           data-chat-reply-bar="1"
           data-chat-reply-id={replyTo.messageId}
+          data-chat-reply-kind={replyTo.kind || 'text'}
         >
           <div className="min-w-0 flex-1">
             <p className="text-[11.5px] font-semibold leading-tight text-[var(--chat-send)]">
-              {replyTo.role === 'user' ? 'Respondiendo a tu mensaje' : 'Respondiendo al asistente'}
+              {replyTo.authorLabel?.trim() ||
+                replyAuthorFallback ||
+                (replyTo.role === 'user' ? 'Tú' : 'Asistente')}
             </p>
-            <p className="line-clamp-1 break-words text-[12.5px] leading-snug text-[var(--chat-text-muted)]">
-              {replyTo.preview}
+            <p className="mt-0.5 flex items-center gap-1 line-clamp-1 break-words text-[12.5px] leading-snug text-[var(--chat-text-muted)]">
+              {replyTo.kind === 'audio' ? (
+                <Mic className="h-3 w-3 shrink-0" aria-hidden />
+              ) : null}
+              {replyTo.kind === 'file' ? (
+                <FileText className="h-3 w-3 shrink-0" aria-hidden />
+              ) : null}
+              <span className="min-w-0 truncate">{replyTo.preview}</span>
             </p>
           </div>
+          {replyTo.kind === 'image' && replyTo.thumbUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={replyTo.thumbUrl}
+              alt=""
+              className="h-10 w-10 shrink-0 rounded object-cover"
+            />
+          ) : null}
           {onClearReply ? (
             <button
               type="button"
@@ -909,16 +944,34 @@ export function ChatComposer({
               <button
                 type="button"
                 className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-                onClick={() => imageInputRef.current?.click()}
-                data-chat-attach-image="1"
+                onClick={() => {
+                  setAttachOpen(false);
+                  cameraInputRef.current?.click();
+                }}
+                data-chat-attach-camera="1"
               >
-                <ImagePlus className="h-4 w-4" aria-hidden />
-                Imagen
+                <Camera className="h-4 w-4" aria-hidden />
+                Cámara
               </button>
               <button
                 type="button"
                 className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  setAttachOpen(false);
+                  imageInputRef.current?.click();
+                }}
+                data-chat-attach-image="1"
+              >
+                <ImagePlus className="h-4 w-4" aria-hidden />
+                Galería
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                onClick={() => {
+                  setAttachOpen(false);
+                  fileInputRef.current?.click();
+                }}
                 data-chat-attach-file="1"
               >
                 <Paperclip className="h-4 w-4" aria-hidden />
@@ -1063,7 +1116,10 @@ export function ChatComposer({
                 // readOnly (not disabled) while sending keeps focus / mobile keyboard open
                 readOnly={disabled || Boolean(voiceDraft)}
                 aria-disabled={disabled || Boolean(voiceDraft)}
-                onChange={(event) => onChange(event.target.value)}
+                onChange={(event) => {
+                  onChange(event.target.value);
+                  if (event.target.value.trim()) onTypingActivity?.();
+                }}
                 onKeyDown={handleKeyDown}
                 onFocus={() => {
                   setEmojiOpen(false);

@@ -127,7 +127,7 @@ describe('panel chat message mapping', () => {
     expect(mapped[0]?.role).toBe('assistant');
     expect(mapped[0]?.senderLabel).toBe('Cliente');
     expect(mapped[1]?.role).toBe('user');
-    expect(mapped[1]?.deliveryStatus).toBe('read');
+    expect(mapped[1]?.deliveryStatus).toBe('delivered');
   });
 
   it('maps voice and image attachments from payload', () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { Reply } from 'lucide-react';
+import { FileText, Mic, Reply } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -50,14 +50,20 @@ type ReplyGestureState = {
  * Handlers are React props, so nothing leaks past unmount; the long-press timer is
  * cleared in an effect cleanup.
  */
-function useReplyGesture(enabled: boolean, onTrigger: () => void) {
+function useReplyGesture(
+  enabled: boolean,
+  onSwipeReply: () => void,
+  onLongPress?: () => void,
+) {
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const stateRef = useRef<ReplyGestureState | null>(null);
   const longPressRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
-  const triggerRef = useRef(onTrigger);
-  triggerRef.current = onTrigger;
+  const swipeRef = useRef(onSwipeReply);
+  swipeRef.current = onSwipeReply;
+  const longPressCbRef = useRef(onLongPress);
+  longPressCbRef.current = onLongPress;
 
   const clearLongPress = useCallback(() => {
     if (longPressRef.current !== null) {
@@ -107,7 +113,8 @@ function useReplyGesture(enabled: boolean, onTrigger: () => void) {
           } catch {
             /* ignore */
           }
-          triggerRef.current();
+          // Long-press opens reactions when available; otherwise reply (desktop fallback).
+          (longPressCbRef.current || swipeRef.current)();
         }, REPLY_LONG_PRESS_MS);
       }
     },
@@ -156,7 +163,7 @@ function useReplyGesture(enabled: boolean, onTrigger: () => void) {
         /* ignore */
       }
       reset();
-      if (fire) triggerRef.current();
+      if (fire) swipeRef.current();
     },
     [reset],
   );
@@ -182,9 +189,17 @@ function useReplyGesture(enabled: boolean, onTrigger: () => void) {
   };
 }
 
-function replyRoleLabel(role: ChatMessage['role']) {
-  return role === 'user' ? 'Tú' : 'Asistente';
+function replyAuthorLabel(
+  reply: NonNullable<ChatMessage['replyTo']>,
+  fallbackRole: ChatMessage['role'],
+) {
+  if (reply.authorLabel?.trim()) return reply.authorLabel.trim();
+  if (fallbackRole === 'user' || reply.role === 'user') return 'Tú';
+  if (reply.role === 'system') return 'Sistema';
+  return 'Asistente';
 }
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 
 type ChatMessageBubbleProps = {
   message: ChatMessage;
@@ -193,6 +208,8 @@ type ChatMessageBubbleProps = {
    * Parent should set composer reply state (see `buildChatReplyRef`).
    */
   onReply?: (message: ChatMessage) => void;
+  /** Long-press reaction picker (WhatsApp). Swipe still replies. */
+  onReact?: (message: ChatMessage, emoji: string) => void;
   groupedWithPrev?: boolean;
   groupedWithNext?: boolean;
   confirmedProposalIds?: Set<string>;
@@ -244,6 +261,7 @@ export function ChatMessageBubble({
   onAddSimpleProduct,
   cartActionBusy = false,
   onReply,
+  onReact,
   onSelectCategory,
   onSeeAllCatalog,
   onOpenCheckout,
@@ -257,11 +275,19 @@ export function ChatMessageBubble({
   const isSystem = message.role === 'system';
   const timeLabel = formatChatTime(message.createdAt);
   const replyEnabled = Boolean(onReply) && !isSystem;
+  const reactEnabled = Boolean(onReact) && !isSystem;
+  const [reactionOpen, setReactionOpen] = useState(false);
   const paymentMethods = message.paymentMethods || [];
   const hoursSchedule = message.hoursSchedule || null;
   const contactCard = message.contactCard || null;
   // Hooks must run before the system-message early return below.
-  const replyGesture = useReplyGesture(replyEnabled, () => onReply?.(message));
+  const replyGesture = useReplyGesture(
+    replyEnabled || reactEnabled,
+    () => onReply?.(message),
+    reactEnabled
+      ? () => setReactionOpen(true)
+      : undefined,
+  );
 
   if (isSystem) {
     const cards = message.productCards || [];
@@ -379,7 +405,7 @@ export function ChatMessageBubble({
               {/* Non-gesture path: keyboard / screen reader / desktop hover. */}
               <button
                 type="button"
-                aria-label={`Responder al mensaje de ${replyRoleLabel(message.role).toLowerCase()}`}
+                aria-label="Responder a este mensaje"
                 className={[
                   // Invisible + click-through until hover/focus so it never eats stray touches.
                   'pointer-events-none absolute top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-[var(--chat-text-muted)] opacity-0 transition-opacity hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--chat-send)] group-hover:pointer-events-auto group-hover:opacity-100',
@@ -391,6 +417,44 @@ export function ChatMessageBubble({
                 <Reply className="h-4 w-4" strokeWidth={2.1} aria-hidden />
               </button>
             </>
+          ) : null}
+          {reactionOpen ? (
+            <div
+              className={[
+                'absolute z-20 -top-11 flex items-center gap-0.5 rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-1.5 py-1 shadow-lg',
+                isUser ? 'right-0' : 'left-0',
+              ].join(' ')}
+              data-chat-reaction-picker="1"
+              role="dialog"
+              aria-label="Reaccionar"
+            >
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="grid h-9 w-9 place-items-center rounded-full text-[20px] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)] active:scale-95"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setReactionOpen(false);
+                    onReact?.(message, emoji);
+                  }}
+                  aria-label={`Reaccionar con ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="ml-0.5 grid h-8 w-8 place-items-center rounded-full text-[12px] text-[var(--chat-text-muted)]"
+                aria-label="Cerrar reacciones"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReactionOpen(false);
+                }}
+              >
+                ✕
+              </button>
+            </div>
           ) : null}
           {!isUser && message.senderLabel ? (
             <p
@@ -408,15 +472,33 @@ export function ChatMessageBubble({
           ) : null}
           {message.replyTo ? (
             <div
-              className="mb-1 max-w-full overflow-hidden rounded-md border-l-[3px] border-[var(--chat-send)] bg-[color-mix(in_srgb,var(--chat-text)_7%,transparent)] px-2 py-1"
+              className="mb-1 flex max-w-full items-stretch gap-2 overflow-hidden rounded-md border-l-[3px] border-[var(--chat-send)] bg-[color-mix(in_srgb,var(--chat-text)_7%,transparent)] py-1 pl-2 pr-1"
               data-chat-reply-quote="1"
+              data-chat-reply-kind={message.replyTo.kind || 'text'}
             >
-              <p className="text-[11.5px] font-semibold leading-tight text-[var(--chat-send)]">
-                {replyRoleLabel(message.replyTo.role)}
-              </p>
-              <p className="line-clamp-2 break-words text-[12.5px] leading-snug text-[var(--chat-text-muted)]">
-                {message.replyTo.preview}
-              </p>
+              <div className="min-w-0 flex-1 py-0.5">
+                <p className="text-[11.5px] font-semibold leading-tight text-[var(--chat-send)]">
+                  {replyAuthorLabel(message.replyTo, message.replyTo.role)}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1 line-clamp-2 break-words text-[12.5px] leading-snug text-[var(--chat-text-muted)]">
+                  {message.replyTo.kind === 'audio' ? (
+                    <Mic className="h-3 w-3 shrink-0" aria-hidden />
+                  ) : null}
+                  {message.replyTo.kind === 'file' ? (
+                    <FileText className="h-3 w-3 shrink-0" aria-hidden />
+                  ) : null}
+                  <span className="min-w-0 truncate">{message.replyTo.preview}</span>
+                </p>
+              </div>
+              {message.replyTo.kind === 'image' && message.replyTo.thumbUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={message.replyTo.thumbUrl}
+                  alt=""
+                  className="h-11 w-11 shrink-0 rounded object-cover"
+                  data-chat-reply-thumb="1"
+                />
+              ) : null}
             </div>
           ) : null}
           {hasVoice ? (
@@ -550,6 +632,28 @@ export function ChatMessageBubble({
             </div>
           ) : null}
           <div className="mt-1 flex justify-end">{meta}</div>
+        </div>
+      ) : null}
+
+      {message.reactions && message.reactions.length > 0 ? (
+        <div
+          className={[
+            '-mt-1.5 flex flex-wrap gap-1 px-1',
+            isUser ? 'justify-end' : 'justify-start',
+          ].join(' ')}
+          data-chat-reactions="1"
+        >
+          {message.reactions.map((r) => (
+            <button
+              key={`${r.party}-${r.emoji}`}
+              type="button"
+              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-1.5 text-[13px] shadow-sm"
+              aria-label={`Reacción ${r.emoji}`}
+              onClick={() => onReact?.(message, r.emoji)}
+            >
+              {r.emoji}
+            </button>
+          ))}
         </div>
       ) : null}
 

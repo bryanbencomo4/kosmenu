@@ -20,7 +20,10 @@ export async function syncLocalSupervisionTurn(input: {
   refs: SupervisionSyncRefs;
   consumerText?: string;
   consumerMessageId?: string;
-  assistant: ChatMessage;
+  /** Optional rich fields for the consumer turn (replyTo, attachments, …). */
+  consumerPayload?: Record<string, unknown>;
+  /** When set, also mirrors this assistant bubble. Omit for consumer-only sync. */
+  assistant?: ChatMessage | null;
   onWatch?: () => void;
 }): Promise<void> {
   try {
@@ -33,21 +36,28 @@ export async function syncLocalSupervisionTurn(input: {
       payload?: Record<string, unknown>;
     }> = [];
 
-    if (input.consumerText?.trim()) {
+    if (input.consumerText?.trim() || input.consumerPayload) {
       turns.push({
         role: 'consumer',
-        text: input.consumerText.trim(),
+        text: (input.consumerText || '').trim() || ' ',
         clientMessageId:
-          input.consumerMessageId || `c_${input.assistant.id}`,
+          input.consumerMessageId ||
+          (input.assistant ? `c_${input.assistant.id}` : `c_${Date.now()}`),
+        ...(input.consumerPayload
+          ? { payload: input.consumerPayload }
+          : {}),
       });
     }
 
-    turns.push({
-      role: 'assistant',
-      text: input.assistant.text || ' ',
-      clientMessageId: input.assistant.id,
-      payload: chatMessageToSupervisionPayload(input.assistant),
-    });
+    if (input.assistant) {
+      turns.push({
+        role: 'assistant',
+        text: input.assistant.text || ' ',
+        clientMessageId: input.assistant.id,
+        payload: chatMessageToSupervisionPayload(input.assistant),
+      });
+    }
+    if (turns.length === 0) return;
 
     const res = await fetch(
       `/api/chat/${encodeURIComponent(input.comercioId)}/supervision-sync`,

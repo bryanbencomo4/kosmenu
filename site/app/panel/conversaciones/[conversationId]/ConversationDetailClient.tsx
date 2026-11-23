@@ -16,11 +16,16 @@ import {
   type ChatVoicePayload,
 } from '../../../v/[id]/_components/chat/ChatComposer';
 import { ChatHeader } from '../../../v/[id]/_components/chat/ChatHeader';
+import {
+  ChatMediaLightbox,
+  type ChatMediaLightboxState,
+} from '../../../v/[id]/_components/chat/ChatMediaLightbox';
 import { ChatMessageList } from '../../../v/[id]/_components/chat/ChatMessageList';
 import {
   ChatSuggestedReplies,
   type ChatSuggestedChip,
 } from '../../../v/[id]/_components/chat/ChatSuggestedReplies';
+import { buildChatReplyRef } from '../../../v/[id]/_components/chat/chat-gestures';
 import {
   blobToDataUrl,
   fileToPersistedDataUrl,
@@ -36,7 +41,11 @@ import {
   setChatSoundsEnabled,
   unlockChatSounds,
 } from '../../../v/[id]/_components/chat/chat-sound-manager';
-import type { ChatAttachment } from '../../../v/[id]/_components/chat/chat-types';
+import type {
+  ChatAttachment,
+  ChatMessage,
+  ChatReplyRef,
+} from '../../../v/[id]/_components/chat/chat-types';
 import {
   mergePanelMessages,
   toPanelChatMessages,
@@ -107,8 +116,13 @@ function ConversationDetailInner({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState('');
+  const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
+  const [lightbox, setLightbox] = useState<ChatMediaLightboxState>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const typingIdleRef = useRef<number | null>(null);
+  const lastTypingSentRef = useRef(0);
   const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(true);
   // Merchant panel matches the consumer WhatsApp dark shell by default.
   const [theme, setTheme] = useState<ChatThemeMode>('dark');
@@ -278,9 +292,44 @@ function ConversationDetailInner({
     }
   }, [messages]);
 
-  const onBroadcastHint = useCallback(() => {
-    void load(lastSeqRef.current, { silent: true });
-  }, [load]);
+  const onBroadcastHint = useCallback(
+    (hint?: {
+      type?: string;
+      party?: string;
+      typing?: boolean;
+      messageId?: string;
+      reactions?: unknown;
+    }) => {
+      if (hint?.type === 'presence' && hint.party === 'consumer') {
+        if (typeof hint.typing === 'boolean') setPeerTyping(hint.typing);
+      }
+      if (
+        hint?.type === 'reaction' &&
+        typeof hint.messageId === 'string' &&
+        Array.isArray(hint.reactions)
+      ) {
+        const mid = hint.messageId;
+        const reactions = hint.reactions;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === mid
+              ? {
+                  ...m,
+                  payload: {
+                    ...(m.payload && typeof m.payload === 'object'
+                      ? m.payload
+                      : {}),
+                    reactions,
+                  },
+                }
+              : m,
+          ),
+        );
+      }
+      void load(lastSeqRef.current, { silent: true });
+    },
+    [load],
+  );
 
   useConversationRealtime(
     conversationId || null,
@@ -311,9 +360,12 @@ function ConversationDetailInner({
     action: string,
     text?: string,
     payload?: Record<string, unknown>,
+    options?: { optimistic?: boolean },
   ) {
     if (!token || !conversationId) return;
-    setBusy(true);
+    const isMessage = action === 'message';
+    // Keep take/return/close gated; message sends stay responsive (WhatsApp-like).
+    if (!isMessage || !options?.optimistic) setBusy(true);
     setError(null);
     const res = await fetch(
       `/api/panel/conversaciones/${encodeURIComponent(conversationId)}`,
@@ -327,7 +379,7 @@ function ConversationDetailInner({
       },
     );
     const data = await res.json().catch(() => ({}));
-    setBusy(false);
+    if (!isMessage || !options?.optimistic) setBusy(false);
     if (!res.ok) {
       setError(friendlyPanelError(String(data.error || ''), res.status));
       if (res.status === 401) {
@@ -337,12 +389,76 @@ function ConversationDetailInner({
       }
       return;
     }
-    setDraft('');
+    if (isMessage) {
+      setDraft('');
+      setReplyTo(null);
+    }
     await load(lastSeqRef.current > 0 ? lastSeqRef.current : 0, {
       silent: true,
     });
     // Full refresh keeps status / assignee in sync after take/return/close.
-    if (action !== 'message') await load(0);
+    if (!isMessage) await load(0);
+  }
+
+  function sendStaffText(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || !canCompose) return;
+    const reply = replyTo;
+    setReplyTo(null);
+    setDraft('');
+    unlockChatSounds();
+    playChatSound('messageSent');
+    void act(
+      'message',
+      trimmed,
+      reply ? { replyTo: reply } : undefined,
+      { optimistic: true },
+    );
+  }
+
+  async function sendStaffPresence(input: {
+    typing?: boolean;
+    readUpToSeq?: number;
+  }) {
+    if (!token || !conversationId) return;
+    try {
+      await fetch(
+        `/api/panel/conversaciones/${encodeURIComponent(conversationId)}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ action: 'presence', ...input }),
+          cache: 'no-store',
+        },
+      );
+    } catch {
+      /* presence is best-effort */
+    }
+  }
+
+  function onStaffTypingActivity() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 1600) {
+      lastTypingSentRef.current = now;
+      void sendStaffPresence({ typing: true });
+    }
+    if (typingIdleRef.current) window.clearTimeout(typingIdleRef.current);
+    typingIdleRef.current = window.setTimeout(() => {
+      void sendStaffPresence({ typing: false });
+    }, 2800);
+  }
+
+  function toggleStaffReaction(message: ChatMessage, emoji: string) {
+    if (!canCompose && conversation?.status !== 'human_handling') return;
+    void act(
+      'react',
+      undefined,
+      { messageId: message.id, emoji },
+      { optimistic: true },
+    );
   }
 
   async function sendStaffVoice(payload: ChatVoicePayload) {
@@ -372,6 +488,8 @@ function ConversationDetailInner({
       url: dataUrl,
       analysis: payload.transcript || null,
     };
+    const reply = replyTo;
+    setReplyTo(null);
     unlockChatSounds();
     playChatSound('voiceSent');
     await act(
@@ -381,7 +499,9 @@ function ConversationDetailInner({
         attachments: [attachment],
         voiceUrl: dataUrl,
         voiceDurationMs: payload.durationMs,
+        ...(reply ? { replyTo: reply } : {}),
       },
+      { optimistic: true },
     );
   }
 
@@ -423,9 +543,19 @@ function ConversationDetailInner({
       url: persistedUrl,
       analysis: null,
     };
+    const reply = replyTo;
+    setReplyTo(null);
     unlockChatSounds();
     playChatSound('messageSent');
-    await act('message', label, { attachments: [attachment] });
+    await act(
+      'message',
+      label,
+      {
+        attachments: [attachment],
+        ...(reply ? { replyTo: reply } : {}),
+      },
+      { optimistic: true },
+    );
   }
 
   const canCompose =
@@ -475,14 +605,21 @@ function ConversationDetailInner({
       if (busy || !canCompose) return;
       const text = chip.action.type === 'text' ? chip.action.text : '';
       if (!text) return;
-      unlockChatSounds();
-      playChatSound('messageSent');
-      void act('message', text);
+      sendStaffText(text);
     },
-    // act closes over latest state; chips only need canCompose/busy.
+    // sendStaffText closes over latest state; chips only need canCompose/busy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [busy, canCompose, conversationId, token],
+    [busy, canCompose, conversationId, token, replyTo],
   );
+
+  // Mark consumer messages read while the thread is open.
+  useEffect(() => {
+    if (!canCompose && conversation?.status !== 'human_handling') return;
+    const maxSeq = messages.reduce((m, row) => Math.max(m, row.seq || 0), 0);
+    if (maxSeq <= 0) return;
+    void sendStaffPresence({ readUpToSeq: maxSeq, typing: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, conversation?.status, conversationId]);
 
   const status = conversation?.status || '';
   const showTake =
@@ -491,16 +628,18 @@ function ConversationDetailInner({
   const showClose = humanTakeoverEnabled && status !== 'closed';
 
   const subtitle = conversation
-    ? [
-        statusLabel(conversation.status),
-        conversation.assigned_user_id
-          ? userId && conversation.assigned_user_id === userId
-            ? 'Tú'
-            : 'Personal'
-          : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+    ? peerTyping
+      ? 'escribiendo…'
+      : [
+          statusLabel(conversation.status),
+          conversation.assigned_user_id
+            ? userId && conversation.assigned_user_id === userId
+              ? 'Tú'
+              : 'Personal'
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
     : 'Cargando…';
 
   if (!ready) {
@@ -534,6 +673,7 @@ function ConversationDetailInner({
           cartCount={0}
           cartTotalLabel=""
           theme={theme}
+          isTyping={peerTyping}
           soundsEnabled={soundsEnabled}
           onToggleSounds={() => {
             const next = !soundsEnabled;
@@ -669,9 +809,31 @@ function ConversationDetailInner({
             messages={chatMessages}
             theme={theme}
             errorText={error}
+            isTyping={peerTyping}
             onRefresh={() => void load(0)}
             voiceAvatarLetter="C"
             cartActionsReadOnly
+            onReply={
+              canCompose
+                ? (m) =>
+                    setReplyTo(
+                      buildChatReplyRef(
+                        m,
+                        m.senderLabel === 'Cliente'
+                          ? 'Cliente'
+                          : m.role === 'user'
+                            ? 'Tú'
+                            : m.senderLabel || 'Asistente',
+                      ),
+                    )
+                : undefined
+            }
+            onReact={
+              canCompose
+                ? (m, emoji) => toggleStaffReaction(m, emoji)
+                : undefined
+            }
+            onOpenImage={(src, alt) => setLightbox({ src, alt })}
           />
         </div>
 
@@ -689,9 +851,15 @@ function ConversationDetailInner({
             inputTestId="staff-draft"
             sendTestId="staff-send"
             placeholder="Escribe un mensaje"
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
+            replyAuthorFallback="Cliente"
+            onTypingActivity={
+              canCompose ? () => onStaffTypingActivity() : undefined
+            }
             onSend={() => {
               if (!canCompose || !draft.trim()) return;
-              void act('message', draft.trim());
+              sendStaffText(draft);
             }}
             onSendVoice={
               canCompose
@@ -737,6 +905,10 @@ function ConversationDetailInner({
           </div>
         )}
       </div>
+      <ChatMediaLightbox
+        media={lightbox}
+        onClose={() => setLightbox(null)}
+      />
     </section>
   );
 }

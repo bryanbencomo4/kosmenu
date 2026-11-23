@@ -125,21 +125,58 @@ export function clampReplyPreview(text: string, max = CHAT_REPLY_PREVIEW_MAX): s
 export function buildChatReplyRef(
   message: Pick<
     ChatMessage,
-    'id' | 'role' | 'text' | 'voiceUrl' | 'attachments' | 'location' | 'productCards'
+    | 'id'
+    | 'role'
+    | 'text'
+    | 'voiceUrl'
+    | 'attachments'
+    | 'location'
+    | 'productCards'
+    | 'senderLabel'
   >,
+  authorLabel?: string | null,
 ): ChatReplyRef {
+  const image = message.attachments?.find((a) => a.kind === 'image' && a.url);
+  const file = message.attachments?.find((a) => a.kind === 'file');
+  const hasAudio = Boolean(message.voiceUrl) ||
+    Boolean(message.attachments?.some((a) => a.kind === 'audio'));
+
+  let kind: ChatReplyRef['kind'] = 'text';
   let preview = clampReplyPreview(message.text || '');
-  if (!preview) {
-    const media = message.attachments?.find((a) => a.kind === 'image' || a.kind === 'file');
-    if (message.voiceUrl) preview = '🎤 Nota de voz';
-    else if (media?.kind === 'image') preview = '📷 Imagen';
-    else if (media) preview = '📎 Archivo';
-    else if (message.location) preview = '📍 Ubicación';
-    else if (message.productCards?.[0]?.name) {
+  let thumbUrl: string | null = null;
+
+  if (hasAudio && (!preview || /^🎤/.test(preview))) {
+    kind = 'audio';
+    preview = preview || 'Nota de voz';
+  } else if (image) {
+    kind = 'image';
+    thumbUrl = image.url;
+    if (!preview || /^📷/.test(preview)) preview = 'Foto';
+  } else if (file) {
+    kind = 'file';
+    if (!preview || /^📎/.test(preview)) preview = file.name || 'Archivo';
+  } else if (message.location) {
+    kind = 'location';
+    preview = preview || 'Ubicación';
+  } else if (!preview) {
+    if (message.productCards?.[0]?.name) {
       preview = clampReplyPreview(message.productCards[0].name);
-    } else preview = 'Mensaje';
+    } else {
+      preview = 'Mensaje';
+    }
   }
-  return { messageId: message.id, role: message.role, preview };
+
+  return {
+    messageId: message.id,
+    role: message.role,
+    preview,
+    kind,
+    ...(thumbUrl ? { thumbUrl } : {}),
+    authorLabel:
+      authorLabel ??
+      message.senderLabel ??
+      (message.role === 'user' ? 'Tú' : null),
+  };
 }
 
 export const CHAT_API_TEXT_MAX = 2000;
