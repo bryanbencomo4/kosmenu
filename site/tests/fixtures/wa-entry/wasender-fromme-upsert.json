@@ -1,0 +1,21 @@
+{
+  "event": "messages.upsert",
+  "timestamp": 1700000200,
+  "data": {
+    "messages": [
+      {
+        "key": {
+          "id": "3EB0FROMMEHUMAN001",
+          "fromMe": true,
+          "remoteJid": "584120000001@s.whatsapp.net",
+          "cleanedSenderPn": "584120000001",
+          "addressingMode": "pn"
+        },
+        "messageBody": "Te atiendo en un momento",
+        "message": {
+          "conversation": "Te atiendo en un momento"
+        }
+      }
+    ]
+  }
+}

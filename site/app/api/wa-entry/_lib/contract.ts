@@ -1,10 +1,22 @@
 /**
  * WaSender inbound contract (normalized).
  *
- * IMPORTANT: This repo historically had NO inbound WaSender handler.
- * Field names below follow common WaSender / WhatsApp-gateway conventions
- * and the fixtures under tests/fixtures/wa-entry/. Treat unverified fields
- * as provisional until a real ELMENUXFA1 capture replaces them.
+ * Source of truth (provider docs, 2026-11):
+ * - https://www.wasenderapi.com/api-docs/webhooks/webhook-message-upsert
+ * - https://www.wasenderapi.com/api-docs/webhooks/webhook-message-received
+ * - https://wasenderapi.com/api-docs/getting-started/how-to-receive-messages-and-media-from-wasenderapi
+ * - https://www.wasenderapi.com/api-docs/webhooks/webhook-setup
+ *
+ * Auth (provider): header `X-Webhook-Signature` must equal the session webhook secret
+ * (exact string match — NOT HMAC of the body).
+ *
+ * Payload notes:
+ * - `messages.upsert`: `data.messages` is an **array** (incoming + outgoing).
+ * - `messages.received` / `messages-personal.received`: `data.messages` is often a **single object**.
+ * - Prefer `key.cleanedSenderPn` / `messageBody` / `key.id` / `key.fromMe`.
+ * - `remoteJid` may be `@lid` — do not treat it as a phone number.
+ *
+ * Local fixtures may still use a simplified shape; the normalizer accepts both.
  */
 
 export type WaNormalizedEvent = {
@@ -20,7 +32,7 @@ export type WaNormalizedEvent = {
   fromMe: boolean;
   isGroup: boolean;
   isStatus: boolean;
-  /** Raw event type string from provider (unverified taxonomy). */
+  /** Raw event type string from provider. */
   eventType: string;
   raw: unknown;
 };
@@ -50,9 +62,12 @@ export type WaOutboundRecord = {
   text: string;
   eventId: string;
   dedupeKey: string;
-  result: 'simulated_ok' | 'simulated_fail' | 'queued';
+  result: 'simulated_ok' | 'simulated_fail' | 'queued' | 'refused';
   atMs: number;
   attempt: number;
+  /** Bot vs human: true when this module generated the outbound. */
+  origin: 'wa_entry_bot' | 'external';
+  textHash: string;
 };
 
 export type WaRouteDropReason =
@@ -60,12 +75,14 @@ export type WaRouteDropReason =
   | 'unauthenticated'
   | 'malformed'
   | 'from_me'
+  | 'bot_echo'
   | 'group'
   | 'status'
   | 'duplicate'
   | 'rate_limited'
   | 'human_handling'
-  | 'empty_text';
+  | 'empty_text'
+  | 'not_allowlisted';
 
 export type WaRouteResult =
   | {
@@ -85,64 +102,83 @@ export function digitsOnly(value: string): string {
   return (value || '').replace(/\D/g, '');
 }
 
+export function hashOutboundText(text: string): string {
+  // Lightweight stable hash without importing crypto in every caller path;
+  // store layer may also SHA-256. This is for in-memory echo matching.
+  let h = 2166136261;
+  const s = (text || '').normalize('NFC');
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `fnv_${(h >>> 0).toString(16)}`;
+}
+
 /**
- * Normalize a provisional WaSender-like webhook body.
- * Unverified fields are tolerated when missing; messageId+from are required.
+ * Normalize a WaSender webhook body (docs + legacy fixtures).
+ * Returns null when messageId / chat identity cannot be resolved.
  */
 export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | null {
   if (!raw || typeof raw !== 'object') return null;
   const root = raw as Record<string, unknown>;
+  const eventType = String(root.event ?? root.type ?? 'message').trim();
 
   const data =
     root.data && typeof root.data === 'object'
       ? (root.data as Record<string, unknown>)
       : root;
 
-  const message =
-    data.message && typeof data.message === 'object'
-      ? (data.message as Record<string, unknown>)
-      : data.messages && Array.isArray(data.messages) && data.messages[0]
-        ? (data.messages[0] as Record<string, unknown>)
-        : data;
+  const messageNode = pickMessageNode(data, root);
+  if (!messageNode) return null;
 
   const key =
-    message.key && typeof message.key === 'object'
-      ? (message.key as Record<string, unknown>)
+    messageNode.key && typeof messageNode.key === 'object'
+      ? (messageNode.key as Record<string, unknown>)
       : {};
 
   const messageId = String(
-    message.id ??
-      message.messageId ??
-      key.id ??
+    key.id ??
+      messageNode.id ??
+      messageNode.messageId ??
       root.messageId ??
       '',
   ).trim();
   if (!messageId) return null;
 
   const remoteJid = String(
-    message.from ??
-      message.remoteJid ??
-      key.remoteJid ??
+    key.remoteJid ??
+      messageNode.from ??
+      messageNode.remoteJid ??
       root.from ??
       '',
   ).trim();
-  if (!remoteJid) return null;
 
-  const fromMe = Boolean(
-    message.fromMe ?? key.fromMe ?? root.fromMe ?? false,
-  );
+  const cleanedPn = String(
+    key.cleanedSenderPn ??
+      key.cleanedParticipantPn ??
+      messageNode.cleanedSenderPn ??
+      '',
+  ).trim();
+
+  const senderPn = String(key.senderPn ?? '').trim();
+  const phoneSource = cleanedPn || senderPn.split('@')[0] || remoteJid.split('@')[0] || remoteJid;
+  const fromDigits = digitsOnly(phoneSource);
+  if (!fromDigits && !remoteJid) return null;
+
+  const fromMe = Boolean(key.fromMe ?? messageNode.fromMe ?? root.fromMe ?? false);
   const isGroup =
     remoteJid.includes('@g.us') ||
-    Boolean(message.isGroup ?? root.isGroup ?? false);
+    Boolean(messageNode.isGroup ?? root.isGroup ?? false) ||
+    Boolean(key.cleanedParticipantPn && remoteJid.includes('@g.us'));
   const isStatus =
     remoteJid === 'status@broadcast' ||
-    Boolean(message.isStatus ?? root.isStatus ?? false);
+    Boolean(messageNode.isStatus ?? root.isStatus ?? false);
 
-  const text = extractText(message, data, root);
+  const text = extractText(messageNode, data, root);
   const tsRaw = Number(
-    message.timestamp ??
-      message.messageTimestamp ??
-      root.timestamp ??
+    root.timestamp ??
+      messageNode.timestamp ??
+      messageNode.messageTimestamp ??
       Date.now(),
   );
   const timestampMs =
@@ -160,14 +196,12 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
       'unknown',
   ).trim();
 
-  const eventType = String(root.event ?? root.type ?? data.event ?? 'message').trim();
-
   return {
     provider: 'wasender',
     messageId,
     sessionId,
-    from: remoteJid,
-    fromDigits: digitsOnly(remoteJid.split('@')[0] || remoteJid),
+    from: remoteJid || `${fromDigits}@s.whatsapp.net`,
+    fromDigits: fromDigits || digitsOnly(remoteJid),
     text,
     timestampMs,
     fromMe,
@@ -178,12 +212,33 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
   };
 }
 
+function pickMessageNode(
+  data: Record<string, unknown>,
+  root: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const messages = data.messages ?? root.messages;
+  if (Array.isArray(messages) && messages[0] && typeof messages[0] === 'object') {
+    return messages[0] as Record<string, unknown>;
+  }
+  if (messages && typeof messages === 'object' && !Array.isArray(messages)) {
+    return messages as Record<string, unknown>;
+  }
+  if (data.message && typeof data.message === 'object') {
+    return data.message as Record<string, unknown>;
+  }
+  // Legacy fixture: data.message already flattened, or root is the message
+  if (data.id || data.text || data.key) return data;
+  if (root.id || root.text) return root;
+  return null;
+}
+
 function extractText(
   message: Record<string, unknown>,
   data: Record<string, unknown>,
   root: Record<string, unknown>,
 ): string {
   const candidates = [
+    message.messageBody,
     message.text,
     message.body,
     message.conversation,

@@ -37,6 +37,9 @@ npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-boo
 npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/10-preview-login-access.sql
 # Add the minimal free Preview AI wallet used by the merchant dashboard.
 npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/11-preview-dashboard-ai-credits.sql
+# Optional: wa-entry router state (fail-closed; never production). Prefer:
+# CONFIRM_WA_ENTRY_PREVIEW=1 node site/scripts/apply-wa-entry-preview-schema.mjs
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/12-wa-entry-router.sql
 ```
 
 If `db query -f` is unavailable in your CLI version, pipe file contents with an explicit Preview connection (still never target production).
@@ -51,6 +54,7 @@ If `db query -f` is unavailable in your CLI version, pipe file contents with an 
 | `04-safe-rls-and-grants.sql` | Secure RLS + minimal grants (final state) |
 | `05-private-storage.sql` | Private `comprobantes` bucket |
 | `06-preview-seed.sql` | Synthetic test data only |
+| `12-wa-entry-router.sql` | Wa-entry threads / dedupe / bot-echo / send locks (optional) |
 
 ## Not included
 

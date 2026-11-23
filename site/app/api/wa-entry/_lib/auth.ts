@@ -5,21 +5,22 @@ import type { WaEntryConfig } from './config';
 /**
  * Webhook authenticity.
  *
- * WaSender docs for signature verification are NOT confirmed in this repo
- * (no prior inbound handler). We support a shared-secret header that we control:
- *   X-Platform-Wa-Secret: <PLATFORM_WA_WEBHOOK_SECRET>
+ * Provider (WasenderApi docs — webhook-setup):
+ *   Header `X-Webhook-Signature` must equal the session Webhook Secret
+ *   (exact string comparison; NOT an HMAC of the body).
  *
- * Optional HMAC mode (provisional): X-Platform-Wa-Signature = hex(hmac_sha256(secret, rawBody))
+ * Platform-local modes (sim / tunnel):
+ *   - `X-Platform-Wa-Secret: <secret>`
+ *   - `X-Platform-Wa-Signature: hex(hmac_sha256(secret, rawBody))`
  *
- * If secret is empty and flags are on, reject (fail closed) except when
- * adapter=sim AND NODE_ENV is test/development with PLATFORM_WA_ALLOW_INSECURE_LOCAL=1.
+ * Fail closed when secret empty, except sim + ALLOW_INSECURE_LOCAL in test/dev.
  */
 export function verifyWaEntryWebhook(params: {
   config: WaEntryConfig;
   headers: Headers | Record<string, string | null | undefined>;
   rawBody: string;
   env?: NodeJS.ProcessEnv;
-}): { ok: true } | { ok: false; status: number; error: string } {
+}): { ok: true; mode?: string } | { ok: false; status: number; error: string } {
   const env = params.env ?? process.env;
   const secret = params.config.webhookSecret;
 
@@ -36,17 +37,29 @@ export function verifyWaEntryWebhook(params: {
       (env.NODE_ENV === 'test' || env.NODE_ENV === 'development') &&
       params.config.adapter === 'sim' &&
       (env.PLATFORM_WA_ALLOW_INSECURE_LOCAL || '').trim() === '1';
-    if (insecureLocal) return { ok: true };
+    if (insecureLocal) return { ok: true, mode: 'insecure_local' };
     return { ok: false, status: 401, error: 'webhook_secret_required' };
   }
 
-  const shared = getHeader('x-platform-wa-secret').trim();
-  if (shared && safeEqual(shared, secret)) return { ok: true };
+  // Wasender official: X-Webhook-Signature === webhook secret
+  const wasenderSig = getHeader('x-webhook-signature').trim();
+  if (wasenderSig && safeEqual(wasenderSig, secret)) {
+    return { ok: true, mode: 'wasender_signature' };
+  }
 
-  const sig = getHeader('x-platform-wa-signature').trim().toLowerCase();
-  if (sig) {
+  // Platform shared secret (local / dual-dispatch)
+  const shared = getHeader('x-platform-wa-secret').trim();
+  if (shared && safeEqual(shared, secret)) {
+    return { ok: true, mode: 'platform_secret' };
+  }
+
+  // Platform HMAC (local tests)
+  const platformHmac = getHeader('x-platform-wa-signature').trim().toLowerCase();
+  if (platformHmac) {
     const expected = createHmac('sha256', secret).update(params.rawBody).digest('hex');
-    if (safeEqual(sig, expected)) return { ok: true };
+    if (safeEqual(platformHmac, expected)) {
+      return { ok: true, mode: 'platform_hmac' };
+    }
   }
 
   return { ok: false, status: 401, error: 'webhook_unauthorized' };

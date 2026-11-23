@@ -1,4 +1,4 @@
-import type { WaEntryConfig } from './config';
+import { isAllowlisted, type WaEntryConfig } from './config';
 import {
   normalizeWaInboundPayload,
   type WaNormalizedEvent,
@@ -8,6 +8,8 @@ import {
 } from './contract';
 import { routeWaEntryEvent } from './router';
 import type { WaEntrySender } from './sender';
+import type { WaEntryAsyncStore } from './store-async';
+import { asAsyncStore } from './store-async';
 import type { WaEntryStore } from './store';
 
 export type WaEntryProcessResult = {
@@ -27,7 +29,7 @@ export type WaEntryProcessResult = {
 
 export type ProcessWaEntryParams = {
   config: WaEntryConfig;
-  store: WaEntryStore;
+  store: WaEntryStore | WaEntryAsyncStore;
   sender: WaEntrySender;
   rawBody: string;
   /** Pre-parsed JSON (tests). If omitted, rawBody is parsed. */
@@ -44,15 +46,24 @@ function safeParseJson(raw: string): { ok: true; value: unknown } | { ok: false;
   }
 }
 
+function resolveAsyncStore(store: WaEntryStore | WaEntryAsyncStore): WaEntryAsyncStore {
+  // Sync memory/file stores expose hasSeenMessage; Preview async store does not.
+  if ('hasSeenMessage' in store) {
+    return asAsyncStore(store as WaEntryStore);
+  }
+  return store as WaEntryAsyncStore;
+}
+
 /**
- * Full inbound pipeline. Returns quickly with a decision; outbound is simulated locally.
- * Never touches production WaSender queue / Supabase service_role.
+ * Full inbound pipeline. Returns quickly with a decision.
+ * Sim adapter never touches production WaSender queue / Supabase service_role.
  */
 export async function processWaEntryEvent(
   params: ProcessWaEntryParams,
 ): Promise<WaEntryProcessResult> {
   const nowMs = params.nowMs ?? Date.now();
-  const { config, store, sender } = params;
+  const { config, sender } = params;
+  const store = resolveAsyncStore(params.store);
   let storeOps = 0;
 
   if (!config.inboundEnabled || !config.routerEnabled) {
@@ -91,8 +102,7 @@ export async function processWaEntryEvent(
     };
   }
 
-  // Atomic dedupe — first claim wins
-  const claimed = store.tryClaimMessage(event.messageId);
+  const claimed = await store.tryClaimMessage(event.messageId, event.sessionId);
   storeOps += 1;
   if (!claimed) {
     return {
@@ -106,19 +116,52 @@ export async function processWaEntryEvent(
     };
   }
 
-  const threadBefore = store.getThread(event.fromDigits);
+  // Bot echo vs human operator (fromMe)
+  if (event.fromMe) {
+    const isEcho = await store.matchBotEcho({
+      toDigits: event.fromDigits,
+      text: event.text,
+      nowMs,
+      windowMs: config.echoWindowMs,
+    });
+    storeOps += 1;
+    if (isEcho) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: 'bot_echo',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+  }
+
+  if (!isAllowlisted(config, event.fromDigits) && !event.fromMe) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'not_allowlisted',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  const threadBefore = await store.getThread(event.fromDigits);
   storeOps += 1;
 
-  const seenForRouter = new Set<string>(); // already claimed above; router duplicate check is secondary
   const { result, thread } = routeWaEntryEvent({
     event,
     thread: threadBefore,
     config,
     nowMs,
-    seenMessageIds: seenForRouter,
+    seenMessageIds: new Set<string>(),
   });
 
-  store.saveThread(thread);
+  await store.saveThread(thread);
   storeOps += 1;
 
   if (result.action === 'drop') {
@@ -134,32 +177,52 @@ export async function processWaEntryEvent(
     };
   }
 
-  const replies: WaEntryProcessResult['replies'] = [];
-  for (const text of result.replies) {
-    const outbound = await sendWithBoundedRetry({
-      sender,
-      to: event.fromDigits,
-      text,
+  const locked = await store.tryAcquireSendLock(event.fromDigits, nowMs, 15_000);
+  storeOps += 1;
+  if (!locked) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'rate_limited',
       eventId: event.messageId,
-      dedupeKey: result.dedupeKey,
-      forceFail: params.forceSendFail,
-    });
-    storeOps += 1;
-    if (!outbound.ok) {
-      return {
-        accepted: true,
-        action: 'error',
-        reason: 'send_failed_after_retry',
+      chatId: event.fromDigits,
+      state: result.nextState,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  const replies: WaEntryProcessResult['replies'] = [];
+  try {
+    for (const text of result.replies) {
+      const outbound = await sendWithBoundedRetry({
+        sender,
+        to: event.fromDigits,
+        text,
         eventId: event.messageId,
-        chatId: event.fromDigits,
-        state: result.nextState,
-        replies,
-        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-      };
+        dedupeKey: result.dedupeKey,
+        forceFail: params.forceSendFail,
+      });
+      storeOps += 1;
+      if (!outbound.ok) {
+        return {
+          accepted: true,
+          action: 'error',
+          reason: 'send_failed_after_retry',
+          eventId: event.messageId,
+          chatId: event.fromDigits,
+          state: result.nextState,
+          replies,
+          metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+        };
+      }
+      if (!outbound.alreadySent) {
+        replies.push({ text, outboundId: outbound.record.id });
+      }
     }
-    if (!outbound.alreadySent) {
-      replies.push({ text, outboundId: outbound.record.id });
-    }
+  } finally {
+    await store.releaseSendLock(event.fromDigits);
+    storeOps += 1;
   }
 
   return {
@@ -195,7 +258,6 @@ async function sendWithBoundedRetry(params: {
   });
   if (first.ok) return first;
 
-  // One bounded retry with a distinct key (avoids false "already sent")
   const retry = await params.sender.send({
     to: params.to,
     text: params.text,
@@ -206,5 +268,4 @@ async function sendWithBoundedRetry(params: {
   return retry;
 }
 
-/** Exported for tests that need to assert route shapes. */
 export type { WaNormalizedEvent, WaRouteResult };

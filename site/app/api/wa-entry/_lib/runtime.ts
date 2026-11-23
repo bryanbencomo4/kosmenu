@@ -6,6 +6,7 @@ import {
   type WaEntryConfig,
 } from './config';
 import {
+  createPreparedWasenderSender,
   createRefusingWasenderSender,
   createSimWaEntrySender,
   type WaEntrySender,
@@ -15,10 +16,12 @@ import {
   createMemoryWaEntryStore,
   type WaEntryStore,
 } from './store';
+import type { WaEntryAsyncStore } from './store-async';
+import { createSupabasePreviewAsyncStore } from './store-supabase-preview';
 
 export type WaEntryRuntime = {
   config: WaEntryConfig;
-  store: WaEntryStore;
+  store: WaEntryStore | WaEntryAsyncStore;
   sender: WaEntrySender;
 };
 
@@ -26,8 +29,7 @@ let singleton: WaEntryRuntime | null = null;
 
 /**
  * Process-local runtime for the wa-entry module.
- * Sim adapter → file store under PLATFORM_WA_LOCAL_DIR (never Supabase).
- * Wasender adapter → refused unless allow flags are set (still no prod writes in this phase).
+ * Defaults: sim adapter + file store. Wasender + Preview require explicit flags.
  */
 export function getWaEntryRuntime(env: NodeJS.ProcessEnv = process.env): WaEntryRuntime {
   if (singleton) return singleton;
@@ -35,32 +37,35 @@ export function getWaEntryRuntime(env: NodeJS.ProcessEnv = process.env): WaEntry
   const config = loadWaEntryConfig(env);
   assertSafeLocalConfig(config, env);
 
-  const dataDir = path.isAbsolute(config.localDataDir)
-    ? config.localDataDir
-    : path.join(process.cwd(), config.localDataDir);
+  let store: WaEntryStore | WaEntryAsyncStore;
+  if (config.storeKind === 'memory' || env.NODE_ENV === 'test') {
+    store = createMemoryWaEntryStore();
+  } else if (config.storeKind === 'supabase_preview') {
+    store = createSupabasePreviewAsyncStore(config);
+  } else {
+    const dataDir = path.isAbsolute(config.localDataDir)
+      ? config.localDataDir
+      : path.join(process.cwd(), config.localDataDir);
+    store = createFileWaEntryStore(dataDir);
+  }
 
-  const store =
-    config.adapter === 'sim' || env.NODE_ENV === 'test'
-      ? env.NODE_ENV === 'test'
-        ? createMemoryWaEntryStore()
-        : createFileWaEntryStore(dataDir)
-      : createFileWaEntryStore(dataDir);
-
-  const sender =
-    config.adapter === 'sim'
-      ? createSimWaEntrySender(store)
-      : createRefusingWasenderSender();
+  let sender: WaEntrySender;
+  if (config.adapter === 'sim') {
+    sender = createSimWaEntrySender(store);
+  } else if (config.allowRealWasender) {
+    sender = createPreparedWasenderSender({ config, store });
+  } else {
+    sender = createRefusingWasenderSender();
+  }
 
   singleton = { config, store, sender };
   return singleton;
 }
 
-/** Test helper — reset singleton between suites. */
 export function resetWaEntryRuntime() {
   singleton = null;
 }
 
-/** Inject a custom runtime (tests / simulator). */
 export function setWaEntryRuntime(runtime: WaEntryRuntime | null) {
   singleton = runtime;
 }

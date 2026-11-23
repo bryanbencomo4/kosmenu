@@ -4,10 +4,20 @@
 PLATFORM_WA_INBOUND=1
 PLATFORM_WA_ROUTER=1
 PLATFORM_WA_ADAPTER=sim
+PLATFORM_WA_STORE=file
 PLATFORM_WA_WEBHOOK_SECRET=local-dev-secret-change-me
 PLATFORM_WA_LOCAL_DIR=.wa-entry-local
 PLATFORM_WA_ALLOW_REAL_WASENDER=0
 PLATFORM_WA_ALLOW_INSECURE_LOCAL=1
+PLATFORM_WA_ENFORCE_ALLOWLIST=0
+# PLATFORM_WA_ALLOWLIST_DIGITS=58412XXXXXXX,58414YYYYYYY
+PLATFORM_WA_ECHO_WINDOW_MS=300000
+
+# Preview store (optional — never production ref qqhberaayhohxlbbhdyi)
+# PLATFORM_WA_STORE=supabase_preview
+# PLATFORM_WA_PREVIEW_PROJECT_REF=gsfxqzvmyzjjgpigrste
+# PLATFORM_WA_PREVIEW_SUPABASE_URL=https://gsfxqzvmyzjjgpigrste.supabase.co
+# PLATFORM_WA_PREVIEW_SERVICE_ROLE_KEY=
 
 # Optional link overrides (defaults are production public URLs — read-only destinations)
 # PLATFORM_WA_CONSUMER_URL=https://elmenuxfa.com/asistente?ref=wa

@@ -4,7 +4,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { verifyWaEntryWebhook } from '../app/api/wa-entry/_lib/auth';
-import { loadWaEntryConfig, type WaEntryConfig } from '../app/api/wa-entry/_lib/config';
+import {
+  assertPreviewSupabaseTarget,
+  loadWaEntryConfig,
+  WA_ENTRY_PROD_PROJECT_REF,
+  type WaEntryConfig,
+} from '../app/api/wa-entry/_lib/config';
 import { normalizeWaInboundPayload } from '../app/api/wa-entry/_lib/contract';
 import {
   businessManageMessage,
@@ -14,7 +19,11 @@ import {
   welcomeMessage,
 } from '../app/api/wa-entry/_lib/messages';
 import { processWaEntryEvent } from '../app/api/wa-entry/_lib/process';
-import { createRefusingWasenderSender, createSimWaEntrySender } from '../app/api/wa-entry/_lib/sender';
+import {
+  createPreparedWasenderSender,
+  createRefusingWasenderSender,
+  createSimWaEntrySender,
+} from '../app/api/wa-entry/_lib/sender';
 import { createMemoryWaEntryStore } from '../app/api/wa-entry/_lib/store';
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'wa-entry');
@@ -244,7 +253,7 @@ describe('wa-entry router (local sim)', () => {
     expect(store.listOutbound()).toHaveLength(0);
   });
 
-  it('Q) webhook inválido → rechazo seguro', () => {
+  it('Q) webhook inválido → rechazo seguro + firma Wasender oficial', () => {
     const config = testConfig();
     const rawBody = JSON.stringify(fixture('hello.json'));
     const bad = verifyWaEntryWebhook({
@@ -269,11 +278,19 @@ describe('wa-entry router (local sim)', () => {
       rawBody,
     });
     expect(goodHmac.ok).toBe(true);
+
+    // Provider docs: X-Webhook-Signature === webhook secret (exact match)
+    const wasender = verifyWaEntryWebhook({
+      config,
+      headers: { 'x-webhook-signature': 'test-secret' },
+      rawBody,
+    });
+    expect(wasender.ok).toBe(true);
+    if (wasender.ok) expect(wasender.mode).toBe('wasender_signature');
   });
 
-  it('R) fromMe / outbound echo → sin loop', async () => {
+  it('R) bot echo fromMe → bot_echo sin pausa humana', async () => {
     await run(fixture('hello.json'), { store });
-    // Simulate our own outbound echo coming back as fromMe
     const { result } = await run(
       makePayload({
         id: 'wamid.ECHO_OUT',
@@ -283,9 +300,91 @@ describe('wa-entry router (local sim)', () => {
       { store },
     );
     expect(result.action).toBe('ignored');
-    expect(result.reason).toBe('from_me');
-    // Only the original welcome outbound exists
+    expect(result.reason).toBe('bot_echo');
+    expect(store.getThread('584120000001')?.state).not.toBe('human_handling');
     expect(store.listOutbound().filter((o) => o.result === 'simulated_ok')).toHaveLength(1);
+  });
+
+  it('R2) human fromMe → human_handling', async () => {
+    await run(fixture('hello.json'), { store });
+    const { result } = await run(fixture('wasender-fromme-upsert.json'), { store });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('from_me');
+    expect(store.getThread('584120000001')?.state).toBe('human_handling');
+  });
+
+  it('S) contrato oficial messages.received → bienvenida', async () => {
+    const { result } = await run(fixture('wasender-official-received.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(welcomeMessage());
+    const n = normalizeWaInboundPayload(fixture('wasender-official-received.json'));
+    expect(n?.fromDigits).toBe('584120000001');
+    expect(n?.text).toBe('Hola');
+    expect(n?.eventType).toBe('messages.received');
+  });
+
+  it('T) contrato oficial messages.upsert array + opción 1', async () => {
+    await run(fixture('wasender-official-received.json'), { store });
+    const { result, config } = await run(fixture('wasender-official-upsert.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(consumerLinkMessage(config));
+  });
+
+  it('U) allowlist enforced → ignore outsiders', async () => {
+    const config = testConfig({
+      enforceAllowlist: true,
+      allowlistDigits: ['584129999999'],
+    });
+    const { result } = await run(fixture('hello.json'), { store, config });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('not_allowlisted');
+  });
+
+  it('V) prepared wasender sender refuses without flags; queues with allowlist+inject', async () => {
+    const config = testConfig({
+      adapter: 'wasender',
+      allowRealWasender: true,
+      allowlistDigits: ['584120000001'],
+    });
+    let enqueued = 0;
+    const sender = createPreparedWasenderSender({
+      config,
+      store,
+      enqueue: async () => {
+        enqueued += 1;
+        return { ok: true as const, queued: true, response: { queueId: 'q1' } };
+      },
+    });
+    await sender.send({
+      to: '584120000001',
+      text: 'hola',
+      eventId: 'e1',
+      dedupeKey: 'd1',
+    });
+    expect(enqueued).toBe(1);
+    expect(store.listOutbound()[0]?.origin).toBe('wa_entry_bot');
+    expect(store.listOutbound()[0]?.result).toBe('queued');
+
+    const refused = createPreparedWasenderSender({
+      config: testConfig({ allowRealWasender: false }),
+      store,
+    });
+    await expect(
+      refused.send({ to: '584120000001', text: 'x', eventId: 'e2', dedupeKey: 'd2' }),
+    ).rejects.toThrow(/ALLOW_REAL_WASENDER/);
+  });
+
+  it('W) Preview URL safety refuses production ref', () => {
+    expect(() =>
+      assertPreviewSupabaseTarget(
+        testConfig({
+          storeKind: 'supabase_preview',
+          previewSupabaseUrl: `https://${WA_ENTRY_PROD_PROJECT_REF}.supabase.co`,
+          previewServiceRoleKey: 'x',
+          previewProjectRef: WA_ENTRY_PROD_PROJECT_REF,
+        }),
+      ),
+    ).toThrow(/production/);
   });
 
   it('real wasender sender refuses in this phase', async () => {

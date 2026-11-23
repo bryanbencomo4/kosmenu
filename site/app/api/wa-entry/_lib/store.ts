@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import type { WaOutboundRecord, WaThreadRecord } from './contract';
+import { hashOutboundText, type WaOutboundRecord, type WaThreadRecord } from './contract';
 
 export type WaEntryStoreSnapshot = {
   threads: Record<string, WaThreadRecord>;
@@ -19,12 +19,40 @@ export interface WaEntryStore {
   tryClaimMessage(messageId: string): boolean;
   appendOutbound(record: WaOutboundRecord): void;
   listOutbound(): WaOutboundRecord[];
+  /**
+   * True when a recent bot outbound to this chat matches the text
+   * (used to classify fromMe as bot echo vs human operator).
+   */
+  matchBotEcho(params: {
+    toDigits: string;
+    text: string;
+    nowMs: number;
+    windowMs: number;
+  }): boolean;
+  /** Soft lock for concurrent send attempts (best-effort in memory/file). */
+  tryAcquireSendLock(chatDigits: string, nowMs: number, ttlMs: number): boolean;
+  releaseSendLock(chatDigits: string): void;
   snapshot(): WaEntryStoreSnapshot;
   clear(): void;
 }
 
 function emptySnapshot(): WaEntryStoreSnapshot {
   return { threads: {}, seenMessageIds: [], outbound: [] };
+}
+
+function matchEchoInList(
+  outbound: WaOutboundRecord[],
+  params: { toDigits: string; text: string; nowMs: number; windowMs: number },
+): boolean {
+  const textHash = hashOutboundText(params.text);
+  const cutoff = params.nowMs - params.windowMs;
+  return outbound.some(
+    (o) =>
+      o.origin === 'wa_entry_bot' &&
+      o.to === params.toDigits &&
+      o.atMs >= cutoff &&
+      (o.textHash === textHash || o.text === params.text),
+  );
 }
 
 /** In-memory store for unit tests. */
@@ -37,6 +65,7 @@ export function createMemoryWaEntryStore(
     outbound: [...(initial?.outbound || [])],
   };
   const seen = new Set(state.seenMessageIds);
+  const sendLocks = new Map<string, number>();
 
   return {
     getThread(fromDigits) {
@@ -67,6 +96,18 @@ export function createMemoryWaEntryStore(
     listOutbound() {
       return [...state.outbound];
     },
+    matchBotEcho(params) {
+      return matchEchoInList(state.outbound, params);
+    },
+    tryAcquireSendLock(chatDigits, nowMs, ttlMs) {
+      const until = sendLocks.get(chatDigits) || 0;
+      if (until > nowMs) return false;
+      sendLocks.set(chatDigits, nowMs + ttlMs);
+      return true;
+    },
+    releaseSendLock(chatDigits) {
+      sendLocks.delete(chatDigits);
+    },
     snapshot() {
       return {
         threads: { ...state.threads },
@@ -79,6 +120,7 @@ export function createMemoryWaEntryStore(
       state.seenMessageIds = [];
       state.outbound = [];
       seen.clear();
+      sendLocks.clear();
     },
   };
 }
@@ -97,6 +139,7 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
   const dir = path.resolve(dataDir);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, 'state.json');
+  const locksPath = path.join(dir, 'send-locks.json');
 
   const load = (): WaEntryStoreSnapshot => {
     if (!existsSync(filePath)) return emptySnapshot();
@@ -105,7 +148,7 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
       return {
         threads: parsed.threads || {},
         seenMessageIds: parsed.seenMessageIds || [],
-        outbound: parsed.outbound || [],
+        outbound: (parsed.outbound || []).map(normalizeOutbound),
       };
     } catch {
       return emptySnapshot();
@@ -114,11 +157,25 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
 
   let state = load();
   const seen = new Set(state.seenMessageIds);
+  let sendLocks: Record<string, number> = {};
+  try {
+    if (existsSync(locksPath)) {
+      sendLocks = JSON.parse(readFileSync(locksPath, 'utf8')) as Record<string, number>;
+    }
+  } catch {
+    sendLocks = {};
+  }
 
   const persist = () => {
     const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
     renameSync(tmp, filePath);
+  };
+
+  const persistLocks = () => {
+    const tmp = `${locksPath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify(sendLocks), 'utf8');
+    renameSync(tmp, locksPath);
   };
 
   return {
@@ -154,6 +211,20 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
     listOutbound() {
       return [...state.outbound];
     },
+    matchBotEcho(params) {
+      return matchEchoInList(state.outbound, params);
+    },
+    tryAcquireSendLock(chatDigits, nowMs, ttlMs) {
+      const until = sendLocks[chatDigits] || 0;
+      if (until > nowMs) return false;
+      sendLocks[chatDigits] = nowMs + ttlMs;
+      persistLocks();
+      return true;
+    },
+    releaseSendLock(chatDigits) {
+      delete sendLocks[chatDigits];
+      persistLocks();
+    },
     snapshot() {
       return {
         threads: { ...state.threads },
@@ -164,8 +235,18 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
     clear() {
       state = emptySnapshot();
       seen.clear();
+      sendLocks = {};
       persist();
+      persistLocks();
     },
+  };
+}
+
+function normalizeOutbound(raw: WaOutboundRecord): WaOutboundRecord {
+  return {
+    ...raw,
+    origin: raw.origin || 'wa_entry_bot',
+    textHash: raw.textHash || hashOutboundText(raw.text || ''),
   };
 }
 

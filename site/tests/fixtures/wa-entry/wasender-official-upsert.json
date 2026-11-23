@@ -1,0 +1,23 @@
+{
+  "event": "messages.upsert",
+  "timestamp": 1700000101,
+  "data": {
+    "messages": [
+      {
+        "key": {
+          "id": "3EB0OFFICIALUPSERT001",
+          "fromMe": false,
+          "remoteJid": "584120000001@s.whatsapp.net",
+          "senderPn": "584120000001@s.whatsapp.net",
+          "cleanedSenderPn": "584120000001",
+          "senderLid": "123456789@lid",
+          "addressingMode": "pn"
+        },
+        "messageBody": "1",
+        "message": {
+          "conversation": "1"
+        }
+      }
+    ]
+  }
+}
