@@ -90,6 +90,22 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
               unawaited(_reload(silent: true));
             },
           )
+          .onBroadcast(
+            event: 'chat',
+            callback: (_) {
+              unawaited(_reload(silent: true));
+            },
+          )
+          .subscribe();
+      // Align with Next publishConversationEvent topic (light hints).
+      Supabase.instance.client
+          .channel('commerce:${widget.comercioId}:chat')
+          .onBroadcast(
+            event: 'chat',
+            callback: (_) {
+              unawaited(_reload(silent: true));
+            },
+          )
           .subscribe();
     } catch (_) {
       // Publication may be pending — REST reload still works.
@@ -367,6 +383,28 @@ class _ChatConversationDetailScreenState
             },
           )
           .subscribe();
+      final comercioId = widget.comercioId;
+      if (comercioId.isNotEmpty) {
+        Supabase.instance.client
+            .channel('commerce:$comercioId:chat')
+            .onBroadcast(
+              event: 'chat',
+              callback: (payload) {
+                final nested = payload['payload'];
+                final map = nested is Map
+                    ? nested
+                    : payload;
+                final id = map['conversationId']?.toString();
+                if (id != null &&
+                    id.isNotEmpty &&
+                    id != widget.conversationId) {
+                  return;
+                }
+                unawaited(_load(incremental: true));
+              },
+            )
+            .subscribe();
+      }
     } catch (_) {
       // Table may not be published yet — REST recovery still works.
     }

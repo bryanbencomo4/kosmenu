@@ -454,6 +454,8 @@ export function ChatAssistantView({
       runtimeEnabled: live,
     }) as ChatMessage[];
   });
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [phoneAction, setPhoneAction] = useState<ChatPhoneAction | null>(null);
   const [mediaLightbox, setMediaLightbox] =
@@ -627,43 +629,41 @@ export function ChatAssistantView({
         if (!sessionId.trim()) return;
         saveChatSessionId(comercioId, sessionId.trim());
       },
-      /** Synchronously merge staff/system feed rows into the visible transcript. */
+      /** Merge staff/system feed rows into the transcript (sync via messagesRef). */
       ingestStaff: (
         rows: Array<{ id: string; seq?: number; role: string; body: string }>,
       ) => {
         // Clear seen set so a prior feed tick that recorded IDs without a
         // durable UI commit cannot block E2E ingest.
         supervisionSeenIdsRef.current = new Set();
-        let nextLen = 0;
+        const prev = messagesRef.current;
+        const existingBodies = new Set(
+          prev.map((m) => String(m.text || '').trim()),
+        );
+        const next = [...prev];
         let merged = 0;
-        setMessages((prev) => {
-          const existingBodies = new Set(
-            prev.map((m) => String(m.text || '').trim()),
+        for (const m of rows) {
+          if (m.role !== 'staff' && m.role !== 'system') continue;
+          const body = String(m.body || '').trim();
+          if (!body || existingBodies.has(body)) continue;
+          if (supervisionSeenIdsRef.current.has(m.id)) continue;
+          supervisionSeenIdsRef.current.add(m.id);
+          existingBodies.add(body);
+          next.push(createMessage('assistant', body, { demo: false }));
+          merged += 1;
+          supervisionAfterSeqRef.current = Math.max(
+            supervisionAfterSeqRef.current,
+            Number(m.seq || 0),
           );
-          const next = [...prev];
-          for (const m of rows) {
-            if (m.role !== 'staff' && m.role !== 'system') continue;
-            const body = String(m.body || '').trim();
-            if (!body || existingBodies.has(body)) continue;
-            if (supervisionSeenIdsRef.current.has(m.id)) continue;
-            supervisionSeenIdsRef.current.add(m.id);
-            existingBodies.add(body);
-            next.push(createMessage('assistant', body, { demo: false }));
-            merged += 1;
-            supervisionAfterSeqRef.current = Math.max(
-              supervisionAfterSeqRef.current,
-              Number(m.seq || 0),
-            );
+        }
+        messagesRef.current = next;
+        setMessages(next);
+        (
+          window as Window & {
+            __elmenuxfaSupervisionE2ELastMerge?: number;
           }
-          nextLen = next.length;
-          (
-            window as Window & {
-              __elmenuxfaSupervisionE2ELastMerge?: number;
-            }
-          ).__elmenuxfaSupervisionE2ELastMerge = nextLen;
-          return next;
-        });
-        return merged || nextLen;
+        ).__elmenuxfaSupervisionE2ELastMerge = next.length;
+        return merged;
       },
     };
     return () => {

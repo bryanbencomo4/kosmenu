@@ -1,8 +1,8 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión implementada en rama `feature/chat-supervision-human` @ `8d28658`; evidencias locales verdes (dual **21/21**, Vitest **19+**, tsc 0, Site CI **SUCCESS**).  
-Hardening: allowlist dedicada, feed HMAC, takeover lock anti-carrera, await persist, resume feed post-reload, inbox poll 20s, escalation hold.  
+**Estado:** supervisión implementada en rama `feature/chat-supervision-human` (HEAD reciente incluye remint feed, race WaSender, discard determinístico, broadcast alineado). Evidencias locales: dual **21/21**, Vitest **19**, tsc 0.  
+Hardening: allowlist dedicada, feed HMAC + remint POST, takeover lock, await persist, resume feed, inbox recovery 20s, escalation hold, broadcast `commerce:{id}:chat` + postgres_changes.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
@@ -60,11 +60,11 @@ Modo `CHAT_SUPERVISION_MEMORY=1` permite probar sin migración.
 
 ## 6. Realtime Broadcast / postgres_changes
 
-- Merchant detalle: `useConversationRealtime` (`INSERT` en `chat_messages` filtrado por `conversation_id`).
-- Merchant bandeja: canal inbox `chat_conversations` por `comercio_id`.
-- Server: `publishConversationEvent` broadcast best-effort.
-- Consumidor anónimo: feed REST session-scoped (HMAC); recovery 8s + visibility (no polling 1–5s).
-- Requiere migración + `alter publication supabase_realtime add table …` (comentado en SQL).
+- Merchant detalle: `postgres_changes` INSERT + broadcast hint → REST incremental.
+- Merchant bandeja: `postgres_changes` en `chat_conversations` + broadcast `commerce:{id}:chat`.
+- Server: `publishConversationEvent` (payload ligero: ids/tipos; sin cuerpos).
+- Consumidor anónimo: feed REST session-scoped (HMAC + remint POST); recovery 8s + visibility.
+- Migración incluye publication Realtime idempotente; apply script la re-aplica.
 
 ## 7. Bandeja
 

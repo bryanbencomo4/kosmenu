@@ -146,7 +146,16 @@ function ConversationDetailInner({
     [],
   );
 
-  useConversationRealtime(conversationId || null, onRealtimeInsert);
+  const onBroadcastHint = useCallback(() => {
+    void load(lastSeqRef.current);
+  }, [load]);
+
+  useConversationRealtime(
+    conversationId || null,
+    comercioId || null,
+    onRealtimeInsert,
+    onBroadcastHint,
+  );
 
   // Recovery after disconnect / missed Realtime — not primary delivery.
   useEffect(() => {

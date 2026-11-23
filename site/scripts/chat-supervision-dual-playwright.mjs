@@ -371,7 +371,7 @@ async function main() {
     const hookResult = await cPage.evaluate(
       async ({ comercioId, sid, token }) => {
         const api = window.__elmenuxfaSupervisionE2E;
-        if (!api?.ingestStaff || !api?.setSession) {
+        if (!api?.ingestStaff || !api?.setSession || !api?.forceWatch) {
           return { ok: false, reason: 'hook_missing' };
         }
         sessionStorage.setItem(`elmenuxfa:chat-sid-v1:${comercioId}`, sid);
@@ -379,6 +379,7 @@ async function main() {
           sessionStorage.setItem(`elmenuxfa:chat-feed-token-v1:${comercioId}`, token);
         }
         api.setSession(sid);
+        api.forceWatch();
         const res = await fetch(
           `/api/chat/${encodeURIComponent(comercioId)}/supervision-feed?afterSeq=0`,
           {
@@ -392,6 +393,8 @@ async function main() {
         const rows = (data?.messages || []).filter(
           (m) => m.role === 'staff' || m.role === 'system',
         );
+        // Yield so forceWatch state commits before merging into the transcript.
+        await new Promise((r) => setTimeout(r, 50));
         const merged = api.ingestStaff(rows);
         return {
           ok: true,

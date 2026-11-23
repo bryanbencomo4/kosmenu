@@ -164,23 +164,34 @@ function ConversationsInboxInner({
     if (!token || !comercioId.trim()) return;
     const sb = getBrowserSupabase();
     if (!sb) return;
+    const cid = comercioId.trim();
     const channel = sb
-      .channel(`commerce:${comercioId.trim()}:chat_inbox`)
+      .channel(`commerce:${cid}:chat_inbox`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'chat_conversations',
-          filter: `comercio_id=eq.${comercioId.trim()}`,
+          filter: `comercio_id=eq.${cid}`,
         },
         () => {
           void loadInbox();
         },
       )
       .subscribe();
+
+    // Same topic as server publishConversationEvent (light ids/types only).
+    const hint = sb
+      .channel(`commerce:${cid}:chat`)
+      .on('broadcast', { event: 'chat' }, () => {
+        void loadInbox();
+      })
+      .subscribe();
+
     return () => {
       void sb.removeChannel(channel);
+      void sb.removeChannel(hint);
     };
   }, [token, comercioId, loadInbox]);
 

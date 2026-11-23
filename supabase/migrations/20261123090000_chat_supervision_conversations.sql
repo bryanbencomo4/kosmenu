@@ -240,9 +240,19 @@ grant execute on function public.chat_return_to_assistant(uuid, uuid) to authent
 comment on table public.chat_conversations is
   'Supervised chatbot conversations. consumer_session_hash binds anonymous sessions; merchants access via membership RLS.';
 
--- Optional Realtime publication (apply only if not already present):
--- alter publication supabase_realtime add table public.chat_conversations;
--- alter publication supabase_realtime add table public.chat_messages;
+-- Realtime publication for merchant postgres_changes (idempotent).
+-- apply-chat-supervision-migration.mjs also runs this block after the file.
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.chat_conversations;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.chat_messages;
+  exception when duplicate_object then null;
+  end;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- DOWN (manual rollback — do not auto-run)

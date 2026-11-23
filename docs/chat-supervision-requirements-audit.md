@@ -15,7 +15,7 @@ Leyenda: **DONE** / **PARTIAL** / **BLOCKED** / **N/A**
 | 5 | Auth comerciante (sin segundo sistema) | DONE | Bearer Supabase + membership; `/panel/login`; `/api/panel/conversaciones/me` |
 | 6 | Bandeja en panel existente | DONE | Next `/panel/conversaciones` + Flutter Configuración → Conversaciones (API + Realtime; prioridad `needs_attention`; propuestas de producto en payload) |
 | 7 | Persistencia servidor (no solo browser) | PARTIAL | Código + migración lista; **tablas null en prod/preview** (read-only) |
-| 8 | Realtime (no polling 1–5s) | PARTIAL | `postgres_changes` + inbox recovery 20s; publication pendiente de apply |
+| 8 | Realtime (no polling 1–5s) | PARTIAL | broadcast + `postgres_changes` + recovery 20s; publication en migración, **pendiente apply remoto** |
 | 9 | Takeover IA→humano atómico | PARTIAL | RPC + optimistic lock anti-clobber; dual/Vitest MEMORY OK; **no Postgres remoto** |
 | 10 | Respuesta humana → consumidor | PARTIAL | Feed HMAC + resume post-reload; dual **21/21** MEMORY; falta DB remota |
 | 11 | Devolver a Gemini | PARTIAL | Igual que 9–10 |

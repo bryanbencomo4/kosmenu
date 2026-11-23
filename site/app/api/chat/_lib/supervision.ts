@@ -1068,9 +1068,10 @@ export async function publishConversationEvent(
 ) {
   try {
     const sb = getServiceSupabaseClient();
-    const channel = sb.channel(`commerce:${comercioId}:chat`, {
-      config: { private: true },
-    });
+    // Public topic name + light payload (ids/types only). Message bodies stay in DB;
+    // merchants still authorize via session + RLS/REST. Avoid private:true until
+    // Realtime Authorization policies exist for this project.
+    const channel = sb.channel(`commerce:${comercioId}:chat`);
     await channel.subscribe();
     await channel.send({
       type: 'broadcast',
