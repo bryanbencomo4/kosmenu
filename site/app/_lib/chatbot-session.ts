@@ -155,6 +155,7 @@ export function saveChatHistory(
       demo: m.demo,
       isWelcome: m.isWelcome,
       welcomeVersion: m.welcomeVersion,
+      isIdentityAsk: m.isIdentityAsk,
       deliveryStatus: m.deliveryStatus,
       voiceDurationMs: m.voiceDurationMs,
       // Keep proposal cards across remounts so confirm UI does not vanish.

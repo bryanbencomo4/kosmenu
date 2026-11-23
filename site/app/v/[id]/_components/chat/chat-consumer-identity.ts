@@ -219,13 +219,31 @@ export function parseIdentityReply(text: string): {
   };
 }
 
-export function shouldAskForIdentity(
+/**
+ * True when we still need name capture.
+ * Do NOT gate on askedAt alone — that caused silent "already asked" without a bubble.
+ */
+export function needsIdentityCapture(
   identity: ChatConsumerIdentity | null,
 ): boolean {
   if (identity?.declinedAt) return false;
-  if (identity?.askedAt) return false;
   if (clean(identity?.name || '')) return false;
   return true;
+}
+
+/** @deprecated use needsIdentityCapture — kept for older call sites/tests. */
+export function shouldAskForIdentity(
+  identity: ChatConsumerIdentity | null,
+): boolean {
+  return needsIdentityCapture(identity);
+}
+
+/** Short greetings that must not skip identity capture via Gemini. */
+export function matchGreetingOnly(text: string | null | undefined): boolean {
+  const norm = fold(text ?? '');
+  return /^(hola|holaa+|buenas|buen[oa]s( (dias|tardes|noches))?|hey|hi|hello|saludos)(!|\.)?$/.test(
+    norm,
+  );
 }
 
 export function shouldRemindPhone(

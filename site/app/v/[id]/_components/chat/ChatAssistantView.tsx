@@ -53,9 +53,10 @@ import {
   buildConsumerLabel,
   buildSoftIdentityAskText,
   buildSoftPhoneReminderText,
+  matchGreetingOnly,
+  needsIdentityCapture,
   parseIdentityReply,
   readChatConsumerIdentity,
-  shouldAskForIdentity,
   shouldRemindPhone,
   writeChatConsumerIdentity,
 } from './chat-consumer-identity';
@@ -243,6 +244,7 @@ function createMessage(
     closeSale?: ChatCloseSalePrompt | null;
     senderLabel?: string;
     id?: string;
+    isIdentityAsk?: boolean;
   },
 ): ChatMessage {
   return {
@@ -254,6 +256,7 @@ function createMessage(
     createdAt: Date.now(),
     demo: options?.demo,
     isWelcome: options?.isWelcome,
+    isIdentityAsk: options?.isIdentityAsk,
     senderLabel: options?.senderLabel,
     welcomeVersion: options?.isWelcome ? CHATBOT_WELCOME_VERSION : undefined,
     productCards: options?.productCards,
@@ -1113,51 +1116,61 @@ export function ChatAssistantView({
     [comercioId],
   );
 
-  /** Soft one-shot ask for name + WhatsApp when this device has never shared them. */
+  /**
+   * Inject soft identity ask into the thread when needed.
+   * Anchored to message history (isIdentityAsk) — never mark asked without a bubble.
+   */
+  const ensureIdentityAskInThread = useCallback(
+    (prev: ChatMessage[]): { next: ChatMessage[]; ask: ChatMessage | null } => {
+      const identity = readChatConsumerIdentity(comercioId);
+      if (!needsIdentityCapture(identity)) {
+        return { next: prev, ask: null };
+      }
+      if (prev.some((m) => m.isIdentityAsk)) {
+        identityAwaitingRef.current = true;
+        return { next: prev, ask: null };
+      }
+      const ask = createMessage('assistant', buildSoftIdentityAskText(), {
+        isIdentityAsk: true,
+      });
+      identityAwaitingRef.current = true;
+      writeChatConsumerIdentity(comercioId, {
+        askedAt: new Date().toISOString(),
+      });
+      return { next: [...prev, ask], ask };
+    },
+    [comercioId],
+  );
+
+  /** Soft one-shot ask for name + WhatsApp — sync, remount-safe. */
   useEffect(() => {
     const existing = readChatConsumerIdentity(comercioId);
     const knownLabel = buildConsumerLabel(existing || {});
     if (knownLabel) {
       syncConsumerLabelToServer(knownLabel);
     }
-    if (!shouldAskForIdentity(existing)) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        if (cancelled) return;
-        writeChatConsumerIdentity(comercioId, {
-          askedAt: new Date().toISOString(),
+    if (!needsIdentityCapture(existing)) return;
+    setMessages((prev) => {
+      const { next, ask } = ensureIdentityAskInThread(prev);
+      if (ask) {
+        queueMicrotask(() => {
+          playAssistantReceivedOnce(ask);
+          void syncLocalSupervisionTurn({
+            comercioId,
+            businessName,
+            refs: {
+              feedTokenRef: supervisionFeedTokenRef,
+              conversationIdRef: supervisionConversationIdRef,
+            },
+            assistant: ask,
+            onWatch: () => setSupervisionWatchActive(true),
+          });
         });
-        identityAwaitingRef.current = true;
-        setIsTyping(true);
-        await sleep(humanLocalReplyMs());
-        if (cancelled) {
-          setIsTyping(false);
-          return;
-        }
-        const ask = createMessage('assistant', buildSoftIdentityAskText());
-        setMessages((prev) => [...prev, ask]);
-        playAssistantReceivedOnce(ask);
-        void syncLocalSupervisionTurn({
-          comercioId,
-          businessName,
-          refs: {
-            feedTokenRef: supervisionFeedTokenRef,
-            conversationIdRef: supervisionConversationIdRef,
-          },
-          assistant: ask,
-          onWatch: () => setSupervisionWatchActive(true),
-        });
-        setIsTyping(false);
-      })();
-    }, 1100);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-    // Intentionally once per mount / commerce — askedAt gate prevents repeats.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- soft ask bootstrap
-  }, [comercioId]);
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per commerce mount
+  }, [comercioId, ensureIdentityAskInThread]);
 
   /** Mirror deterministic UI turns so the merchant panel sees the same cards. */
   const mirrorLocalTurn = useCallback(
@@ -2127,18 +2140,34 @@ export function ChatAssistantView({
         deliveryStatus: 'sent',
         replyTo: reply,
       });
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
+      // Ensure the soft identity ask is in the thread before any Gemini reply.
+      const withUser = [...messages, userMsg];
+      const { next: seededThread, ask: seededAsk } =
+        ensureIdentityAskInThread(withUser);
+      setMessages(seededThread);
+      if (seededAsk) {
+        playAssistantReceivedOnce(seededAsk);
+        void syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          assistant: seededAsk,
+          onWatch: () => setSupervisionWatchActive(true),
+        });
+      }
+      const nextMessages = seededThread;
 
       // Soft identity capture (name / WhatsApp) — non-blocking if they also order.
       const priorIdentity = readChatConsumerIdentity(comercioId);
       const parsedId = parseIdentityReply(text);
-      if (
+      const capturing =
+        needsIdentityCapture(priorIdentity) ||
         identityAwaitingRef.current ||
-        (priorIdentity?.askedAt &&
-          !priorIdentity.declinedAt &&
-          (!priorIdentity.name || !priorIdentity.whatsapp))
-      ) {
+        nextMessages.some((m) => m.isIdentityAsk);
+      if (capturing && needsIdentityCapture(priorIdentity)) {
         if (parsedId.declined) {
           identityAwaitingRef.current = false;
           writeChatConsumerIdentity(comercioId, {
@@ -2205,6 +2234,37 @@ export function ChatAssistantView({
             setIsTyping(false);
             return;
           }
+        } else if (matchGreetingOnly(text)) {
+          // "Hola" must not go to Gemini while we still need name/WhatsApp.
+          if (seededAsk) {
+            setMessages((prev) => markLatestUserMessage(prev, 'read'));
+            mirrorLocalTurn({
+              consumerText: text,
+              consumerMessageId: userMsg.id,
+              assistant: seededAsk,
+            });
+            return;
+          }
+          setIsTyping(true);
+          await sleep(humanLocalReplyMs());
+          const hasAsk = nextMessages.some((m) => m.isIdentityAsk);
+          const nudge = createMessage(
+            'assistant',
+            hasAsk
+              ? 'Cuando puedas, con tu nombre y WhatsApp te atienden mejor. Si prefieres, también puedes decir qué te provoca del menú.'
+              : buildSoftIdentityAskText(),
+            hasAsk ? undefined : { isIdentityAsk: true },
+          );
+          identityAwaitingRef.current = true;
+          setMessages((prev) => [...markLatestUserMessage(prev, 'read'), nudge]);
+          playAssistantReceivedOnce(nudge);
+          mirrorLocalTurn({
+            consumerText: text,
+            consumerMessageId: userMsg.id,
+            assistant: nudge,
+          });
+          setIsTyping(false);
+          return;
         }
       } else if (shouldRemindPhone(priorIdentity) && parsedId.whatsapp) {
         const saved = writeChatConsumerIdentity(comercioId, {
@@ -2256,10 +2316,12 @@ export function ChatAssistantView({
       replyTo,
       cartCount,
       comercioId,
+      businessName,
       onOpenCheckout,
       playAssistantReceivedOnce,
       mirrorLocalTurn,
       syncConsumerLabelToServer,
+      ensureIdentityAskInThread,
       runAssistantTurn,
       answerCatalogIntent,
       answerLocationIntent,

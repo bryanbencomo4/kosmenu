@@ -144,6 +144,8 @@ export type ChatMessage = {
   /** First assistant bubble; refreshed when welcome copy/version changes. */
   isWelcome?: boolean;
   welcomeVersion?: number;
+  /** Soft name/WhatsApp capture prompt (persist so remounts do not re-ask wrongly). */
+  isIdentityAsk?: boolean;
   /** User-message delivery ticks (grey / blue). */
   deliveryStatus?: ChatDeliveryStatus;
   /** Optional voice note attached to a user bubble. */

@@ -5,9 +5,10 @@ import {
   buildSoftIdentityAskText,
   extractNameFromText,
   extractWhatsappFromText,
+  matchGreetingOnly,
   matchIdentityDecline,
+  needsIdentityCapture,
   parseIdentityReply,
-  shouldAskForIdentity,
 } from '../app/v/[id]/_components/chat/chat-consumer-identity';
 import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
 
@@ -30,6 +31,8 @@ describe('chat consumer identity', () => {
     );
     expect(matchIdentityDecline('luego, gracias')).toBe(true);
     expect(matchIdentityDecline('quiero una hawaiana')).toBe(false);
+    expect(matchGreetingOnly('Hola')).toBe(true);
+    expect(matchGreetingOnly('Menu')).toBe(false);
 
     const parsed = parseIdentityReply('Soy Ana 04141234567');
     expect(parsed.name).toBe('Ana');
@@ -37,23 +40,23 @@ describe('chat consumer identity', () => {
     expect(buildConsumerLabel(parsed)).toMatch(/Ana/);
   });
 
-  it('only asks when name is missing and not declined', () => {
-    expect(shouldAskForIdentity(null)).toBe(true);
+  it('needs capture until name exists (askedAt alone does not block)', () => {
+    expect(needsIdentityCapture(null)).toBe(true);
     expect(
-      shouldAskForIdentity({
+      needsIdentityCapture({
         name: '',
         whatsapp: '',
         askedAt: new Date().toISOString(),
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      shouldAskForIdentity({
+      needsIdentityCapture({
         name: 'Ana',
         whatsapp: '',
       }),
     ).toBe(false);
     expect(
-      shouldAskForIdentity({
+      needsIdentityCapture({
         name: '',
         whatsapp: '',
         declinedAt: new Date().toISOString(),
