@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
 import { appSiteUrl } from '../../_lib/public-site-config';
+import { safePanelNext } from '../_lib/safe-panel-next';
 
 export function PanelLoginClient({
   searchParamsPromise,
@@ -22,14 +23,16 @@ export function PanelLoginClient({
     let cancelled = false;
     (async () => {
       const sp = searchParamsPromise ? await searchParamsPromise : {};
-      const next = typeof sp.next === 'string' ? sp.next : '';
-      if (!cancelled && next.startsWith('/panel/')) setNextPath(next);
+      const next = safePanelNext(
+        typeof sp.next === 'string' ? sp.next : '',
+      );
+      if (!cancelled) setNextPath(next);
 
       const sb = getBrowserSupabase();
       if (!sb) return;
       const { data } = await sb.auth.getSession();
       if (!cancelled && data.session?.access_token) {
-        router.replace(next.startsWith('/panel/') ? next : '/panel/conversaciones');
+        router.replace(next);
       }
     })();
     return () => {

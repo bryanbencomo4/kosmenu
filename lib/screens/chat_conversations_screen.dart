@@ -45,6 +45,7 @@ class ChatConversationsScreen extends StatefulWidget {
 class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
   late Future<List<ChatConversationSummary>> _future;
   RealtimeChannel? _inboxChannel;
+  RealtimeChannel? _hintChannel;
   Timer? _recoveryTimer;
 
   @override
@@ -69,6 +70,7 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
   void dispose() {
     _recoveryTimer?.cancel();
     unawaited(_inboxChannel?.unsubscribe() ?? Future<void>.value());
+    unawaited(_hintChannel?.unsubscribe() ?? Future<void>.value());
     super.dispose();
   }
 
@@ -90,15 +92,9 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
               unawaited(_reload(silent: true));
             },
           )
-          .onBroadcast(
-            event: 'chat',
-            callback: (_) {
-              unawaited(_reload(silent: true));
-            },
-          )
           .subscribe();
       // Align with Next publishConversationEvent topic (light hints).
-      Supabase.instance.client
+      _hintChannel = Supabase.instance.client
           .channel('commerce:${widget.comercioId}:chat')
           .onBroadcast(
             event: 'chat',
@@ -307,6 +303,7 @@ class _ChatConversationDetailScreenState
   bool _busy = false;
   final _draft = TextEditingController();
   RealtimeChannel? _channel;
+  RealtimeChannel? _hintChannel;
   Timer? _recoveryTimer;
   int _lastSeq = 0;
 
@@ -327,6 +324,7 @@ class _ChatConversationDetailScreenState
   void dispose() {
     _recoveryTimer?.cancel();
     unawaited(_channel?.unsubscribe() ?? Future<void>.value());
+    unawaited(_hintChannel?.unsubscribe() ?? Future<void>.value());
     _draft.dispose();
     super.dispose();
   }
@@ -385,7 +383,7 @@ class _ChatConversationDetailScreenState
           .subscribe();
       final comercioId = widget.comercioId;
       if (comercioId.isNotEmpty) {
-        Supabase.instance.client
+        _hintChannel = Supabase.instance.client
             .channel('commerce:$comercioId:chat')
             .onBroadcast(
               event: 'chat',

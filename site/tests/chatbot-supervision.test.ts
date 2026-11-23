@@ -34,6 +34,8 @@ import {
 import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
 import { canSendStaffMessage } from '../app/api/panel/conversaciones/_lib/staff-authz';
 import { resolveE2ePanelBearer } from '../app/panel/_lib/e2e-panel-bearer';
+import { safePanelNext } from '../app/panel/_lib/safe-panel-next';
+import { commerceChatChannelName } from '../app/_lib/chat-supervision-realtime';
 
 const COMERCIO = '0aa8c53b-07f1-446e-8b88-66c2b7ae89ea';
 
@@ -93,6 +95,20 @@ describe('chat supervision helpers', () => {
     expect(href).toMatch(/elmenuxfa\.com|localhost|127\.0\.0\.1/);
     expect(href).not.toMatch(/^https:\/\/app\.elmenuxfa\.com\//);
     expect(href).not.toMatch(/service_role|apikey|Bearer/i);
+  });
+
+  it('sanitizes panel login next redirects', () => {
+    expect(
+      safePanelNext(
+        '/panel/conversaciones/11111111-1111-4111-8111-111111111111?comercioId=x',
+      ),
+    ).toContain('/panel/conversaciones/');
+    expect(safePanelNext('https://evil.example/phish')).toBe(
+      '/panel/conversaciones',
+    );
+    expect(safePanelNext('//evil.example')).toBe('/panel/conversaciones');
+    expect(safePanelNext('/panel/../admin')).toBe('/panel/conversaciones');
+    expect(commerceChatChannelName(COMERCIO)).toBe(`commerce:${COMERCIO}:chat`);
   });
 
   it('feature flags default off and fail-closed in production allowlist', () => {
