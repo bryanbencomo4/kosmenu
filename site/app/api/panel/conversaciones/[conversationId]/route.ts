@@ -77,6 +77,9 @@ export async function GET(
 
   if (isSupervisionMemoryEnabled()) {
     memoryUpdateConversation(conversationId, { unread_merchant_count: 0 });
+    void publishConversationEvent(access.comercioId, conversationId, {
+      type: 'unread_cleared',
+    });
     return NextResponse.json({
       ok: true,
       conversation,
@@ -109,6 +112,10 @@ export async function GET(
     .update({ unread_merchant_count: 0 })
     .eq('id', conversationId)
     .eq('comercio_id', access.comercioId);
+
+  void publishConversationEvent(access.comercioId, conversationId, {
+    type: 'unread_cleared',
+  });
 
   return NextResponse.json({
     ok: true,

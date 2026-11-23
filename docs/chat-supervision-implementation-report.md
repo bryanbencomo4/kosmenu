@@ -1,7 +1,7 @@
 # Informe — supervisión humana del chatbot
 
 **Rama:** `feature/chat-supervision-human`  
-**Estado:** supervisión en `feature/chat-supervision-human` @ `8aa2360`+ (remint feed, race WaSender, discard determinístico, broadcast panel/consumidor, `REPLICA IDENTITY FULL`). Evidencias locales: dual **21/21**, Vitest **19**, tsc 0.  
+**Estado:** supervisión en `feature/chat-supervision-human` @ `9779353` (remint, WaSender race, discard, broadcast panel/consumidor, replica identity, safePanelNext). Evidencias: dual **21/21**, Vitest **20**, tsc 0, Site CI **success**.  
 **Veredicto:** **NO-GO** publicar.  
 **Desbloqueo schema:** `I_AUTHORIZE_CHAT_SUPERVISION_MIGRATION` (+ opcional `I_AUTHORIZE_CHAT_SUPERVISION_TRUENO_ACTIVATE`).  
 **Antes de WaSender=1:** `I_AUTHORIZE_TRUENO_SUPERVISION_WHATSAPP` + E.164 (ya no se usa el WhatsApp público del menú para avisos).  
