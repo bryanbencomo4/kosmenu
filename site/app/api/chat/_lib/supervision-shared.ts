@@ -148,10 +148,16 @@ export function shouldRetrySupervisionNotify(
 export const PLATFORM_SUPPORT_WHATSAPP_DIGITS = '584220451906';
 
 /**
- * Merchant WaSender notify destination from config only.
- * Does NOT fall back to the public menu WhatsApp — that number may be for
- * diners, not staff alerts. Set config_negocio.supervision_whatsapp (preferred)
- * or notify_whatsapp / whatsapp_avisos.
+ * Merchant WaSender notify destination — resolved per commerce, never hardcoded.
+ *
+ * Order:
+ * 1) config_negocio.supervision_whatsapp (dedicated staff alerts)
+ * 2) config_negocio.notify_whatsapp / whatsapp_avisos
+ * 3) comercios.whatsapp (registered restaurant WhatsApp), when present and
+ *    not the platform support number
+ *
+ * Never uses El Menú XFA / platform support WhatsApp as a destination.
+ * Never trusts a consumer-provided phone.
  */
 /** Idempotent WaSender key; version rises when a closed thread is reopened. */
 export function newConversationNotifyDedupeKey(
@@ -162,20 +168,53 @@ export function newConversationNotifyDedupeKey(
   return `chat_supervision:new:${conversationId}:v${version}`;
 }
 
-export function pickSupervisionNotifyPhone(
-  configNegocio: Record<string, unknown> | null | undefined,
-): string | null {
-  const cfg = configNegocio || {};
-  const preferred = String(
-    cfg.supervision_whatsapp ||
-      cfg.notify_whatsapp ||
-      cfg.whatsapp_avisos ||
-      '',
-  ).trim();
+export type SupervisionNotifySource =
+  | 'supervision_whatsapp'
+  | 'notify_whatsapp'
+  | 'whatsapp_avisos'
+  | 'comercios.whatsapp';
+
+export type SupervisionNotifyResolution = {
+  phone: string;
+  source: SupervisionNotifySource;
+};
+
+function sanitizeSupervisionNotifyPhone(raw: string | null | undefined): string | null {
+  const preferred = String(raw || '').trim();
   if (!preferred) return null;
   const digits = preferred.replace(/\D/g, '');
   if (!digits || digits === PLATFORM_SUPPORT_WHATSAPP_DIGITS) return null;
   return preferred;
+}
+
+export function resolveSupervisionNotifyDestination(input: {
+  configNegocio?: Record<string, unknown> | null;
+  /** Registered public WhatsApp on comercios.whatsapp (per-commerce). */
+  registeredWhatsapp?: string | null;
+}): SupervisionNotifyResolution | null {
+  const cfg = input.configNegocio || {};
+  const candidates: Array<[SupervisionNotifySource, unknown]> = [
+    ['supervision_whatsapp', cfg.supervision_whatsapp],
+    ['notify_whatsapp', cfg.notify_whatsapp],
+    ['whatsapp_avisos', cfg.whatsapp_avisos],
+    ['comercios.whatsapp', input.registeredWhatsapp],
+  ];
+  for (const [source, value] of candidates) {
+    const phone = sanitizeSupervisionNotifyPhone(
+      value == null ? '' : String(value),
+    );
+    if (phone) return { phone, source };
+  }
+  return null;
+}
+
+/** Config-only pick (no registered WhatsApp fallback). Prefer resolveSupervisionNotifyDestination. */
+export function pickSupervisionNotifyPhone(
+  configNegocio: Record<string, unknown> | null | undefined,
+): string | null {
+  return (
+    resolveSupervisionNotifyDestination({ configNegocio })?.phone ?? null
+  );
 }
 
 const FEED_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;

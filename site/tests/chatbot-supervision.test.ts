@@ -10,6 +10,7 @@ import {
   nextSupervisionRetryAt,
   pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
+  resolveSupervisionNotifyDestination,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
   SUPERVISION_NOTIFY_MAX_ATTEMPTS,
@@ -274,7 +275,7 @@ describe('chat supervision helpers', () => {
     expect(resolveE2ePanelBearer('', '127.0.0.1')).toBeNull();
   });
 
-  it('picks supervision notify phone from dedicated config only', () => {
+  it('resolves supervision notify phone per commerce with registered WhatsApp fallback', () => {
     expect(
       pickSupervisionNotifyPhone({
         supervision_whatsapp: '+584141111111',
@@ -291,8 +292,28 @@ describe('chat supervision helpers', () => {
         supervision_whatsapp: `+${PLATFORM_SUPPORT_WHATSAPP_DIGITS}`,
       }),
     ).toBeNull();
-    // Public menu number is intentionally ignored by this helper — callers
-    // must not pass comercios.whatsapp as a fallback for staff alerts.
+    // Trueno-style: no dedicated config → registered comercios.whatsapp
+    expect(
+      resolveSupervisionNotifyDestination({
+        configNegocio: {},
+        registeredWhatsapp: '+584140821633',
+      }),
+    ).toEqual({ phone: '+584140821633', source: 'comercios.whatsapp' });
+    // Never deliver staff alerts to platform / El Menú XFA support number
+    expect(
+      resolveSupervisionNotifyDestination({
+        configNegocio: {},
+        registeredWhatsapp: `+${PLATFORM_SUPPORT_WHATSAPP_DIGITS}`,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSupervisionNotifyDestination({
+        configNegocio: {
+          supervision_whatsapp: `+${PLATFORM_SUPPORT_WHATSAPP_DIGITS}`,
+        },
+        registeredWhatsapp: '+584140821633',
+      }),
+    ).toEqual({ phone: '+584140821633', source: 'comercios.whatsapp' });
   });
 
   it('limits WaSender notify retries with backoff', () => {

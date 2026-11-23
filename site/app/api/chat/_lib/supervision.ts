@@ -24,8 +24,8 @@ import {
   nextConversationStatusAfterConsumerMessage,
   nextSupervisionRetryAt,
   newConversationNotifyDedupeKey,
-  pickSupervisionNotifyPhone,
   PLATFORM_SUPPORT_WHATSAPP_DIGITS,
+  resolveSupervisionNotifyDestination,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
 } from './supervision-shared';
@@ -52,6 +52,7 @@ export {
   nextSupervisionRetryAt,
   newConversationNotifyDedupeKey,
   pickSupervisionNotifyPhone,
+  resolveSupervisionNotifyDestination,
   shouldDiscardInFlightAssistant,
   shouldRetrySupervisionNotify,
   verifySupervisionFeedToken,
@@ -741,25 +742,30 @@ async function resolvePublicMenuWhatsapp(
 }
 
 /**
- * Staff alert destination for WaSender — dedicated config keys only.
- * Never falls back to comercios.whatsapp / owner phone (public menu contact).
+ * Staff alert destination for WaSender — dynamic per comercio_id.
+ * Prefer dedicated config keys; else registered comercios.whatsapp.
+ * Never uses platform support WhatsApp; never trusts browser-supplied phones.
  */
 async function resolveSupervisionWhatsapp(
   comercioId: string,
-): Promise<{ phone: string; nombre: string } | null> {
+): Promise<{ phone: string; nombre: string; source: string } | null> {
   const sb = getServiceSupabaseClient();
   const { data: row } = await sb
     .from('comercios')
-    .select('nombre,branding_ia')
+    .select('nombre,whatsapp,branding_ia')
     .eq('id', comercioId)
     .maybeSingle();
   const cfg =
     (row?.branding_ia as { config_negocio?: Record<string, unknown> } | null)
       ?.config_negocio || {};
-  const phone = pickSupervisionNotifyPhone(cfg);
-  if (!phone) return null;
+  const resolved = resolveSupervisionNotifyDestination({
+    configNegocio: cfg,
+    registeredWhatsapp: row?.whatsapp == null ? null : String(row.whatsapp),
+  });
+  if (!resolved) return null;
   return {
-    phone,
+    phone: resolved.phone,
+    source: resolved.source,
     nombre: String(row?.nombre || 'Tu restaurante'),
   };
 }
@@ -831,8 +837,9 @@ async function enqueueNewConversationNotify(input: {
     '',
     `Un cliente ha iniciado una conversación con el asistente virtual de *${dest.nombre || input.commerceName}*.`,
     '',
-    'El asistente ya está atendiendo automáticamente.',
-    'Puedes revisar los mensajes en tiempo real e intervenir cuando quieras.',
+    '🤖 Tu asistente ya está atendiendo.',
+    '',
+    'Puedes seguir la conversación en tiempo real e intervenir cuando lo necesites.',
     '',
     'Ver conversación:',
     link,
@@ -848,7 +855,11 @@ async function enqueueNewConversationNotify(input: {
       .from('chat_supervision_events')
       .update({
         status: 'sent',
-        meta: { attempts: 0, handed_to_wasender_queue: true },
+        meta: {
+          attempts: 0,
+          handed_to_wasender_queue: true,
+          notify_source: dest.source,
+        },
         updated_at: new Date().toISOString(),
       })
       .eq('dedupe_key', dedupeKey);
@@ -1035,8 +1046,9 @@ export async function retryFailedSupervisionNotifies(comercioId: string) {
             '',
             `Un cliente ha iniciado una conversación con el asistente virtual de *${dest.nombre}*.`,
             '',
-            'El asistente ya está atendiendo automáticamente.',
-            'Puedes revisar los mensajes en tiempo real e intervenir cuando quieras.',
+            '🤖 Tu asistente ya está atendiendo.',
+            '',
+            'Puedes seguir la conversación en tiempo real e intervenir cuando lo necesites.',
             '',
             'Ver conversación:',
             link,
