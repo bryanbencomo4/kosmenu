@@ -139,6 +139,8 @@ export async function GET() {
     routerEnabled: config.routerEnabled,
     adapter: config.adapter,
     storeKind: config.storeKind,
+    previewProjectRef: config.storeKind === 'supabase_preview' ? config.previewProjectRef : null,
     realWasenderEnabled: false,
+    webhookSecretConfigured: Boolean(config.webhookSecret),
   });
 }
