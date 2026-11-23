@@ -124,8 +124,9 @@ Escenarios cubiertos: bienvenida, consumidor, negocio register/manage, MENÚ, ay
 
 ```bash
 cd site
-# Opcional: copiar .env.wa-entry.local.example → .env.wa-entry.local
+# Opcional: copiar docs/wa-entry-env.example → site/.env.wa-entry.local
 # y cargar vars, o exportar PLATFORM_WA_* en la shell.
+# El simulador UI fuerza flags ON vía /api/wa-entry/dev/sim.
 npm run dev:wa-entry
 ```
 
