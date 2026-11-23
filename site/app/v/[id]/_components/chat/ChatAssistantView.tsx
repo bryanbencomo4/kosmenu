@@ -2540,8 +2540,7 @@ export function ChatAssistantView({
           </p>
           <button
             type="button"
-            className="mx-auto mt-2.5 inline-flex min-h-10 items-center justify-center rounded-full px-5 text-[13.5px] font-semibold text-[var(--chat-send-fg)]"
-            style={{ backgroundColor: 'var(--chat-send)' }}
+            className="mx-auto mt-2 block text-[13px] font-semibold text-[var(--chat-send)]"
             onClick={resetConversation}
             data-chat-new-conversation="1"
           >
