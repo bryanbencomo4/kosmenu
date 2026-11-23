@@ -7,6 +7,8 @@ type ChatCartActionCardProps = {
   action: ChatCartActionData;
   busy?: boolean;
   confirmed?: boolean;
+  /** Merchant supervision: show the same card without client confirm CTAs. */
+  readOnly?: boolean;
   onConfirm: (action: ChatCartActionData) => void;
   onDismiss?: (action: ChatCartActionData) => void;
   onConfigure?: (productId: string) => void;
@@ -17,6 +19,7 @@ export function ChatCartActionCard({
   action,
   busy = false,
   confirmed = false,
+  readOnly = false,
   onConfirm,
   onDismiss,
   onConfigure,
@@ -30,6 +33,7 @@ export function ChatCartActionCard({
         data-chat-cart-action={action.type}
         data-proposal-id={action.proposal_id}
         data-confirmed={confirmed ? '1' : '0'}
+        data-chat-readonly={readOnly ? '1' : undefined}
       >
         <ChatProductCard
           card={{
@@ -48,7 +52,11 @@ export function ChatCartActionCard({
               {action.line_total} {action.currency}
             </span>
           </p>
-          {!confirmed ? (
+          {readOnly ? (
+            <p className="mt-1.5 text-[11.5px] font-medium text-[var(--chat-text-muted)]">
+              Propuesta mostrada al cliente
+            </p>
+          ) : !confirmed ? (
             <div className="mt-2 flex gap-2">
               <button
                 type="button"
@@ -87,6 +95,7 @@ export function ChatCartActionCard({
       data-chat-cart-action={action.type}
       data-proposal-id={action.proposal_id}
       data-confirmed={confirmed ? '1' : '0'}
+      data-chat-readonly={readOnly ? '1' : undefined}
     >
       <p className="text-[13.5px] font-medium leading-snug text-[var(--chat-text)]">
         {action.label}
@@ -96,7 +105,11 @@ export function ChatCartActionCard({
           {action.line_total} {action.currency}
         </p>
       ) : null}
-      {!confirmed ? (
+      {readOnly ? (
+        <p className="mt-1.5 text-[11.5px] font-medium text-[var(--chat-text-muted)]">
+          Acción mostrada al cliente
+        </p>
+      ) : !confirmed ? (
         <div className="mt-2 flex gap-2">
           <button
             type="button"

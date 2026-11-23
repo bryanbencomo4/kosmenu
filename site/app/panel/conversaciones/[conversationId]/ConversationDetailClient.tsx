@@ -22,18 +22,21 @@ import {
   saveChatTheme,
   type ChatThemeMode,
 } from '../../../v/[id]/_components/chat/chat-theme';
-import type { ChatMessage } from '../../../v/[id]/_components/chat/chat-types';
+import {
+  isChatSoundsEnabled,
+  playChatSound,
+  setChatSoundsEnabled,
+  unlockChatSounds,
+} from '../../../v/[id]/_components/chat/chat-sound-manager';
+import {
+  mergePanelMessages,
+  toPanelChatMessages,
+  type PanelMessageRow,
+} from '../../_lib/panel-chat-messages';
 import { usePanelSession } from '../../_lib/usePanelSession';
 import { useConversationRealtime } from '../../_lib/useConversationRealtime';
 
-type MessageRow = {
-  id: string;
-  seq: number;
-  role: string;
-  body: string;
-  created_at: string;
-  payload?: Record<string, unknown>;
-};
+type MessageRow = PanelMessageRow;
 
 type Conversation = {
   id: string;
@@ -75,41 +78,6 @@ function friendlyPanelError(code: string, status?: number) {
   return code || 'No se pudo completar la acción.';
 }
 
-/** Map supervision rows → consumer ChatMessage shape (same bubbles/list). */
-function toChatMessages(rows: MessageRow[]): ChatMessage[] {
-  return rows.map((m) => {
-    const createdAt = Date.parse(m.created_at) || Date.now();
-    if (m.role === 'system') {
-      return { id: m.id, role: 'system' as const, text: m.body, createdAt };
-    }
-    if (m.role === 'staff') {
-      return {
-        id: m.id,
-        role: 'user' as const,
-        text: m.body,
-        createdAt,
-        deliveryStatus: 'read' as const,
-      };
-    }
-    if (m.role === 'consumer') {
-      return {
-        id: m.id,
-        role: 'assistant' as const,
-        text: m.body,
-        createdAt,
-        senderLabel: 'Cliente',
-      };
-    }
-    return {
-      id: m.id,
-      role: 'assistant' as const,
-      text: m.body,
-      createdAt,
-      senderLabel: 'Asistente',
-    };
-  });
-}
-
 function ConversationDetailInner({
   paramsPromise,
   searchParamsPromise,
@@ -128,6 +96,7 @@ function ConversationDetailInner({
   const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(true);
   // Merchant panel matches the consumer WhatsApp dark shell by default.
   const [theme, setTheme] = useState<ChatThemeMode>('dark');
+  const [soundsEnabled, setSoundsEnabled] = useState(true);
   const [frameStyle, setFrameStyle] = useState<CSSProperties>({
     position: 'fixed',
     inset: 0,
@@ -136,6 +105,23 @@ function ConversationDetailInner({
     maxHeight: '100dvh',
   });
   const lastSeqRef = useRef(0);
+  const playedSoundIdsRef = useRef<Set<string>>(new Set());
+  const seededSoundsRef = useRef(false);
+
+  useEffect(() => {
+    setSoundsEnabled(isChatSoundsEnabled());
+  }, []);
+
+  // Browsers block Web Audio until a user gesture; unlock on first interaction.
+  useEffect(() => {
+    const unlock = () => unlockChatSounds();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   useEffect(() => {
     const sync = () => {
@@ -226,8 +212,7 @@ function ConversationDetailInner({
       const incoming = (data.messages || []) as MessageRow[];
       if (afterSeq > 0) {
         setMessages((prev) => {
-          const seen = new Set(prev.map((m) => m.id));
-          const merged = [...prev, ...incoming.filter((m) => !seen.has(m.id))];
+          const merged = mergePanelMessages(prev, incoming);
           lastSeqRef.current = merged.reduce(
             (max, m) => Math.max(max, m.seq || 0),
             lastSeqRef.current,
@@ -235,6 +220,9 @@ function ConversationDetailInner({
           return merged;
         });
       } else {
+        seededSoundsRef.current = false;
+        playedSoundIdsRef.current = new Set(incoming.map((m) => m.id));
+        seededSoundsRef.current = true;
         setMessages(incoming);
         lastSeqRef.current = incoming.reduce(
           (max, m) => Math.max(max, m.seq || 0),
@@ -249,22 +237,30 @@ function ConversationDetailInner({
     if (ready && token && conversationId) void load(0);
   }, [ready, token, conversationId, load]);
 
-  const onRealtimeInsert = useCallback(
-    (row: {
-      id: string;
-      seq: number;
-      role: string;
-      body: string;
-      created_at: string;
-    }) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === row.id)) return prev;
-        lastSeqRef.current = Math.max(lastSeqRef.current, row.seq || 0);
-        return [...prev, row];
-      });
-    },
-    [],
-  );
+  const onRealtimeInsert = useCallback((row: MessageRow) => {
+    setMessages((prev) => {
+      const merged = mergePanelMessages(prev, [row]);
+      lastSeqRef.current = merged.reduce(
+        (max, m) => Math.max(max, m.seq || 0),
+        lastSeqRef.current,
+      );
+      return merged;
+    });
+  }, []);
+
+  // Incoming customer / assistant turns — same cue as the consumer chat.
+  useEffect(() => {
+    if (!seededSoundsRef.current) return;
+    for (const m of messages) {
+      if (playedSoundIdsRef.current.has(m.id)) continue;
+      playedSoundIdsRef.current.add(m.id);
+      if (m.role === 'consumer' || m.role === 'assistant') {
+        unlockChatSounds();
+        playChatSound('messageReceived');
+        break;
+      }
+    }
+  }, [messages]);
 
   const onBroadcastHint = useCallback(() => {
     void load(lastSeqRef.current, { silent: true });
@@ -322,7 +318,11 @@ function ConversationDetailInner({
       return;
     }
     setDraft('');
-    await load(0);
+    await load(lastSeqRef.current > 0 ? lastSeqRef.current : 0, {
+      silent: true,
+    });
+    // Full refresh keeps status / assignee / chips in sync after take/return/close.
+    if (action !== 'message') await load(0);
   }
 
   const canCompose =
@@ -335,7 +335,10 @@ function ConversationDetailInner({
     return `/panel/conversaciones${q}`;
   }, [comercioId]);
 
-  const chatMessages = useMemo(() => toChatMessages(messages), [messages]);
+  const chatMessages = useMemo(
+    () => toPanelChatMessages(messages),
+    [messages],
+  );
   const themeStyle = useMemo(() => chatThemeVars(theme), [theme]);
 
   const actionChips = useMemo((): ChatSuggestedChip[] => {
@@ -395,6 +398,8 @@ function ConversationDetailInner({
         return;
       }
       if (canCompose && text) {
+        unlockChatSounds();
+        playChatSound('messageSent');
         void act('message', text);
       }
     },
@@ -447,6 +452,12 @@ function ConversationDetailInner({
           cartCount={0}
           cartTotalLabel=""
           theme={theme}
+          soundsEnabled={soundsEnabled}
+          onToggleSounds={() => {
+            const next = !soundsEnabled;
+            setChatSoundsEnabled(next);
+            setSoundsEnabled(next);
+          }}
           onToggleTheme={() => {
             setTheme((prev) => {
               const next = prev === 'dark' ? 'light' : 'dark';
@@ -566,6 +577,7 @@ function ConversationDetailInner({
             errorText={error}
             onRefresh={() => void load(0)}
             voiceAvatarLetter="C"
+            cartActionsReadOnly
           />
         </div>
 

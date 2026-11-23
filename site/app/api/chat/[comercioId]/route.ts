@@ -382,6 +382,7 @@ export async function POST(
     await persistAssistantReply(simulated.text, {
       cart_actions: simulated.cartActions,
       product_cards: simulated.productCards,
+      category_cards: [],
     });
     return json({
       ok: true,
@@ -479,6 +480,7 @@ export async function POST(
     await persistAssistantReply(detReply, {
       cart_actions: cartActions,
       product_cards: productCards,
+      category_cards: [],
     });
     return json({
       ok: true,
@@ -518,6 +520,7 @@ export async function POST(
     await persistAssistantReply(result.text, {
       cart_actions: result.cartActions,
       product_cards: result.productCards,
+      category_cards: result.categoryCards || [],
     });
     return json({
       ok: true,
@@ -646,6 +649,7 @@ export async function POST(
     await persistAssistantReply(result.text, {
       cart_actions: result.cartActions,
       product_cards: result.productCards,
+      category_cards: result.categoryCards || [],
     });
 
     return json({

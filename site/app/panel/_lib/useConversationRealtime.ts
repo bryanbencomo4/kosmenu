@@ -23,6 +23,7 @@ export function useConversationRealtime(
     role: string;
     body: string;
     created_at: string;
+    payload?: Record<string, unknown> | null;
   }) => void,
   onBroadcastHint?: () => void,
 ) {
@@ -48,6 +49,7 @@ export function useConversationRealtime(
             role?: string;
             body?: string;
             created_at?: string;
+            payload?: Record<string, unknown> | null;
           };
           if (!row?.id) return;
           onInsert({
@@ -56,6 +58,10 @@ export function useConversationRealtime(
             role: String(row.role || ''),
             body: String(row.body || ''),
             created_at: String(row.created_at || new Date().toISOString()),
+            payload:
+              row.payload && typeof row.payload === 'object'
+                ? row.payload
+                : {},
           });
         },
       )

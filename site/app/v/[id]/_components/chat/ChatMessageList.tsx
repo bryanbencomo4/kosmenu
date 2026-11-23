@@ -38,6 +38,8 @@ type ChatMessageListProps = {
   confirmedProposalIds?: Set<string>;
   onConfirmCartAction?: (action: ChatCartActionData) => void;
   onDismissCartAction?: (action: ChatCartActionData) => void;
+  /** Merchant panel: show proposals without client confirm buttons. */
+  cartActionsReadOnly?: boolean;
   onConfigureProduct?: (productId: string) => void;
   onAddSimpleProduct?: (productId: string) => void;
   cartActionBusy?: boolean;
@@ -68,6 +70,7 @@ export function ChatMessageList({
   confirmedProposalIds,
   onConfirmCartAction,
   onDismissCartAction,
+  cartActionsReadOnly = false,
   onConfigureProduct,
   onAddSimpleProduct,
   cartActionBusy = false,
@@ -369,6 +372,7 @@ export function ChatMessageList({
                 confirmedProposalIds={confirmedProposalIds}
                 onConfirmCartAction={onConfirmCartAction}
                 onDismissCartAction={onDismissCartAction}
+                cartActionsReadOnly={cartActionsReadOnly}
                 onConfigureProduct={onConfigureProduct}
                 onAddSimpleProduct={onAddSimpleProduct}
                 cartActionBusy={cartActionBusy}

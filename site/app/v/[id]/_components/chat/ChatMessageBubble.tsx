@@ -198,6 +198,8 @@ type ChatMessageBubbleProps = {
   confirmedProposalIds?: Set<string>;
   onConfirmCartAction?: (action: ChatCartActionData) => void;
   onDismissCartAction?: (action: ChatCartActionData) => void;
+  /** Merchant panel: render cart proposals without client CTAs. */
+  cartActionsReadOnly?: boolean;
   onConfigureProduct?: (productId: string) => void;
   onAddSimpleProduct?: (productId: string) => void;
   cartActionBusy?: boolean;
@@ -237,6 +239,7 @@ export function ChatMessageBubble({
   confirmedProposalIds,
   onConfirmCartAction,
   onDismissCartAction,
+  cartActionsReadOnly = false,
   onConfigureProduct,
   onAddSimpleProduct,
   cartActionBusy = false,
@@ -661,6 +664,7 @@ export function ChatMessageBubble({
                 action.proposal_id &&
                   confirmedProposalIds?.has(action.proposal_id),
               )}
+              readOnly={cartActionsReadOnly}
               onConfirm={(a) => onConfirmCartAction?.(a)}
               onDismiss={onDismissCartAction}
               onConfigure={onConfigureProduct}
