@@ -27,7 +27,7 @@ const envMap = Object.fromEntries(
     .filter((l) => l.includes('='))
     .map((l) => {
       const i = l.indexOf('=');
-      return [l.slice(0, i), l.slice(i + 1)];
+      return [l.slice(0, i), l.slice(i + 1).trim()];
     }),
 );
 const secret = envMap.PLATFORM_WA_WEBHOOK_SECRET;
@@ -36,8 +36,23 @@ if (!secret) {
   process.exit(1);
 }
 
-function run(label, curlArgs) {
-  const outFile = path.join(mkdtempSync(path.join(tmpdir(), 'wa-probe-')), 'out.txt');
+function toCurlPath(p) {
+  return p.replace(/\\/g, '/');
+}
+
+function post({ signature, payload }) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-probe-'));
+  const bodyFile = path.join(dir, 'body.json');
+  const cfgFile = path.join(dir, 'curl.cfg');
+  const outFile = path.join(dir, 'out.json');
+  const hdrFile = path.join(dir, 'hdr.txt');
+  writeFileSync(bodyFile, JSON.stringify(payload));
+  const cfgLines = ['header = "content-type: application/json"'];
+  if (signature != null) {
+    cfgLines.push(`header = "x-webhook-signature: ${signature}"`);
+  }
+  writeFileSync(cfgFile, `${cfgLines.join('\n')}\n`);
+
   const r = spawnSync(
     'npx',
     [
@@ -48,70 +63,70 @@ function run(label, curlArgs) {
       deployment,
       '--yes',
       '--',
-      ...curlArgs,
+      '-sS',
+      '-X',
+      'POST',
+      '-K',
+      toCurlPath(cfgFile),
+      '--data-binary',
+      `@${toCurlPath(bodyFile)}`,
+      '-D',
+      toCurlPath(hdrFile),
       '-o',
-      outFile,
-      '-w',
-      '%{http_code}',
+      toCurlPath(outFile),
     ],
     { cwd: root, encoding: 'utf8', shell: true },
   );
+
   const bodyText = readFileSync(outFile, 'utf8').trim();
-  const http = Number(String(r.stdout || '').trim().match(/(\d{3})\s*$/)?.[1] || 0);
+  const hdrText = readFileSync(hdrFile, 'utf8');
+  const http = Number(hdrText.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/i)?.[1] || 0);
   let body = null;
   try {
     body = JSON.parse(bodyText);
   } catch {
-    body = { rawPreview: bodyText.slice(0, 120) };
+    body = { rawPreview: bodyText.slice(0, 160) };
   }
-  return { label, http, body, cliStatus: r.status };
+  return { http, body, cliStatus: r.status };
+}
+
+function get() {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-probe-'));
+  const outFile = path.join(dir, 'out.json');
+  const hdrFile = path.join(dir, 'hdr.txt');
+  const r = spawnSync(
+    'npx',
+    [
+      'vercel',
+      'curl',
+      '/api/wa-entry/webhook',
+      '--deployment',
+      deployment,
+      '--yes',
+      '--',
+      '-sS',
+      '-D',
+      toCurlPath(hdrFile),
+      '-o',
+      toCurlPath(outFile),
+    ],
+    { cwd: root, encoding: 'utf8', shell: true },
+  );
+  const bodyText = readFileSync(outFile, 'utf8').trim();
+  const hdrText = readFileSync(hdrFile, 'utf8');
+  const http = Number(hdrText.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/i)?.[1] || 0);
+  return { http, body: JSON.parse(bodyText), cliStatus: r.status };
 }
 
 const results = {
   deployment,
   endpoint: `${deployment}/api/wa-entry/webhook`,
-};
-
-results.get = run('get', ['-sS']);
-
-{
-  const dir = mkdtempSync(path.join(tmpdir(), 'wa-probe-'));
-  const bodyFile = path.join(dir, 'body.json');
-  writeFileSync(bodyFile, JSON.stringify({ event: 'messages.received' }));
-  results.noSig = run('noSig', [
-    '-sS',
-    '-X',
-    'POST',
-    '-H',
-    'content-type: application/json',
-    '--data-binary',
-    `@${bodyFile}`,
-  ]);
-}
-
-{
-  const dir = mkdtempSync(path.join(tmpdir(), 'wa-probe-'));
-  const bodyFile = path.join(dir, 'body.json');
-  writeFileSync(bodyFile, JSON.stringify({ event: 'messages.received' }));
-  results.forged = run('forged', [
-    '-sS',
-    '-X',
-    'POST',
-    '-H',
-    'content-type: application/json',
-    '-H',
-    'x-webhook-signature: forged',
-    '--data-binary',
-    `@${bodyFile}`,
-  ]);
-}
-
-{
-  const dir = mkdtempSync(path.join(tmpdir(), 'wa-probe-'));
-  const bodyFile = path.join(dir, 'body.json');
-  writeFileSync(
-    bodyFile,
-    JSON.stringify({
+  get: get(),
+  noSig: post({ signature: null, payload: { event: 'messages.received' } }),
+  forged: post({ signature: 'forged', payload: { event: 'messages.received' } }),
+  authOk: post({
+    signature: secret,
+    payload: {
       event: 'messages.received',
       timestamp: Math.floor(Date.now() / 1000),
       data: {
@@ -126,24 +141,13 @@ results.get = run('get', ['-sS']);
           message: { conversation: 'Hola' },
         },
       },
-    }),
-  );
-  results.authOk = run('authOk', [
-    '-sS',
-    '-X',
-    'POST',
-    '-H',
-    'content-type: application/json',
-    '-H',
-    `x-webhook-signature: ${secret}`,
-    '--data-binary',
-    `@${bodyFile}`,
-  ]);
-}
+    },
+  }),
+};
 
 console.log(JSON.stringify(results, null, 2));
 
-const g = results.get?.body || {};
+const g = results.get.body;
 const ok =
   g.ok === true &&
   g.previewProjectRef === 'gsfxqzvmyzjjgpigrste' &&
@@ -153,10 +157,10 @@ const ok =
   g.storeKind === 'supabase_preview' &&
   g.realWasenderEnabled === false &&
   g.webhookSecretConfigured === true &&
-  results.noSig?.http === 401 &&
-  results.forged?.http === 401 &&
-  results.authOk?.http === 200 &&
-  results.authOk?.body?.reason === 'kill_switch';
+  results.noSig.http === 401 &&
+  results.forged.http === 401 &&
+  results.authOk.http === 200 &&
+  results.authOk.body?.reason === 'kill_switch';
 
 console.log(ok ? 'PROBE_PASS' : 'PROBE_FAIL');
 process.exit(ok ? 0 : 2);
