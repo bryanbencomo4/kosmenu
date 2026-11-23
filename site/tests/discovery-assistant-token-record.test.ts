@@ -79,6 +79,19 @@ describe('discovery token recording', () => {
     expect(config.maxMonthlyRequests).toBe(200);
     expect(config.maxMonthlyTokens).toBe(500_000);
     expect(config.maxToolRounds).toBe(2);
+    expect(config.maxGeminiHttpCallsPerRequest).toBe(3);
+    expect(config.geminiHttpBudget).toBe(0);
+    expect(config.maxOutputTokens).toBe(512);
+  });
+
+  it('honors explicit Gemini HTTP budget env', () => {
+    const config = getDiscoveryAssistantConfig({
+      NODE_ENV: 'test',
+      DISCOVERY_ASSISTANT_GEMINI_HTTP_BUDGET: '15',
+      DISCOVERY_ASSISTANT_MAX_GEMINI_HTTP_CALLS: '3',
+    } as NodeJS.ProcessEnv);
+    expect(config.geminiHttpBudget).toBe(15);
+    expect(config.maxGeminiHttpCallsPerRequest).toBe(3);
   });
 
   it('extracts usageMetadata counts', () => {

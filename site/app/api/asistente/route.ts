@@ -10,6 +10,7 @@ import { createRequestId, createSessionId } from '../chat/_lib/schema';
 import { runDiscoveryAgent } from './_lib/agent';
 import {
   DISCOVERY_FALLBACK_MSG,
+  estimateDiscoveryCostUsd,
   getDiscoveryAssistantConfig,
   isDiscoveryGeminiLiveAllowed,
 } from './_lib/config';
@@ -131,6 +132,8 @@ export async function POST(request: Request) {
   const sessionId = body.sessionId || createSessionId();
   const requestId = createRequestId();
   const shareRef = normalizeDiscoveryRef(body.ref);
+  const supabase =
+    config.quotaBackend === 'postgres' ? getServiceSupabaseClient() : null;
 
   const live = isDiscoveryGeminiLiveAllowed(config);
   if (live.ok) {
@@ -138,8 +141,7 @@ export async function POST(request: Request) {
       await reserveDiscoveryRequest({
         config,
         sessionId,
-        supabase:
-          config.quotaBackend === 'postgres' ? getServiceSupabaseClient() : null,
+        supabase,
       });
     } catch (err) {
       if (err instanceof DiscoveryQuotaError) {
@@ -178,6 +180,7 @@ export async function POST(request: Request) {
         region: body.region,
         pageSize: config.defaultPageSize,
       },
+      supabase,
     });
 
     // Post-turn metering (once per requestId). Never authorizes Gemini by itself.
@@ -192,16 +195,15 @@ export async function POST(request: Request) {
           model: result.model,
           tokensInput: result.tokensInput ?? 0,
           tokensOutput: result.tokensOutput ?? 0,
-          supabase:
-            config.quotaBackend === 'postgres'
-              ? getServiceSupabaseClient()
-              : null,
+          supabase,
         });
       } catch {
         // Visibility only — request reserve already applied; do not fail the user turn.
       }
     }
 
+    const tokensInput = result.tokensInput ?? 0;
+    const tokensOutput = result.tokensOutput ?? 0;
     return json({
       ok: true,
       fallback: Boolean(result.fallback),
@@ -210,6 +212,11 @@ export async function POST(request: Request) {
       model: result.model,
       toolCalls: result.toolCalls,
       skippedLlm: result.skippedLlm ?? false,
+      tokensInput,
+      tokensOutput,
+      geminiHttpCalls: result.geminiHttpCalls ?? 0,
+      estimatedCostUsd: estimateDiscoveryCostUsd(tokensInput, tokensOutput),
+      stopReason: result.stopReason ?? null,
       sessionId,
       requestId,
       ref: shareRef,
@@ -240,5 +247,9 @@ export async function GET() {
     liveReason: live.ok ? null : live.reason ?? null,
     quotaBackend: config.quotaBackend,
     pageSize: config.defaultPageSize,
+    maxGeminiHttpCallsPerRequest: config.maxGeminiHttpCallsPerRequest,
+    geminiHttpBudget: config.geminiHttpBudget || null,
+    maxOutputTokens: config.maxOutputTokens,
+    maxToolRounds: config.maxToolRounds,
   });
 }

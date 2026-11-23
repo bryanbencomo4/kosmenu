@@ -427,6 +427,74 @@ export async function recordDiscoveryTokens(params: {
   return period;
 }
 
+/**
+ * Consume one Gemini HTTP slot from the optional durable budget.
+ * Uses a synthetic period (`2099-12`) so real calendar months are untouched.
+ * Fail-closed when budget env is set and the slot cannot be reserved.
+ */
+export async function consumeDiscoveryGeminiHttpSlot(params: {
+  config: DiscoveryAssistantConfig;
+  supabase?: SupabaseClient | null;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const budget = params.config.geminiHttpBudget;
+  if (!budget || budget <= 0) return { ok: true };
+
+  const BUDGET_SESSION = 'discovery-gemini-http-budget-v1';
+  const BUDGET_PERIOD = '2099-12';
+
+  if (params.config.quotaBackend === 'postgres') {
+    if (!params.supabase) {
+      return { ok: false, reason: 'http_budget_unavailable' };
+    }
+    const { error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
+      p_session_id: BUDGET_SESSION,
+      p_max_session_requests: budget,
+      p_period_month: BUDGET_PERIOD,
+      p_max_monthly_requests: budget,
+      p_max_monthly_tokens: null,
+      p_model: 'http-budget',
+    });
+    if (error) {
+      const msg = error.message || '';
+      if (/session request limit|monthly request limit/i.test(msg)) {
+        return { ok: false, reason: 'http_budget_exhausted' };
+      }
+      return { ok: false, reason: 'http_budget_unavailable' };
+    }
+    return { ok: true };
+  }
+
+  if (params.config.quotaBackend === 'filesystem') {
+    assertFilesystemAllowed();
+    try {
+      withFileLock(params.config.usageDir, 'discovery_http_budget', () => {
+        const path = join(params.config.usageDir, 'gemini-http-budget.json');
+        let used = 0;
+        if (existsSync(path)) {
+          try {
+            const raw = JSON.parse(readFileSync(path, 'utf8')) as { used?: number };
+            used = Number(raw.used ?? 0) || 0;
+          } catch {
+            used = 0;
+          }
+        }
+        if (used >= budget) {
+          throw new DiscoveryQuotaError('http budget exhausted', 429, 'http_budget_exhausted');
+        }
+        writeJsonAtomic(path, { used: used + 1, budget, updatedAt: new Date().toISOString() });
+      });
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof DiscoveryQuotaError) {
+        return { ok: false, reason: err.code };
+      }
+      return { ok: false, reason: 'http_budget_unavailable' };
+    }
+  }
+
+  return { ok: false, reason: 'http_budget_unavailable' };
+}
+
 /** Test helper — clears in-process token idempotency map. */
 export function __resetDiscoveryTokenIdempotencyForTests() {
   recordedTokenRequestIds.clear();

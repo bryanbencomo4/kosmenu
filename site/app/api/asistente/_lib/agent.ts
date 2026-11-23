@@ -4,6 +4,8 @@
  * Simulate / fallback path never hits Google.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type { DiscoveryAssistantConfig } from './config';
 import {
   DISCOVERY_FALLBACK_MSG,
@@ -12,6 +14,7 @@ import {
 import { buildDiscoverySystemPrompt } from './prompt';
 import { runSimulatedDiscoveryAgent } from './simulate';
 import { extractDiscoveryGeminiUsage } from './gemini-usage';
+import { consumeDiscoveryGeminiHttpSlot } from './quota';
 import {
   DISCOVERY_TOOL_DECLARATIONS,
   executeDiscoveryTool,
@@ -33,7 +36,9 @@ export type DiscoveryAgentResult = {
   /** Sum of usageMetadata across all Gemini HTTP rounds in this turn. */
   tokensInput?: number;
   tokensOutput?: number;
+  /** Gemini HTTP attempts this turn (success + failure + retry). */
   geminiHttpCalls?: number;
+  stopReason?: string;
 };
 
 type GeminiPart = {
@@ -85,6 +90,7 @@ async function runLiveDiscoveryGemini(params: {
   config: DiscoveryAssistantConfig;
   messages: DiscoveryAgentMessage[];
   ctx: DiscoveryToolContext;
+  supabase?: SupabaseClient | null;
 }): Promise<DiscoveryAgentResult> {
   const { config, messages, ctx } = params;
   const apiKey = config.geminiApiKey!;
@@ -105,6 +111,7 @@ async function runLiveDiscoveryGemini(params: {
   let tokensInput = 0;
   let tokensOutput = 0;
   let geminiHttpCalls = 0;
+  const maxHttp = Math.max(1, config.maxGeminiHttpCallsPerRequest);
 
   const withUsage = (
     result: Omit<DiscoveryAgentResult, 'tokensInput' | 'tokensOutput' | 'geminiHttpCalls'>,
@@ -116,6 +123,35 @@ async function runLiveDiscoveryGemini(params: {
   });
 
   for (let round = 0; round <= config.maxToolRounds; round++) {
+    // Hard stop BEFORE any network call (per-turn + durable budget).
+    if (geminiHttpCalls >= maxHttp) {
+      return withUsage({
+        text: restaurants.length
+          ? DISCOVERY_FALLBACK_MSG
+          : DISCOVERY_FALLBACK_MSG,
+        model: modelUsed,
+        restaurants,
+        toolCalls,
+        fallback: true,
+        stopReason: 'http_per_request_cap',
+      });
+    }
+
+    const slot = await consumeDiscoveryGeminiHttpSlot({
+      config,
+      supabase: params.supabase,
+    });
+    if (!slot.ok) {
+      return withUsage({
+        text: DISCOVERY_FALLBACK_MSG,
+        model: modelUsed,
+        restaurants,
+        toolCalls,
+        fallback: true,
+        stopReason: slot.reason,
+      });
+    }
+
     const body = {
       systemInstruction: { parts: [{ text: buildDiscoverySystemPrompt() }] },
       contents,
@@ -125,6 +161,9 @@ async function runLiveDiscoveryGemini(params: {
         temperature: 0.4,
       },
     };
+
+    // Count every attempt (success, HTTP error, network failure, model fallback).
+    geminiHttpCalls += 1;
 
     let res: Response;
     try {
@@ -139,13 +178,13 @@ async function runLiveDiscoveryGemini(params: {
         modelUsed = config.modelFallback;
         continue;
       }
-      // Partial usage (prior successful rounds) still returned to the caller.
       return withUsage({
         text: DISCOVERY_FALLBACK_MSG,
         model: modelUsed,
         restaurants,
         toolCalls,
         fallback: true,
+        stopReason: 'gemini_network_error',
       });
     }
 
@@ -160,10 +199,10 @@ async function runLiveDiscoveryGemini(params: {
         restaurants,
         toolCalls,
         fallback: true,
+        stopReason: 'gemini_http_error',
       });
     }
 
-    geminiHttpCalls += 1;
     const json = (await res.json()) as GeminiResponseJson;
     const usage = extractDiscoveryGeminiUsage(json);
     tokensInput += usage.in;
@@ -211,6 +250,7 @@ async function runLiveDiscoveryGemini(params: {
     restaurants,
     toolCalls,
     fallback: true,
+    stopReason: 'tool_rounds_exhausted',
   });
 }
 
@@ -222,6 +262,7 @@ export async function runDiscoveryAgent(params: {
   messages: DiscoveryAgentMessage[];
   ctx: DiscoveryToolContext;
   env?: NodeJS.ProcessEnv;
+  supabase?: SupabaseClient | null;
 }): Promise<DiscoveryAgentResult> {
   const env = params.env ?? process.env;
   const { config, messages, ctx } = params;
@@ -270,7 +311,12 @@ export async function runDiscoveryAgent(params: {
   }
 
   try {
-    return await runLiveDiscoveryGemini({ config, messages, ctx });
+    return await runLiveDiscoveryGemini({
+      config,
+      messages,
+      ctx,
+      supabase: params.supabase,
+    });
   } catch (err) {
     // Soft degrade: directory path still available to the client.
     // Preserve any partial usage attached by a failed live attempt when present.

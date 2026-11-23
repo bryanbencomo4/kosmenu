@@ -34,6 +34,13 @@ export type DiscoveryAssistantConfig = {
   maxRequestsPerSession: number;
   maxMonthlyRequests: number;
   maxMonthlyTokens: number;
+  /** Hard cap of Gemini HTTP attempts per turn (includes failures/retries). */
+  maxGeminiHttpCallsPerRequest: number;
+  /**
+   * Optional durable cross-request Gemini HTTP budget (Preview/live tests).
+   * 0 = disabled. Uses synthetic quota period so real months stay clean.
+   */
+  geminiHttpBudget: number;
   defaultPageSize: number;
   usageDir: string;
 };
@@ -89,6 +96,14 @@ export function getDiscoveryAssistantConfig(
     maxRequestsPerSession: envInt('DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION', 15, env),
     maxMonthlyRequests: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS', 200, env),
     maxMonthlyTokens: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS', 500_000, env),
+    // Default: one HTTP per tool round + final answer (= maxToolRounds + 1).
+    maxGeminiHttpCallsPerRequest: envInt(
+      'DISCOVERY_ASSISTANT_MAX_GEMINI_HTTP_CALLS',
+      envInt('DISCOVERY_ASSISTANT_MAX_TOOL_ROUNDS', 2, env) + 1,
+      env,
+    ),
+    // 0 = off. Set to 15 for controlled Preview live tests.
+    geminiHttpBudget: envInt('DISCOVERY_ASSISTANT_GEMINI_HTTP_BUDGET', 0, env),
     defaultPageSize: envInt('DISCOVERY_ASSISTANT_PAGE_SIZE', 24, env),
     usageDir:
       (env.DISCOVERY_ASSISTANT_USAGE_DIR ?? '').trim() ||
