@@ -94,6 +94,32 @@ async function hasSupervisionEvent(dedupeKey: string): Promise<boolean> {
   }
 }
 
+/** True if this conversation already got a new_conversation notify (any version). */
+async function hasAnyNewConversationNotify(
+  conversationId: string,
+): Promise<boolean> {
+  if (isSupervisionMemoryEnabled()) {
+    return memoryListEvents().some(
+      (e) =>
+        e.conversation_id === conversationId &&
+        e.event_type === 'new_conversation',
+    );
+  }
+  try {
+    const sb = getServiceSupabaseClient();
+    const { data } = await sb
+      .from('chat_supervision_events')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('event_type', 'new_conversation')
+      .limit(1)
+      .maybeSingle();
+    return Boolean(data?.id);
+  } catch {
+    return false;
+  }
+}
+
 export type ConversationStatus =
   | 'ai_handling'
   | 'human_handling'
@@ -295,14 +321,12 @@ export async function persistConsumerTurn(
             }),
           );
         } else if (isNewConversation) {
-          scheduleAfterResponse(() =>
-            enqueueNewConversationNotify({
-              conversationId: conversation.id,
-              comercioId: input.comercioId,
-              commerceName: input.commerceName,
-              attentionVersion: conversation.attention_version,
-            }),
-          );
+          await enqueueNewConversationNotify({
+            conversationId: conversation.id,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+            attentionVersion: conversation.attention_version,
+          }).catch(() => {});
         }
       }
       if (escalated) {
@@ -524,20 +548,22 @@ export async function persistConsumerTurn(
           }),
         );
       } else {
-        const dedupe = newConversationNotifyDedupeKey(
-          conversationId,
-          attentionVersion,
-        );
-        const missingEvent = !(await hasSupervisionEvent(dedupe));
-        if (isNewConversation || missingEvent) {
-          scheduleAfterResponse(() =>
-            enqueueNewConversationNotify({
-              conversationId,
-              comercioId: input.comercioId,
-              commerceName: input.commerceName,
-              attentionVersion,
-            }),
-          );
+        // Notify only on first open, reopen-after-close, or race recovery when
+        // no new_conversation event exists yet. take/return bump
+        // attention_version but must NOT send another WhatsApp.
+        const shouldNotify =
+          isNewConversation ||
+          wasClosed ||
+          !(await hasAnyNewConversationNotify(conversationId));
+        if (shouldNotify) {
+          // Await on the request path: Vercel after() was truncating the
+          // insert→resolve→enqueue handoff, leaving events stuck at queued.
+          await enqueueNewConversationNotify({
+            conversationId,
+            comercioId: input.comercioId,
+            commerceName: input.commerceName,
+            attentionVersion,
+          }).catch(() => {});
         }
       }
     }
@@ -1003,7 +1029,7 @@ export async function retryFailedSupervisionNotifies(comercioId: string) {
   const sb = getServiceSupabaseClient();
   const { data: rows } = await sb
     .from('chat_supervision_events')
-    .select('id,dedupe_key,event_type,conversation_id,meta,last_error')
+    .select('id,dedupe_key,event_type,conversation_id,meta,last_error,status')
     .eq('comercio_id', comercioId)
     .eq('status', 'failed')
     .in('event_type', ['new_conversation', 'needs_attention'])

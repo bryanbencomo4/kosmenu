@@ -69,6 +69,7 @@ try {
       'db',
       'query',
       `--remote=${PROD}`,
+      '--yes',
       '-o',
       'json',
       '-f',
