@@ -65,6 +65,7 @@ type Conversation = {
   attention_version: number;
   assigned_user_id: string | null;
   comercio_id: string;
+  consumer_label: string | null;
   last_message_preview: string | null;
 };
 
@@ -625,7 +626,8 @@ function ConversationDetailInner({
   const showTake =
     humanTakeoverEnabled && status !== 'human_handling' && status !== 'closed';
   const showReturn = humanTakeoverEnabled && status === 'human_handling';
-  const showClose = humanTakeoverEnabled && status !== 'closed';
+  const customerTitle =
+    (conversation?.consumer_label || '').trim() || 'Cliente';
 
   const subtitle = conversation
     ? peerTyping
@@ -667,7 +669,7 @@ function ConversationDetailInner({
         data-chat-shell="1"
       >
         <ChatHeader
-          businessName="Cliente"
+          businessName={customerTitle}
           logoUrl={null}
           initialLetter="C"
           cartCount={0}
@@ -724,13 +726,6 @@ function ConversationDetailInner({
                 ]
               : []),
             {
-              id: 'close',
-              label: 'Cerrar chat',
-              disabled: busy,
-              testId: 'close-conversation-menu',
-              onSelect: () => void act('close'),
-            },
-            {
               id: 'refresh',
               label: 'Actualizar',
               disabled: busy,
@@ -768,14 +763,6 @@ function ConversationDetailInner({
           ) : (
             <p data-testid="takeover-disabled-hint">takeover off</p>
           )}
-          <button
-            type="button"
-            data-testid="close-conversation"
-            disabled={busy}
-            onClick={() => void act('close')}
-          >
-            close
-          </button>
         </div>
 
         {!humanTakeoverEnabled ? (
@@ -797,10 +784,8 @@ function ConversationDetailInner({
             busy={busy}
             showTake={showTake}
             showReturn={showReturn}
-            showClose={showClose}
             onTake={() => void act('take')}
             onReturn={() => void act('return')}
-            onClose={() => void act('close')}
           />
         ) : null}
 
@@ -820,7 +805,7 @@ function ConversationDetailInner({
                       buildChatReplyRef(
                         m,
                         m.senderLabel === 'Cliente'
-                          ? 'Cliente'
+                          ? customerTitle
                           : m.role === 'user'
                             ? 'Tú'
                             : m.senderLabel || 'Asistente',
@@ -853,7 +838,7 @@ function ConversationDetailInner({
             placeholder="Escribe un mensaje"
             replyTo={replyTo}
             onClearReply={() => setReplyTo(null)}
-            replyAuthorFallback="Cliente"
+            replyAuthorFallback={customerTitle}
             onTypingActivity={
               canCompose ? () => onStaffTypingActivity() : undefined
             }

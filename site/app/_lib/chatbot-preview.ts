@@ -87,15 +87,17 @@ export function shouldOpenChatbotFromQuery(params: {
 }
 
 /** Bump when welcome copy changes so persisted chats refresh the first bubble. */
-export const CHATBOT_WELCOME_VERSION = 6;
+export const CHATBOT_WELCOME_VERSION = 7;
 
 export function buildChatbotWelcomeMessage(
   restaurantName: string,
-  _options?: { runtimeEnabled?: boolean },
+  options?: { runtimeEnabled?: boolean; guestName?: string | null },
 ): string {
   const name = restaurantName.trim() || 'nuestro restaurante';
+  const guest = (options?.guestName || '').trim().split(/\s+/)[0] || '';
+  const hello = guest ? `¡Hola, ${guest}! 👋` : '¡Hola! 👋';
   return [
-    `¡Hola! 👋 Bienvenido a ${name} 🍕`,
+    `${hello} Bienvenido a ${name} 🍕`,
     '',
     '¿Qué se te antoja hoy? Mira nuestro menú o dime qué te gustaría pedir.',
     '',

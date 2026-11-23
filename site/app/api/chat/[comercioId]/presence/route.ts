@@ -5,6 +5,7 @@ import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
 import {
   hashConsumerSession,
+  updateConversationConsumerLabel,
   verifySupervisionFeedToken,
 } from '../../_lib/supervision';
 import { isSupervisionEnabledForCommerce } from '../../_lib/supervision-config';
@@ -51,11 +52,13 @@ export async function POST(
   let sessionId = '';
   let typing: boolean | undefined;
   let readUpToSeq: number | undefined;
+  let consumerLabel: string | undefined;
   try {
     const body = (await request.json()) as {
       typing?: boolean;
       readUpToSeq?: number;
       sessionId?: string;
+      consumerLabel?: string;
     };
     if (typeof body.typing === 'boolean') typing = body.typing;
     if (
@@ -65,6 +68,11 @@ export async function POST(
       readUpToSeq = body.readUpToSeq;
     }
     sessionId = String(body.sessionId || '').trim();
+    const label = String(body.consumerLabel || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    if (label) consumerLabel = label;
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
@@ -93,6 +101,14 @@ export async function POST(
       .maybeSingle();
     conversationId = data?.id ? String(data.id) : null;
   }
+  if (consumerLabel && sessionId) {
+    await updateConversationConsumerLabel({
+      comercioId: commerceId,
+      sessionId,
+      consumerLabel,
+    });
+  }
+
   if (!conversationId) {
     return NextResponse.json({ ok: true, enabled: true, conversation: null });
   }

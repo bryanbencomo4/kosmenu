@@ -271,6 +271,7 @@ export async function POST(
       text: displayText,
       publicWhatsapp: comercio.whatsapp || null,
       payload: replyToPayload,
+      consumerLabel: body.consumer_label || null,
     });
     if (persisted.ok && persisted.conversationId) {
       supervisionConversationId = persisted.conversationId;

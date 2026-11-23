@@ -57,12 +57,18 @@ export async function POST(
     sessionId?: string;
     turns?: SyncTurn[];
     commerceName?: string;
+    consumerLabel?: string;
   };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
+  const consumerLabel =
+    String(body.consumerLabel || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120) || null;
 
   const headerToken = (
     request.headers.get('x-chat-supervision-feed-token') || ''
@@ -129,6 +135,7 @@ export async function POST(
         clientMessageId,
         payload,
         publicWhatsapp: comercio.whatsapp || null,
+        consumerLabel,
       });
       if (persisted.ok && persisted.conversationId) {
         conversationId = persisted.conversationId;

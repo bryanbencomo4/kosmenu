@@ -211,7 +211,48 @@ type PersistConsumerTurnInput = {
   payload?: Record<string, unknown>;
   /** Public menu WhatsApp for consumer alternate-contact (MEMORY-safe). */
   publicWhatsapp?: string | null;
+  /** Optional display name for merchant inbox (e.g. "María · +58…"). */
+  consumerLabel?: string | null;
 };
+
+/**
+ * Update merchant-facing consumer label (name / phone) without changing status.
+ */
+export async function updateConversationConsumerLabel(input: {
+  comercioId: string;
+  sessionId: string;
+  consumerLabel: string;
+}): Promise<{ ok: boolean; conversationId?: string }> {
+  const label = input.consumerLabel.replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!label) return { ok: false };
+  if (!isSupervisionEnabledForCommerce(input.comercioId)) {
+    return { ok: false };
+  }
+  try {
+    const hash = hashConsumerSession(input.comercioId, input.sessionId);
+    if (isSupervisionMemoryEnabled()) {
+      const row = memoryGetBySession(input.comercioId, input.sessionId);
+      if (!row) return { ok: false };
+      memoryUpdateConversation(row.id, { consumer_label: label });
+      return { ok: true, conversationId: row.id };
+    }
+    const sb = getServiceSupabaseClient();
+    const { data } = await sb
+      .from('chat_conversations')
+      .update({
+        consumer_label: label,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('comercio_id', input.comercioId)
+      .eq('consumer_session_hash', hash)
+      .select('id')
+      .maybeSingle();
+    if (!data?.id) return { ok: false };
+    return { ok: true, conversationId: String(data.id) };
+  } catch {
+    return { ok: false };
+  }
+}
 
 export type PersistConsumerTurnResult = {
   ok: boolean;
@@ -249,6 +290,7 @@ export async function persistConsumerTurn(
       let conversation = existing;
       const previousStatus = existing?.status || null;
       if (!conversation) {
+        const label = (input.consumerLabel || '').trim().slice(0, 120) || null;
         conversation = memoryUpsertConversation({
           comercio_id: input.comercioId,
           consumer_session_id: input.sessionId.trim().slice(0, 80),
@@ -260,6 +302,7 @@ export async function persistConsumerTurn(
           last_message_at: now.toISOString(),
           last_message_preview: previewText(input.text),
           unread_merchant_count: 1,
+          ...(label ? { consumer_label: label } : {}),
         });
       } else {
         const wasClosed = conversation.status === 'closed';
@@ -275,6 +318,7 @@ export async function persistConsumerTurn(
           consumerText: input.text,
           wasClosed,
         });
+        const label = (input.consumerLabel || '').trim().slice(0, 120) || null;
         conversation =
           memoryUpdateConversation(conversation.id, {
             status: nextStatus,
@@ -282,6 +326,7 @@ export async function persistConsumerTurn(
             last_message_preview: previewText(input.text),
             unread_merchant_count: conversation.unread_merchant_count + 1,
             closed_at: wasClosed ? null : conversation.closed_at,
+            ...(label ? { consumer_label: label } : {}),
             ...(wasClosed
               ? {
                   assigned_user_id: null,
@@ -363,6 +408,9 @@ export async function persistConsumerTurn(
       ? String(conversation.status || '')
       : null;
 
+    const incomingLabel =
+      (input.consumerLabel || '').trim().slice(0, 120) || null;
+
     if (!conversation) {
       isNewConversation = true;
       const insert = await sb
@@ -378,6 +426,7 @@ export async function persistConsumerTurn(
           last_message_at: now.toISOString(),
           last_message_preview: previewText(input.text),
           unread_merchant_count: 0,
+          ...(incomingLabel ? { consumer_label: incomingLabel } : {}),
         })
         .select('*')
         .single();
@@ -456,6 +505,7 @@ export async function persistConsumerTurn(
             Number(conversation!.unread_merchant_count || 0) + 1,
           closed_at: wasClosed ? null : conversation!.closed_at,
           updated_at: now.toISOString(),
+          ...(incomingLabel ? { consumer_label: incomingLabel } : {}),
           ...(wasClosed
             ? {
                 assigned_user_id: null,

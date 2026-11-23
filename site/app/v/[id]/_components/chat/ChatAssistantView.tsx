@@ -50,6 +50,16 @@ import {
 import { chatMessageToSupervisionPayload } from './chat-supervision-payload';
 import { syncLocalSupervisionTurn } from './chat-supervision-sync';
 import {
+  buildConsumerLabel,
+  buildSoftIdentityAskText,
+  buildSoftPhoneReminderText,
+  parseIdentityReply,
+  readChatConsumerIdentity,
+  shouldAskForIdentity,
+  shouldRemindPhone,
+  writeChatConsumerIdentity,
+} from './chat-consumer-identity';
+import {
   ChatMediaLightbox,
   type ChatMediaLightboxState,
 } from './ChatMediaLightbox';
@@ -446,12 +456,17 @@ export function ChatAssistantView({
 
   const themeStyle = useMemo(() => chatThemeVars(theme), [theme]);
 
+  const guestIdentity = useMemo(
+    () => readChatConsumerIdentity(comercioId),
+    [comercioId],
+  );
   const welcome = useMemo(
     () =>
       buildChatbotWelcomeMessage(businessName, {
         runtimeEnabled: live,
+        guestName: guestIdentity?.name || null,
       }),
-    [businessName, live],
+    [businessName, live, guestIdentity?.name],
   );
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
@@ -510,6 +525,9 @@ export function ChatAssistantView({
   const supervisionConversationIdRef = useRef<string | null>(null);
   const supervisionFeedTickRef = useRef<(() => void) | null>(null);
   const welcomeSyncedRef = useRef(false);
+  /** Soft identity ask was shown; next user reply may carry name/phone. */
+  const identityAwaitingRef = useRef(false);
+  const identitySyncedLabelRef = useRef<string | null>(null);
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -1057,6 +1075,90 @@ export function ChatAssistantView({
     );
   }, [staffLastReadSeq, humanSupervisionActive]);
 
+  const currentConsumerLabel = useCallback((): string | null => {
+    return buildConsumerLabel(readChatConsumerIdentity(comercioId) || {});
+  }, [comercioId]);
+
+  const syncConsumerLabelToServer = useCallback(
+    (label: string | null) => {
+      const trimmed = (label || '').trim();
+      if (!trimmed || identitySyncedLabelRef.current === trimmed) return;
+      identitySyncedLabelRef.current = trimmed;
+      void (async () => {
+        try {
+          const sessionId = ensureChatSessionId(comercioId);
+          const token = supervisionFeedTokenRef.current;
+          await fetch(
+            `/api/chat/${encodeURIComponent(comercioId)}/presence`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token
+                  ? { 'X-Chat-Supervision-Feed-Token': token }
+                  : {}),
+              },
+              body: JSON.stringify({
+                sessionId,
+                consumerLabel: trimmed,
+              }),
+              cache: 'no-store',
+            },
+          );
+        } catch {
+          /* optional */
+        }
+      })();
+    },
+    [comercioId],
+  );
+
+  /** Soft one-shot ask for name + WhatsApp when this device has never shared them. */
+  useEffect(() => {
+    const existing = readChatConsumerIdentity(comercioId);
+    const knownLabel = buildConsumerLabel(existing || {});
+    if (knownLabel) {
+      syncConsumerLabelToServer(knownLabel);
+    }
+    if (!shouldAskForIdentity(existing)) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (cancelled) return;
+        writeChatConsumerIdentity(comercioId, {
+          askedAt: new Date().toISOString(),
+        });
+        identityAwaitingRef.current = true;
+        setIsTyping(true);
+        await sleep(humanLocalReplyMs());
+        if (cancelled) {
+          setIsTyping(false);
+          return;
+        }
+        const ask = createMessage('assistant', buildSoftIdentityAskText());
+        setMessages((prev) => [...prev, ask]);
+        playAssistantReceivedOnce(ask);
+        void syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          assistant: ask,
+          onWatch: () => setSupervisionWatchActive(true),
+        });
+        setIsTyping(false);
+      })();
+    }, 1100);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // Intentionally once per mount / commerce — askedAt gate prevents repeats.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- soft ask bootstrap
+  }, [comercioId]);
+
   /** Mirror deterministic UI turns so the merchant panel sees the same cards. */
   const mirrorLocalTurn = useCallback(
     (opts: {
@@ -1076,6 +1178,7 @@ export function ChatAssistantView({
           consumerText: opts.consumerText,
           consumerMessageId: opts.consumerMessageId,
           consumerPayload: opts.consumerPayload,
+          consumerLabel: currentConsumerLabel(),
           assistant: opts.assistant,
           onWatch: () => {
             setSupervisionWatchActive(true);
@@ -1094,11 +1197,12 @@ export function ChatAssistantView({
             feedTokenRef: supervisionFeedTokenRef,
             conversationIdRef: supervisionConversationIdRef,
           },
+          consumerLabel: currentConsumerLabel(),
           assistant: welcomeMsg,
         });
       })();
     },
-    [comercioId, businessName],
+    [comercioId, businessName, currentConsumerLabel],
   );
 
   /** Deterministic (no Gemini): show the category's products as a carousel. */
@@ -1812,6 +1916,9 @@ export function ChatAssistantView({
             cart_snapshot: cartSnapshot.slice(0, 40),
             // Clean body for merchant panel; model still gets prefixed text above.
             display_text: userText,
+            ...(currentConsumerLabel()
+              ? { consumer_label: currentConsumerLabel() }
+              : {}),
             ...(lastUserForReply?.replyTo
               ? { reply_to: lastUserForReply.replyTo }
               : {}),
@@ -2001,6 +2108,7 @@ export function ChatAssistantView({
       whatsappUrl,
       whatsappDisplay,
       logoUrl,
+      currentConsumerLabel,
       playAssistantReceivedOnce,
     ],
   );
@@ -2021,6 +2129,89 @@ export function ChatAssistantView({
       });
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
+
+      // Soft identity capture (name / WhatsApp) — non-blocking if they also order.
+      const priorIdentity = readChatConsumerIdentity(comercioId);
+      const parsedId = parseIdentityReply(text);
+      if (
+        identityAwaitingRef.current ||
+        (priorIdentity?.askedAt &&
+          !priorIdentity.declinedAt &&
+          (!priorIdentity.name || !priorIdentity.whatsapp))
+      ) {
+        if (parsedId.declined) {
+          identityAwaitingRef.current = false;
+          writeChatConsumerIdentity(comercioId, {
+            declinedAt: new Date().toISOString(),
+          });
+          setIsTyping(true);
+          await sleep(humanLocalReplyMs());
+          const ack = createMessage(
+            'assistant',
+            'Perfecto, sin problema. Cuando quieras pedimos; aquí estoy para ayudarte con el menú.',
+          );
+          setMessages((prev) => [...markLatestUserMessage(prev, 'read'), ack]);
+          playAssistantReceivedOnce(ack);
+          mirrorLocalTurn({
+            consumerText: text,
+            consumerMessageId: userMsg.id,
+            assistant: ack,
+          });
+          setIsTyping(false);
+          return;
+        }
+        if (parsedId.name || parsedId.whatsapp) {
+          identityAwaitingRef.current = false;
+          const saved = writeChatConsumerIdentity(comercioId, {
+            name: parsedId.name || priorIdentity?.name || '',
+            whatsapp: parsedId.whatsapp || priorIdentity?.whatsapp || '',
+          });
+          const label = buildConsumerLabel(saved);
+          syncConsumerLabelToServer(label);
+          const first = (saved.name || '').split(/\s+/)[0] || '';
+          const thanks = first
+            ? `Gracias, ${first}. Ya te tengo anotado para el pedido.`
+            : 'Gracias, ya guardé tus datos para el pedido.';
+          const phoneNote =
+            saved.name && !saved.whatsapp
+              ? ` ${buildSoftPhoneReminderText(saved.name)}`
+              : '';
+          // Pure identity reply → ack and stop; otherwise keep helping with the ask.
+          const foodish =
+            /\b(pizza|menu|men[uú]|pedir|quiero|bebida|promo|combo|hawaiana|pepperoni)\b/i.test(
+              text,
+            );
+          const looksPureIdentity =
+            !foodish && text.split(/\s+/).length <= 10;
+          if (looksPureIdentity) {
+            setIsTyping(true);
+            await sleep(humanLocalReplyMs());
+            const ack = createMessage(
+              'assistant',
+              `${thanks}${phoneNote ? `\n\n${phoneNote.trim()}` : ''} ¿Qué se te antoja?`,
+            );
+            if (phoneNote) {
+              writeChatConsumerIdentity(comercioId, {
+                phoneRemindedAt: new Date().toISOString(),
+              });
+            }
+            setMessages((prev) => [...markLatestUserMessage(prev, 'read'), ack]);
+            playAssistantReceivedOnce(ack);
+            mirrorLocalTurn({
+              consumerText: text,
+              consumerMessageId: userMsg.id,
+              assistant: ack,
+            });
+            setIsTyping(false);
+            return;
+          }
+        }
+      } else if (shouldRemindPhone(priorIdentity) && parsedId.whatsapp) {
+        const saved = writeChatConsumerIdentity(comercioId, {
+          whatsapp: parsedId.whatsapp,
+        });
+        syncConsumerLabelToServer(buildConsumerLabel(saved));
+      }
 
       // Typed close-sale: go straight to checkout (no menu upsell sheet).
       if (READY_TO_PAY_RE.test(text) && cartCount > 0 && onOpenCheckout) {
@@ -2064,8 +2255,11 @@ export function ChatAssistantView({
       messages,
       replyTo,
       cartCount,
+      comercioId,
       onOpenCheckout,
       playAssistantReceivedOnce,
+      mirrorLocalTurn,
+      syncConsumerLabelToServer,
       runAssistantTurn,
       answerCatalogIntent,
       answerLocationIntent,

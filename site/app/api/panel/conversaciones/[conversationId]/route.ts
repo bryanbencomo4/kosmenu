@@ -127,7 +127,8 @@ export async function GET(
 }
 
 /**
- * POST actions: take | return | close | message
+ * POST actions: take | return | message
+ * (close/archive intentionally disabled — merchants keep conversation history)
  */
 export async function POST(
   request: Request,
@@ -267,62 +268,14 @@ export async function POST(
   }
 
   if (action === 'close') {
-    const closeVersion = Number(conversation.attention_version || 1) + 1;
-    if (isSupervisionMemoryEnabled()) {
-      const data = memoryUpdateConversation(conversationId, {
-        status: 'closed',
-        closed_at: new Date().toISOString(),
-        attention_version: closeVersion,
-        assigned_user_id: null,
-        assigned_at: null,
-      });
-      if (!data) {
-        return NextResponse.json({ error: 'close_failed' }, { status: 503 });
-      }
-      await persistAssistantOrStaffMessage({
-        conversationId,
-        comercioId: access.comercioId,
-        role: 'system',
-        text: 'Esta conversación fue archivada por el restaurante.',
-        senderUserId: access.user.id,
-        clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
-      });
-      void publishConversationEvent(access.comercioId, conversationId, {
-        type: 'status_changed',
-        status: 'closed',
-      });
-      return NextResponse.json({ ok: true, conversation: data, memory: true });
-    }
-    const { data, error } = await sb!
-      .from('chat_conversations')
-      .update({
-        status: 'closed',
-        closed_at: new Date().toISOString(),
-        attention_version: closeVersion,
-        assigned_user_id: null,
-        assigned_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId)
-      .eq('comercio_id', access.comercioId)
-      .select('*')
-      .single();
-    if (error) {
-      return NextResponse.json({ error: 'close_failed' }, { status: 503 });
-    }
-    await persistAssistantOrStaffMessage({
-      conversationId,
-      comercioId: access.comercioId,
-      role: 'system',
-      text: 'Esta conversación fue archivada por el restaurante.',
-      senderUserId: access.user.id,
-      clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
-    });
-    void publishConversationEvent(access.comercioId, conversationId, {
-      type: 'status_changed',
-      status: 'closed',
-    });
-    return NextResponse.json({ ok: true, conversation: data });
+    return NextResponse.json(
+      {
+        error: 'close_disabled',
+        message:
+          'Archivar o cerrar chats está desactivado para conservar el historial con el cliente.',
+      },
+      { status: 410 },
+    );
   }
 
   if (action === 'presence') {

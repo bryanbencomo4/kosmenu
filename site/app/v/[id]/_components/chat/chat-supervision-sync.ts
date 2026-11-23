@@ -24,6 +24,8 @@ export async function syncLocalSupervisionTurn(input: {
   consumerPayload?: Record<string, unknown>;
   /** When set, also mirrors this assistant bubble. Omit for consumer-only sync. */
   assistant?: ChatMessage | null;
+  /** Merchant inbox label (name · phone). */
+  consumerLabel?: string | null;
   onWatch?: () => void;
 }): Promise<void> {
   try {
@@ -71,6 +73,9 @@ export async function syncLocalSupervisionTurn(input: {
           sessionId,
           commerceName: input.businessName,
           turns,
+          ...(input.consumerLabel
+            ? { consumerLabel: input.consumerLabel }
+            : {}),
         }),
         cache: 'no-store',
       },

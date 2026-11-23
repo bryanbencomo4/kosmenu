@@ -88,6 +88,8 @@ export const chatRequestSchema = z.object({
   display_text: z.string().trim().min(1).max(2000).optional(),
   /** Structured reply quote for WhatsApp-style rendering in the merchant panel. */
   reply_to: chatReplyToSchema.optional(),
+  /** Merchant inbox label (guest name · WhatsApp). */
+  consumer_label: z.string().trim().min(1).max(120).optional(),
 });
 
 export type ChatRequestBody = z.infer<typeof chatRequestSchema>;
