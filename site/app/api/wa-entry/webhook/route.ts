@@ -49,13 +49,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
-  if (!config.inboundEnabled || !config.routerEnabled) {
-    return NextResponse.json(
-      { ok: true, action: 'ignored', reason: 'kill_switch' },
-      { status: 200 },
-    );
-  }
-
   const contentLength = Number(req.headers.get('content-length') || 0);
   if (contentLength > 0 && contentLength > config.maxBodyBytes) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
@@ -66,6 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
   }
 
+  // Authenticate BEFORE kill-switch so forged requests never look like a soft ignore.
   const auth = verifyWaEntryWebhook({
     config,
     headers: req.headers,
@@ -74,6 +68,13 @@ export async function POST(req: Request) {
   if (auth.ok === false) {
     console.error('[wa-entry] unauthorized', { ip: ip.slice(0, 32) });
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+  }
+
+  if (!config.inboundEnabled || !config.routerEnabled) {
+    return NextResponse.json(
+      { ok: true, action: 'ignored', reason: 'kill_switch' },
+      { status: 200 },
+    );
   }
 
   try {
