@@ -7,15 +7,18 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react';
 
 import { ChatComposer } from '../../../v/[id]/_components/chat/ChatComposer';
 import { ChatHeader } from '../../../v/[id]/_components/chat/ChatHeader';
 import { ChatMessageList } from '../../../v/[id]/_components/chat/ChatMessageList';
 import {
+  ChatSuggestedReplies,
+  type ChatSuggestedChip,
+} from '../../../v/[id]/_components/chat/ChatSuggestedReplies';
+import {
   chatThemeVars,
-  loadStoredChatTheme,
-  resolvePreferredChatTheme,
   saveChatTheme,
   type ChatThemeMode,
 } from '../../../v/[id]/_components/chat/chat-theme';
@@ -54,17 +57,30 @@ function statusLabel(status: string) {
   }
 }
 
+function friendlyPanelError(code: string, status?: number) {
+  const map: Record<string, string> = {
+    rate_limited:
+      'Hay mucha actividad ahora. Espera unos segundos e inténtalo de nuevo.',
+    human_takeover_disabled:
+      'La intervención humana está desactivada (feature flag).',
+    conflict: 'Otro empleado ya tomó esta conversación.',
+    not_assignee: 'Solo el responsable (o un administrador) puede responder.',
+    not_in_human_mode: 'Únete al chat antes de escribir.',
+    supervision_disabled: 'La supervisión no está activa para este comercio.',
+    unauthorized: 'Sesión expirada. Vuelve a iniciar sesión.',
+    not_found: 'No encontramos esta conversación.',
+  };
+  if (map[code]) return map[code];
+  if (status === 429) return map.rate_limited;
+  return code || 'No se pudo completar la acción.';
+}
+
 /** Map supervision rows → consumer ChatMessage shape (same bubbles/list). */
 function toChatMessages(rows: MessageRow[]): ChatMessage[] {
   return rows.map((m) => {
     const createdAt = Date.parse(m.created_at) || Date.now();
     if (m.role === 'system') {
-      return {
-        id: m.id,
-        role: 'system' as const,
-        text: m.body,
-        createdAt,
-      };
+      return { id: m.id, role: 'system' as const, text: m.body, createdAt };
     }
     if (m.role === 'staff') {
       return {
@@ -84,7 +100,6 @@ function toChatMessages(rows: MessageRow[]): ChatMessage[] {
         senderLabel: 'Cliente',
       };
     }
-    // assistant + unknown → incoming assistant bubble
     return {
       id: m.id,
       role: 'assistant' as const,
@@ -111,11 +126,50 @@ function ConversationDetailInner({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(true);
+  // Merchant panel matches the consumer WhatsApp dark shell by default.
   const [theme, setTheme] = useState<ChatThemeMode>('dark');
+  const [frameStyle, setFrameStyle] = useState<CSSProperties>({
+    position: 'fixed',
+    inset: 0,
+    width: '100%',
+    height: '100dvh',
+    maxHeight: '100dvh',
+  });
   const lastSeqRef = useRef(0);
 
   useEffect(() => {
-    setTheme(resolvePreferredChatTheme(loadStoredChatTheme()));
+    const sync = () => {
+      const vv = window.visualViewport;
+      if (!vv) {
+        setFrameStyle({
+          position: 'fixed',
+          inset: 0,
+          width: '100%',
+          height: '100dvh',
+          maxHeight: '100dvh',
+        });
+        return;
+      }
+      setFrameStyle({
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        width: '100%',
+        top: `${vv.offsetTop}px`,
+        height: `${vv.height}px`,
+        maxHeight: `${vv.height}px`,
+      });
+    };
+    sync();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', sync);
+    vv?.addEventListener('scroll', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      vv?.removeEventListener('resize', sync);
+      vv?.removeEventListener('scroll', sync);
+      window.removeEventListener('orientationchange', sync);
+    };
   }, []);
 
   useEffect(() => {
@@ -134,8 +188,9 @@ function ConversationDetailInner({
   }, [paramsPromise, searchParamsPromise]);
 
   const load = useCallback(
-    async (afterSeq = 0) => {
+    async (afterSeq = 0, opts?: { silent?: boolean }) => {
       if (!token || !conversationId) return;
+      const silent = Boolean(opts?.silent);
       const res = await fetch(
         `/api/panel/conversaciones/${encodeURIComponent(conversationId)}?afterSeq=${afterSeq}`,
         {
@@ -145,14 +200,22 @@ function ConversationDetailInner({
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Background poll / Realtime recovery must not flash raw API codes.
+        if (silent || res.status === 429) return;
         setError(
-          res.status === 401
-            ? 'Sesión requerida. Serás redirigido al inicio de sesión.'
-            : String(data.error || 'No se pudo abrir la conversación'),
+          friendlyPanelError(
+            String(data.error || ''),
+            res.status,
+          ),
         );
+        if (res.status === 401) {
+          window.location.href = `/panel/login?next=${encodeURIComponent(
+            `/panel/conversaciones/${encodeURIComponent(conversationId)}`,
+          )}`;
+        }
         return;
       }
-      setError(null);
+      if (!silent) setError(null);
       setConversation(data.conversation);
       if (typeof data.flags?.human_takeover === 'boolean') {
         setHumanTakeoverEnabled(data.flags.human_takeover);
@@ -204,7 +267,7 @@ function ConversationDetailInner({
   );
 
   const onBroadcastHint = useCallback(() => {
-    void load(lastSeqRef.current);
+    void load(lastSeqRef.current, { silent: true });
   }, [load]);
 
   useConversationRealtime(
@@ -217,15 +280,15 @@ function ConversationDetailInner({
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'visible' && lastSeqRef.current > 0) {
-        void load(lastSeqRef.current);
+        void load(lastSeqRef.current, { silent: true });
       }
     };
     document.addEventListener('visibilitychange', onVis);
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible' && lastSeqRef.current > 0) {
-        void load(lastSeqRef.current);
+        void load(lastSeqRef.current, { silent: true });
       }
-    }, 20_000);
+    }, 45_000);
     return () => {
       document.removeEventListener('visibilitychange', onVis);
       window.clearInterval(id);
@@ -250,17 +313,7 @@ function ConversationDetailInner({
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      const code = String(data.error || '');
-      const friendly: Record<string, string> = {
-        human_takeover_disabled:
-          'La intervención humana está desactivada (feature flag).',
-        conflict: 'Otro empleado ya tomó esta conversación.',
-        not_assignee: 'Solo el responsable (o un administrador) puede responder.',
-        not_in_human_mode: 'Toma la conversación antes de escribir.',
-        supervision_disabled: 'La supervisión no está activa para este comercio.',
-        unauthorized: 'Sesión expirada. Vuelve a iniciar sesión.',
-      };
-      setError(friendly[code] || code || 'Acción fallida');
+      setError(friendlyPanelError(String(data.error || ''), res.status));
       if (res.status === 401) {
         window.location.href = `/panel/login?next=${encodeURIComponent(
           `/panel/conversaciones/${encodeURIComponent(conversationId)}`,
@@ -285,6 +338,71 @@ function ConversationDetailInner({
   const chatMessages = useMemo(() => toChatMessages(messages), [messages]);
   const themeStyle = useMemo(() => chatThemeVars(theme), [theme]);
 
+  const actionChips = useMemo((): ChatSuggestedChip[] => {
+    if (!humanTakeoverEnabled) return [];
+    const chips: ChatSuggestedChip[] = [];
+    const status = conversation?.status || '';
+    if (status !== 'human_handling' && status !== 'closed') {
+      chips.push({
+        id: 'take',
+        label: 'Unirse al chat',
+        action: { type: 'text', text: '__take__' },
+      });
+    }
+    if (status === 'human_handling') {
+      chips.push({
+        id: 'return',
+        label: 'Devolver al asistente',
+        action: { type: 'text', text: '__return__' },
+      });
+      chips.push({
+        id: 'quick-ok',
+        label: 'En un momento te atiendo',
+        action: {
+          type: 'text',
+          text: 'En un momento te atiendo 😊',
+        },
+      });
+      chips.push({
+        id: 'quick-help',
+        label: '¿En qué te ayudo?',
+        action: { type: 'text', text: '¿En qué te puedo ayudar?' },
+      });
+    }
+    chips.push({
+      id: 'close',
+      label: 'Cerrar chat',
+      action: { type: 'text', text: '__close__' },
+    });
+    return chips.slice(0, 5);
+  }, [conversation?.status, humanTakeoverEnabled]);
+
+  const onPickChip = useCallback(
+    (chip: ChatSuggestedChip) => {
+      if (busy) return;
+      const text =
+        chip.action.type === 'text' ? chip.action.text : '';
+      if (text === '__take__') {
+        void act('take');
+        return;
+      }
+      if (text === '__return__') {
+        void act('return');
+        return;
+      }
+      if (text === '__close__') {
+        void act('close');
+        return;
+      }
+      if (canCompose && text) {
+        void act('message', text);
+      }
+    },
+    // act closes over latest state; chips only need canCompose/busy.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [busy, canCompose, conversationId, token],
+  );
+
   const subtitle = conversation
     ? [
         statusLabel(conversation.status),
@@ -308,8 +426,9 @@ function ConversationDetailInner({
 
   return (
     <section
-      className="fixed inset-0 z-40 flex flex-col overflow-hidden"
+      className="z-[70] flex w-full flex-col overflow-hidden"
       style={{
+        ...frameStyle,
         ...themeStyle,
         backgroundColor: 'var(--chat-bg)',
         color: 'var(--chat-text)',
@@ -358,7 +477,7 @@ function ConversationDetailInner({
                         ? 'Ya unido al chat'
                         : 'Unirse al chat',
                     disabled: busy || conversation?.status === 'human_handling',
-                    testId: 'take-conversation',
+                    testId: 'take-conversation-menu',
                     onSelect: () => void act('take'),
                   },
                   {
@@ -366,7 +485,7 @@ function ConversationDetailInner({
                     label: 'Devolver al asistente',
                     disabled:
                       busy || conversation?.status !== 'human_handling',
-                    testId: 'return-assistant',
+                    testId: 'return-assistant-menu',
                     onSelect: () => void act('return'),
                   },
                 ]
@@ -375,7 +494,7 @@ function ConversationDetailInner({
               id: 'close',
               label: 'Cerrar chat',
               disabled: busy,
-              testId: 'close-conversation',
+              testId: 'close-conversation-menu',
               onSelect: () => void act('close'),
             },
             {
@@ -384,26 +503,16 @@ function ConversationDetailInner({
               disabled: busy,
               onSelect: () => void load(0),
             },
-            ...(email
-              ? [
-                  {
-                    id: 'signout',
-                    label: `Salir (${email})`,
-                    onSelect: () => void signOut(),
-                  },
-                ]
-              : [
-                  {
-                    id: 'signout',
-                    label: 'Salir',
-                    onSelect: () => void signOut(),
-                  },
-                ]),
+            {
+              id: 'signout',
+              label: email ? `Salir (${email})` : 'Salir',
+              onSelect: () => void signOut(),
+            },
           ]}
         />
 
-        {/* Always-mounted hooks for Playwright (menu items unmount when closed). */}
-        <div className="sr-only" aria-hidden="true">
+        {/* Always-mounted hooks for Playwright. */}
+        <div className="sr-only">
           {humanTakeoverEnabled ? (
             <>
               <button
@@ -436,29 +545,6 @@ function ConversationDetailInner({
           </button>
         </div>
 
-        {humanTakeoverEnabled &&
-        conversation &&
-        conversation.status !== 'human_handling' &&
-        conversation.status !== 'closed' ? (
-          <div
-            className="shrink-0 border-b px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
-            style={{
-              backgroundColor: 'var(--chat-header)',
-              borderColor: 'var(--chat-header-border)',
-            }}
-          >
-            <button
-              type="button"
-              disabled={busy}
-              className="font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline disabled:opacity-50"
-              onClick={() => void act('take')}
-            >
-              Unirse al chat
-            </button>
-            <span> — el asistente sigue respondiendo</span>
-          </div>
-        ) : null}
-
         {!humanTakeoverEnabled ? (
           <div
             className="shrink-0 border-b px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
@@ -483,6 +569,12 @@ function ConversationDetailInner({
           />
         </div>
 
+        <ChatSuggestedReplies
+          chips={actionChips}
+          hidden={busy || !humanTakeoverEnabled}
+          onPick={onPickChip}
+        />
+
         {conversation?.status === 'human_handling' ? (
           <div
             className="shrink-0 border-t px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
@@ -491,8 +583,8 @@ function ConversationDetailInner({
               borderColor: 'var(--chat-header-border)',
             }}
           >
-            Estás atendiendo. Por ahora solo texto — voz y archivos del
-            cliente no llegan aquí.
+            Estás atendiendo. Por ahora solo texto — voz y archivos del cliente
+            no llegan aquí.
           </div>
         ) : null}
 

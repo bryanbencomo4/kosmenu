@@ -48,6 +48,7 @@ function shouldHideWidget(pathname: string, hostname: string) {
   if (hostname.toLowerCase() === adminSiteHost) return true;
   return (
     pathname.startsWith('/admin') ||
+    pathname.startsWith('/panel') ||
     pathname.startsWith('/v/') ||
     pathname.startsWith('/p/') ||
     pathname.startsWith('/preview') ||

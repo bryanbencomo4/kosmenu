@@ -51,7 +51,8 @@ export async function GET(
   context: { params: Promise<{ conversationId: string }> },
 ) {
   const ip = getClientIp(request);
-  const rl = consumeRateLimit(`panel:chat:get:${ip}`, 90, 60_000);
+  // Inbox poll + Realtime recovery can burst; keep generous for staff sessions.
+  const rl = consumeRateLimit(`panel:chat:get:${ip}`, 180, 60_000);
   if (!rl.ok) return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
 
   const { conversationId: raw } = await context.params;
