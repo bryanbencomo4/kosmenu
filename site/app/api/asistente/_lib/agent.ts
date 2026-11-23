@@ -11,12 +11,15 @@ import {
 } from './config';
 import { buildDiscoverySystemPrompt } from './prompt';
 import { runSimulatedDiscoveryAgent } from './simulate';
+import { extractDiscoveryGeminiUsage } from './gemini-usage';
 import {
   DISCOVERY_TOOL_DECLARATIONS,
   executeDiscoveryTool,
   type DiscoveryRestaurantCard,
   type DiscoveryToolContext,
 } from './tools';
+
+export { extractDiscoveryGeminiUsage } from './gemini-usage';
 
 export type DiscoveryAgentMessage = { role: 'user' | 'assistant'; text: string };
 
@@ -27,6 +30,10 @@ export type DiscoveryAgentResult = {
   toolCalls: number;
   fallback?: boolean;
   skippedLlm?: boolean;
+  /** Sum of usageMetadata across all Gemini HTTP rounds in this turn. */
+  tokensInput?: number;
+  tokensOutput?: number;
+  geminiHttpCalls?: number;
 };
 
 type GeminiPart = {
@@ -36,6 +43,15 @@ type GeminiPart = {
 };
 
 type GeminiContent = { role: string; parts: GeminiPart[] };
+
+type GeminiResponseJson = {
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+  candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
+};
 
 async function callDiscoveryGemini(params: {
   apiKey: string;
@@ -86,6 +102,18 @@ async function runLiveDiscoveryGemini(params: {
   const restaurants: DiscoveryRestaurantCard[] = [];
   let toolCalls = 0;
   let modelUsed = config.model;
+  let tokensInput = 0;
+  let tokensOutput = 0;
+  let geminiHttpCalls = 0;
+
+  const withUsage = (
+    result: Omit<DiscoveryAgentResult, 'tokensInput' | 'tokensOutput' | 'geminiHttpCalls'>,
+  ): DiscoveryAgentResult => ({
+    ...result,
+    tokensInput,
+    tokensOutput,
+    geminiHttpCalls,
+  });
 
   for (let round = 0; round <= config.maxToolRounds; round++) {
     const body = {
@@ -111,7 +139,14 @@ async function runLiveDiscoveryGemini(params: {
         modelUsed = config.modelFallback;
         continue;
       }
-      throw new Error('gemini_network');
+      // Partial usage (prior successful rounds) still returned to the caller.
+      return withUsage({
+        text: DISCOVERY_FALLBACK_MSG,
+        model: modelUsed,
+        restaurants,
+        toolCalls,
+        fallback: true,
+      });
     }
 
     if (!res.ok) {
@@ -119,12 +154,21 @@ async function runLiveDiscoveryGemini(params: {
         modelUsed = config.modelFallback;
         continue;
       }
-      throw new Error(`gemini_http_${res.status}`);
+      return withUsage({
+        text: DISCOVERY_FALLBACK_MSG,
+        model: modelUsed,
+        restaurants,
+        toolCalls,
+        fallback: true,
+      });
     }
 
-    const json = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
-    };
+    geminiHttpCalls += 1;
+    const json = (await res.json()) as GeminiResponseJson;
+    const usage = extractDiscoveryGeminiUsage(json);
+    tokensInput += usage.in;
+    tokensOutput += usage.out;
+
     const parts = json?.candidates?.[0]?.content?.parts ?? [];
     const fnCalls = parts.filter((p) => p.functionCall?.name);
 
@@ -134,12 +178,12 @@ async function runLiveDiscoveryGemini(params: {
         .filter(Boolean)
         .join('\n')
         .trim();
-      return {
+      return withUsage({
         text: text || DISCOVERY_FALLBACK_MSG,
         model: modelUsed,
         restaurants,
         toolCalls,
-      };
+      });
     }
 
     contents.push({ role: 'model', parts });
@@ -161,13 +205,13 @@ async function runLiveDiscoveryGemini(params: {
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  return {
+  return withUsage({
     text: DISCOVERY_FALLBACK_MSG,
     model: modelUsed,
     restaurants,
     toolCalls,
     fallback: true,
-  };
+  });
 }
 
 /**
@@ -192,6 +236,9 @@ export async function runDiscoveryAgent(params: {
           restaurants: sim.restaurants,
           toolCalls: sim.toolCalls,
           skippedLlm: true,
+          tokensInput: 0,
+          tokensOutput: 0,
+          geminiHttpCalls: 0,
         };
       }
       // Gemini not live — still run deterministic tool path for last user text.
@@ -203,6 +250,9 @@ export async function runDiscoveryAgent(params: {
         toolCalls: sim.toolCalls,
         fallback: true,
         skippedLlm: true,
+        tokensInput: 0,
+        tokensOutput: 0,
+        geminiHttpCalls: 0,
       };
     } catch {
       return {
@@ -212,14 +262,26 @@ export async function runDiscoveryAgent(params: {
         toolCalls: 0,
         fallback: true,
         skippedLlm: true,
+        tokensInput: 0,
+        tokensOutput: 0,
+        geminiHttpCalls: 0,
       };
     }
   }
 
   try {
     return await runLiveDiscoveryGemini({ config, messages, ctx });
-  } catch {
+  } catch (err) {
     // Soft degrade: directory path still available to the client.
+    // Preserve any partial usage attached by a failed live attempt when present.
+    const partialIn =
+      err && typeof err === 'object' && 'tokensInput' in err
+        ? Number((err as { tokensInput?: number }).tokensInput || 0)
+        : 0;
+    const partialOut =
+      err && typeof err === 'object' && 'tokensOutput' in err
+        ? Number((err as { tokensOutput?: number }).tokensOutput || 0)
+        : 0;
     try {
       const sim = await runSimulatedDiscoveryAgent({ messages, ctx });
       return {
@@ -229,6 +291,9 @@ export async function runDiscoveryAgent(params: {
         toolCalls: sim.toolCalls,
         fallback: true,
         skippedLlm: true,
+        tokensInput: partialIn,
+        tokensOutput: partialOut,
+        geminiHttpCalls: 0,
       };
     } catch {
       return {
@@ -237,6 +302,9 @@ export async function runDiscoveryAgent(params: {
         restaurants: [],
         toolCalls: 0,
         fallback: true,
+        tokensInput: partialIn,
+        tokensOutput: partialOut,
+        geminiHttpCalls: 0,
       };
     }
   }

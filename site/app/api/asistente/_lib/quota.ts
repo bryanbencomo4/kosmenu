@@ -21,7 +21,32 @@ import { join } from 'node:path';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { DiscoveryAssistantConfig } from './config';
+import {
+  estimateDiscoveryCostUsd,
+  type DiscoveryAssistantConfig,
+} from './config';
+
+/** In-process idempotency for token posts (same requestId must not double-count). */
+const recordedTokenRequestIds = new Map<string, number>();
+const TOKEN_IDEMPOTENCY_TTL_MS = 15 * 60_000;
+
+function rememberTokenRecord(requestId: string) {
+  const now = Date.now();
+  for (const [id, at] of recordedTokenRequestIds) {
+    if (now - at > TOKEN_IDEMPOTENCY_TTL_MS) recordedTokenRequestIds.delete(id);
+  }
+  recordedTokenRequestIds.set(requestId, now);
+}
+
+function alreadyRecordedTokens(requestId: string): boolean {
+  const at = recordedTokenRequestIds.get(requestId);
+  if (at == null) return false;
+  if (Date.now() - at > TOKEN_IDEMPOTENCY_TTL_MS) {
+    recordedTokenRequestIds.delete(requestId);
+    return false;
+  }
+  return true;
+}
 
 export type DiscoveryUsagePeriod = {
   agent: 'discovery';
@@ -29,6 +54,7 @@ export type DiscoveryUsagePeriod = {
   requests: number;
   tokensInput?: number;
   tokensOutput?: number;
+  estimatedCost?: number | null;
   updatedAt: string;
 };
 
@@ -283,4 +309,125 @@ export async function reserveDiscoveryRequest(params: {
     sessionId,
     supabase: params.supabase,
   });
+}
+
+function recordFilesystemTokens(params: {
+  config: DiscoveryAssistantConfig;
+  tokensInput: number;
+  tokensOutput: number;
+  estimatedCost: number | null;
+  model: string;
+}): DiscoveryUsagePeriod {
+  assertFilesystemAllowed();
+  const periodMonth = currentPeriodMonth();
+  return withFileLock(params.config.usageDir, `discovery_tokens_${periodMonth}`, () => {
+    const period = loadPeriodUsage(params.config, periodMonth);
+    period.tokensInput = (period.tokensInput ?? 0) + Math.max(0, params.tokensInput);
+    period.tokensOutput = (period.tokensOutput ?? 0) + Math.max(0, params.tokensOutput);
+    period.updatedAt = new Date().toISOString();
+    writeJsonAtomic(periodPath(params.config.usageDir, periodMonth), period);
+    return {
+      ...period,
+      estimatedCost: params.estimatedCost,
+    };
+  });
+}
+
+async function recordPostgresTokens(params: {
+  config: DiscoveryAssistantConfig;
+  supabase: SupabaseClient;
+  tokensInput: number;
+  tokensOutput: number;
+  estimatedCost: number | null;
+  model: string;
+}): Promise<DiscoveryUsagePeriod> {
+  const periodMonth = currentPeriodMonth();
+  const { data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', {
+    p_period_month: periodMonth,
+    p_tokens_input: Math.max(0, Math.floor(params.tokensInput)),
+    p_tokens_output: Math.max(0, Math.floor(params.tokensOutput)),
+    p_estimated_cost: params.estimatedCost,
+    p_model: params.model,
+  });
+  if (error) {
+    throw new DiscoveryQuotaError(
+      error.message || 'discovery token rpc failed',
+      503,
+      'quota_unavailable',
+    );
+  }
+  const period = (data ?? {}) as Record<string, unknown>;
+  return {
+    agent: 'discovery',
+    periodMonth: String(period.period_month ?? periodMonth),
+    requests: Number(period.requests ?? 0),
+    tokensInput: Number(period.tokens_input ?? 0),
+    tokensOutput: Number(period.tokens_output ?? 0),
+    estimatedCost:
+      period.estimated_cost == null ? null : Number(period.estimated_cost),
+    updatedAt: String(period.updated_at ?? new Date().toISOString()),
+  };
+}
+
+/**
+ * Post-turn token accounting. Call once per HTTP requestId after live Gemini.
+ * Does not authorize Gemini by itself; reserve must have succeeded first.
+ * Token posting is best-effort for cost visibility — request caps remain the hard stop.
+ */
+export async function recordDiscoveryTokens(params: {
+  config: DiscoveryAssistantConfig;
+  requestId: string;
+  model: string;
+  tokensInput: number;
+  tokensOutput: number;
+  supabase?: SupabaseClient | null;
+}): Promise<DiscoveryUsagePeriod | null> {
+  const tin = Math.max(0, Math.floor(params.tokensInput || 0));
+  const tout = Math.max(0, Math.floor(params.tokensOutput || 0));
+  if (tin === 0 && tout === 0) return null;
+
+  const requestId = (params.requestId || '').trim();
+  if (requestId.length >= 8 && alreadyRecordedTokens(requestId)) {
+    return null;
+  }
+
+  const cost = estimateDiscoveryCostUsd(tin, tout);
+  const { config } = params;
+
+  let period: DiscoveryUsagePeriod;
+  if (config.quotaBackend === 'filesystem') {
+    period = recordFilesystemTokens({
+      config,
+      tokensInput: tin,
+      tokensOutput: tout,
+      estimatedCost: cost,
+      model: params.model,
+    });
+  } else if (config.quotaBackend === 'postgres') {
+    if (!params.supabase) {
+      throw new DiscoveryQuotaError(
+        'Discovery postgres token record requires Supabase client',
+        503,
+        'quota_unavailable',
+      );
+    }
+    period = await recordPostgresTokens({
+      config,
+      supabase: params.supabase,
+      tokensInput: tin,
+      tokensOutput: tout,
+      estimatedCost: cost,
+      model: params.model,
+    });
+  } else {
+    return null;
+  }
+
+  if (requestId.length >= 8) rememberTokenRecord(requestId);
+  return period;
+}
+
+/** Test helper — clears in-process token idempotency map. */
+export function __resetDiscoveryTokenIdempotencyForTests() {
+  recordedTokenRequestIds.clear();
 }

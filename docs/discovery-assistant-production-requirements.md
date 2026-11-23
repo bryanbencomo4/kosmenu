@@ -16,10 +16,11 @@
 | `DISCOVERY_ASSISTANT_SIMULATE` | unset / `0` | Forzado off en prod |
 | `DISCOVERY_ASSISTANT_QUOTA_BACKEND` | `postgres` (tras migración) | Nunca `filesystem` en prod |
 | `DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY` | `0` hasta RPC verificada | Gate explícito |
-| `DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION` | p.ej. `40` | Sesión |
-| `DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS` | p.ej. `2000` | Global mensuales discovery |
-| `DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS` | p.ej. `2000000` | Techo tokens |
-| `DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN` | p.ej. `30` | In-memory por instancia; complementar con WAF/Upstash |
+| `DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION` | **`15`** (piloto) | Sesión — hard stop |
+| `DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS` | **`200`** (piloto) | Global mensuales — **control de costo primario** |
+| `DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS` | **`500000`** (piloto) | Techo adicional (post `usageMetadata`) |
+| `DISCOVERY_ASSISTANT_MAX_TOOL_ROUNDS` | **`2`** | Rondas de tools |
+| `DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN` | **`15`** | In-memory por instancia; complementar con WAF/Upstash |
 | `GEMINI_API_KEY` | ya existente | Compartida con chatbot; cuotas **aisladas** |
 | `NEXT_PUBLIC_CHATBOT_PREVIEW` | según política | Necesario para CTAs `?chatbot=1` |
 | `CHATBOT_ALLOWED_COMMERCE_IDS` | UUIDs reales | CTAs de chat en prod |

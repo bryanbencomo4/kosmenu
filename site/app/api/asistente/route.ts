@@ -14,7 +14,11 @@ import {
   isDiscoveryGeminiLiveAllowed,
 } from './_lib/config';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
-import { DiscoveryQuotaError, reserveDiscoveryRequest } from './_lib/quota';
+import {
+  DiscoveryQuotaError,
+  recordDiscoveryTokens,
+  reserveDiscoveryRequest,
+} from './_lib/quota';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -175,6 +179,28 @@ export async function POST(request: Request) {
         pageSize: config.defaultPageSize,
       },
     });
+
+    // Post-turn metering (once per requestId). Never authorizes Gemini by itself.
+    if (
+      live.ok &&
+      ((result.tokensInput ?? 0) > 0 || (result.tokensOutput ?? 0) > 0)
+    ) {
+      try {
+        await recordDiscoveryTokens({
+          config,
+          requestId,
+          model: result.model,
+          tokensInput: result.tokensInput ?? 0,
+          tokensOutput: result.tokensOutput ?? 0,
+          supabase:
+            config.quotaBackend === 'postgres'
+              ? getServiceSupabaseClient()
+              : null,
+        });
+      } catch {
+        // Visibility only — request reserve already applied; do not fail the user turn.
+      }
+    }
 
     return json({
       ok: true,

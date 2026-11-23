@@ -84,10 +84,11 @@ export function getDiscoveryAssistantConfig(
     maxHistoryMessages: envInt('DISCOVERY_ASSISTANT_MAX_HISTORY_MESSAGES', 20, env),
     maxMessageChars: envInt('DISCOVERY_ASSISTANT_MAX_MESSAGE_CHARS', 800, env),
     maxMessagesPerRequest: envInt('DISCOVERY_ASSISTANT_MAX_MESSAGES_PER_REQUEST', 30, env),
-    rateLimitPerIpPerMinute: envInt('DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN', 30, env),
-    maxRequestsPerSession: envInt('DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION', 40, env),
-    maxMonthlyRequests: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS', 2_000, env),
-    maxMonthlyTokens: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS', 2_000_000, env),
+    rateLimitPerIpPerMinute: envInt('DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN', 15, env),
+    // Pilot budget defaults (override via env; do not treat smoke caps as billing).
+    maxRequestsPerSession: envInt('DISCOVERY_ASSISTANT_MAX_REQUESTS_PER_SESSION', 15, env),
+    maxMonthlyRequests: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_REQUESTS', 200, env),
+    maxMonthlyTokens: envInt('DISCOVERY_ASSISTANT_MAX_MONTHLY_TOKENS', 500_000, env),
     defaultPageSize: envInt('DISCOVERY_ASSISTANT_PAGE_SIZE', 24, env),
     usageDir:
       (env.DISCOVERY_ASSISTANT_USAGE_DIR ?? '').trim() ||
@@ -140,3 +141,16 @@ export function isDiscoveryGeminiLiveAllowed(
 
 export const DISCOVERY_FALLBACK_MSG =
   'Puedo ayudarte a buscar restaurantes con los filtros del directorio. Prueba una categoría o escribe qué se te antoja.';
+
+/** Rough USD estimate for discovery metering (not a hard billing invoice). */
+export function estimateDiscoveryCostUsd(
+  tokensIn: number,
+  tokensOut: number,
+  priceInputPer1M = 0.1,
+  priceOutputPer1M = 0.4,
+): number | null {
+  const tin = Math.max(0, tokensIn);
+  const tout = Math.max(0, tokensOut);
+  if (tin === 0 && tout === 0) return null;
+  return (tin / 1_000_000) * priceInputPer1M + (tout / 1_000_000) * priceOutputPer1M;
+}
