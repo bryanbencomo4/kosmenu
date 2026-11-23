@@ -102,6 +102,7 @@ function runQueryFile(sqlText, label) {
         'db',
         'query',
         `--remote=${projectRef}`,
+        '--yes',
         '-o',
         'json',
         '-f',

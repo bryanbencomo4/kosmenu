@@ -260,12 +260,25 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- DOWN (manual rollback — do not auto-run)
--- alter publication supabase_realtime drop table if exists public.chat_messages;
--- alter publication supabase_realtime drop table if exists public.chat_conversations;
--- drop function if exists public.chat_return_to_assistant(uuid, uuid);
--- drop function if exists public.chat_take_conversation(uuid, uuid);
--- drop function if exists public.chat_user_can_supervise(uuid, uuid);
--- drop table if exists public.chat_supervision_events;
--- drop table if exists public.chat_messages;
--- drop table if exists public.chat_conversations;
+-- Prefer kill-switch flags first. Schema DROP is last resort (destroys history).
+-- Publication: Postgres rejects "DROP TABLE IF EXISTS" here — use DO/EXCEPTION.
+/*
+do $$
+begin
+  begin
+    alter publication supabase_realtime drop table public.chat_messages;
+  exception when undefined_object then null;
+  end;
+  begin
+    alter publication supabase_realtime drop table public.chat_conversations;
+  exception when undefined_object then null;
+  end;
+end $$;
+drop function if exists public.chat_return_to_assistant(uuid, uuid);
+drop function if exists public.chat_take_conversation(uuid, uuid);
+drop function if exists public.chat_user_can_supervise(uuid, uuid);
+drop table if exists public.chat_supervision_events;
+drop table if exists public.chat_messages;
+drop table if exists public.chat_conversations;
+*/
 -- ---------------------------------------------------------------------------

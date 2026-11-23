@@ -40,6 +40,15 @@ const required = [
   ['unique session hash', /unique\s*\(\s*comercio_id\s*,\s*consumer_session_hash\s*\)/i],
   ['unique dedupe_key', /unique\s*\(\s*dedupe_key\s*\)/i],
   ['DOWN comments', /DOWN \(manual rollback/i],
+  // Publication DROP must not use invalid "IF EXISTS" inside ALTER PUBLICATION.
+  [
+    'DOWN publication uses DO/EXCEPTION',
+    /alter publication supabase_realtime drop table public\.chat_messages[\s\S]*exception when undefined_object/i,
+  ],
+  [
+    'DOWN rejects invalid IF EXISTS publication drop',
+    (s) => !/alter publication supabase_realtime drop table if exists/i.test(s),
+  ],
   // Publication may be applied by apply script; SQL must document both tables.
   ['realtime chat_conversations note', /supabase_realtime[\s\S]*chat_conversations|chat_conversations[\s\S]*supabase_realtime/i],
   ['realtime chat_messages note', /supabase_realtime[\s\S]*chat_messages|chat_messages[\s\S]*supabase_realtime/i],
@@ -48,8 +57,9 @@ const required = [
 ];
 
 let failed = 0;
-for (const [name, re] of required) {
-  if (!re.test(sql)) {
+for (const [name, check] of required) {
+  const ok = typeof check === 'function' ? check(sql) : check.test(sql);
+  if (!ok) {
     console.error(`✗ ${name}`);
     failed += 1;
   } else {
