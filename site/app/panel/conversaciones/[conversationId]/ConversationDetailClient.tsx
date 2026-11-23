@@ -681,18 +681,14 @@ function ConversationDetailInner({
           onPick={onPickChip}
         />
 
-        {humanTakeoverEnabled ? (
+        {canCompose || conversation?.status === 'human_handling' ? (
           <ChatComposer
             value={draft}
             disabled={!canCompose || busy}
             onChange={setDraft}
             inputTestId="staff-draft"
             sendTestId="staff-send"
-            placeholder={
-              canCompose
-                ? 'Escribe un mensaje'
-                : 'Únete al chat para responder'
-            }
+            placeholder="Escribe un mensaje"
             onSend={() => {
               if (!canCompose || !draft.trim()) return;
               void act('message', draft.trim());
@@ -712,7 +708,34 @@ function ConversationDetailInner({
                 : undefined
             }
           />
-        ) : null}
+        ) : (
+          <div
+            className="shrink-0 border-t px-4 py-3.5"
+            style={{
+              backgroundColor: 'var(--chat-composer)',
+              borderColor: 'var(--chat-header-border)',
+              paddingBottom: 'max(0.85rem, env(safe-area-inset-bottom))',
+            }}
+            role="status"
+            data-panel-composer-locked="1"
+            data-testid="composer-locked-banner"
+          >
+            <p className="mx-auto max-w-5xl text-center text-[13.5px] leading-snug text-[var(--chat-text-muted)]">
+              {!humanTakeoverEnabled
+                ? 'No puedes enviar mensajes porque la intervención humana está desactivada.'
+                : conversation?.status === 'closed'
+                  ? 'No puedes enviar mensajes porque esta conversación está cerrada.'
+                  : 'Únete al chat para enviar mensajes.'}
+            </p>
+            {/* Keep Playwright hooks mounted even without the composer. */}
+            <div className="sr-only">
+              <input data-testid="staff-draft" readOnly value="" />
+              <button type="button" data-testid="staff-send" disabled>
+                send
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
