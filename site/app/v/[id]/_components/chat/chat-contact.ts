@@ -8,7 +8,7 @@ import {
  * Includes claims, complaints, human handoff, and published local WhatsApp.
  */
 export const CONTACT_INTENT_RE =
-  /\b(whats?app|wa\.?me|hablar con (un |una )?(humano|persona|alguien|asesor|mesero|cajero|el local|el restaurante|ustedes)|atencion (humana|personal|al cliente)|pasar(me)? (con |a )?(un )?humano|numero (de )?(whats?app|telefono|contacto)|telefono (del |de )?(negocio|local|restaurante)|contacto (del |de )?(negocio|local|restaurante)|escribir(le)? (al|a) (local|restaurante)|reclam(ar|o|acion|ación)|queja|quejar(me)?|devoluci[oó]n|pedido (incompleto|equivocado|malo|errado|danado|dañado)|me (falt[oó]|lleg[oó] mal|cobraron)|problema con (el |mi )?pedido|soporte (del |de (mi )?pedido)|atenci[oó]n (del |de (mi )?pedido))\b/i;
+  /\b(whats?app|wa\.?me|hablar con (un |una )?(humano|persona|alguien|asesor|mesero|cajero|el local|el restaurante|ustedes)|atencion (humana|personal|al cliente)|pasar(me)? (con |a )?(un )?humano|(pasa(me)?|dame|quiero|necesito|envia(me)?|manda(me)?) (el |tu |su )?contacto|numero (de )?(whats?app|telefono|contacto)|telefono (del |de la |de el |de )?(negocio|local|restaurante|pizzeria|tienda|comercio)|contacto (del |de la |de el |de )?(negocio|local|restaurante|pizzeria|tienda|comercio)|el contacto( (del |de la |de el |de )?\w+)?|escribir(le)? (al|a) (local|restaurante|pizzeria)|reclam(ar|o|acion|ación)|queja|quejar(me)?|devoluci[oó]n|pedido (incompleto|equivocado|malo|errado|danado|dañado)|me (falt[oó]|lleg[oó] mal|cobraron)|problema con (el |mi )?pedido|soporte (del |de (mi )?pedido)|atenci[oó]n (del |de (mi )?pedido))\b/i;
 
 /** "elmenuxfa", "cómo creo un menú", "este chat para mi negocio"… */
 export const PLATFORM_INTENT_RE =
@@ -77,6 +77,22 @@ export function buildRestaurantContactCard(input: {
     avatarUrl: (input.avatarUrl || '').trim() || null,
     phoneDisplay: (input.phoneDisplay || '').trim() || null,
   };
+}
+
+/** True when a model reply dumps a raw WhatsApp deep link (prefer contact card UI). */
+export function replyContainsWhatsAppLink(text: string | null | undefined): boolean {
+  return /(?:api\.)?whatsapp\.com\/send|wa\.me\//i.test(text ?? '');
+}
+
+/** Remove raw WA URLs once the contact card carries the action. */
+export function stripWhatsAppLinksFromText(text: string): string {
+  return text
+    .replace(/https?:\/\/(?:api\.)?whatsapp\.com\/send\?[^\s)\]>"']+/gi, '')
+    .replace(/https?:\/\/wa\.me\/[^\s)\]>"']+/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 export function buildPlatformPitchText(): string {

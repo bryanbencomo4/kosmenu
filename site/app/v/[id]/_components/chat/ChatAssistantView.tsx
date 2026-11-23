@@ -76,6 +76,8 @@ import {
   matchContactIntent,
   matchFulfillmentIntent,
   matchPlatformIntent,
+  replyContainsWhatsAppLink,
+  stripWhatsAppLinksFromText,
   type ChatContactCardData,
   type ChatFulfillmentOptions,
 } from './chat-contact';
@@ -1955,10 +1957,25 @@ export function ChatAssistantView({
         const attributeOnly =
           Boolean(data?.pending_configuration) &&
           !(data?.cart_actions && data.cart_actions.length > 0);
-        const okMsg = createMessage('assistant', replyText, {
+        // If Gemini dumps a raw WA link, upgrade to the contact-card UI.
+        const geminiContactCard =
+          replyContainsWhatsAppLink(replyText)
+            ? buildRestaurantContactCard({
+                whatsappUrl,
+                phoneDisplay: whatsappDisplay,
+                businessName,
+                avatarUrl: logoUrl,
+              })
+            : null;
+        const displayReplyText = geminiContactCard
+          ? stripWhatsAppLinksFromText(replyText) ||
+            'Claro, aquí tienes el contacto del local para hablar con una persona:'
+          : replyText;
+        const okMsg = createMessage('assistant', displayReplyText, {
           productCards: attributeOnly ? [] : data?.product_cards || [],
           cartActions: data?.cart_actions || [],
           catalogCategories: attributeOnly ? undefined : categoryCards,
+          contactCard: geminiContactCard,
         });
         setMessages((prev) => [
           ...markLatestUserMessage(prev, 'read'),
@@ -1981,6 +1998,9 @@ export function ChatAssistantView({
       comercioId,
       cartSnapshot,
       catalog,
+      whatsappUrl,
+      whatsappDisplay,
+      logoUrl,
       playAssistantReceivedOnce,
     ],
   );

@@ -67,6 +67,9 @@ describe('chat hours + contact + platform intelligence', () => {
 
     expect(matchContactIntent('pásame el whatsapp')).toBe(true);
     expect(matchContactIntent('quiero hablar con un humano')).toBe(true);
+    expect(matchContactIntent('Pasame el contacto de la pizzería')).toBe(true);
+    expect(matchContactIntent('dame el contacto del local')).toBe(true);
+    expect(matchContactIntent('quiero el contacto')).toBe(true);
     expect(matchContactIntent('dame una hawaiana')).toBe(false);
 
     expect(matchPlatformIntent('cómo creo un menú en elmenuxfa')).toBe(true);
