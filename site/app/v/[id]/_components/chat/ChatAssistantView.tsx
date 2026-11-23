@@ -574,16 +574,23 @@ export function ChatAssistantView({
   const quickReplyContextIdRef = useRef<string | null>(null);
   const regionId = useId();
   const frameRef = useRef<HTMLElement | null>(null);
-  const [frameStyle, setFrameStyle] = useState<CSSProperties>({});
+  // Stable first paint — avoid an empty style flash before visualViewport sync.
+  const [frameStyle, setFrameStyle] = useState<CSSProperties>({
+    position: 'fixed',
+    inset: 0,
+    width: '100%',
+    height: '100dvh',
+    maxHeight: '100dvh',
+  });
 
   useEffect(() => {
     setSoundsEnabled(isChatSoundsEnabled());
   }, []);
 
-  // Mobile keyboard: size the chat frame to visualViewport so the header stays
-  // visible and the composer sits above the keyboard (100dvh alone often fails).
-  // Full-bleed shell (left+right 0) so desktop isn't stuck left of a white void;
-  // the inner column is centered like the public menu (max-w-5xl).
+  // Mobile keyboard: shrink the shell to visualViewport.height so the composer
+  // sits above the keyboard. Always pin top:0 — never follow vv.offsetTop, or
+  // iOS briefly slides the header out of view while focusing the input.
+  // Full-bleed shell (left+right 0); inner column centers like the public menu.
   useEffect(() => {
     const sync = () => {
       const vv = window.visualViewport;
@@ -597,12 +604,17 @@ export function ChatAssistantView({
         });
         return;
       }
+      // Undo the document scroll iOS applies on input focus; that scroll is what
+      // makes offsetTop jump and the fixed header look like it "hides".
+      if (window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
       setFrameStyle({
         position: 'fixed',
         left: 0,
         right: 0,
+        top: 0,
         width: '100%',
-        top: `${vv.offsetTop}px`,
         height: `${vv.height}px`,
         maxHeight: `${vv.height}px`,
       });

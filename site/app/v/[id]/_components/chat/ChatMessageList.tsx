@@ -146,7 +146,8 @@ export function ChatMessageList({
 
   /**
    * Keyboard / viewport shrink: keep the latest bubbles above the soft keyboard.
-   * Runs twice on rAF because iOS applies visualViewport then layout one frame later.
+   * Only scroll the list container — never scrollIntoView (that scrolls the
+   * document on iOS and briefly hides the fixed chat header).
    */
   const pinBottomForKeyboard = useCallback(() => {
     const run = () => {
@@ -155,11 +156,6 @@ export function ChatMessageList({
       el.scrollTop = el.scrollHeight;
       nearBottomRef.current = true;
       setShowJumpLatest(false);
-      try {
-        endRef.current?.scrollIntoView({ block: 'end', inline: 'nearest' });
-      } catch {
-        /* ignore */
-      }
     };
     run();
     requestAnimationFrame(() => {
