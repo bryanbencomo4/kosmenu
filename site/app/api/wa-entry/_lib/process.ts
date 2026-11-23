@@ -79,7 +79,7 @@ export async function processWaEntryEvent(
   let payload: unknown = params.payload;
   if (payload === undefined) {
     const parsed = safeParseJson(params.rawBody);
-    if (!parsed.ok) {
+    if (parsed.ok === false) {
       return {
         accepted: false,
         action: 'rejected',

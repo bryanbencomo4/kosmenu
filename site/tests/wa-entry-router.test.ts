@@ -39,7 +39,7 @@ function testConfig(overrides: Partial<WaEntryConfig> = {}): WaEntryConfig {
       PLATFORM_WA_ROUTER: '1',
       PLATFORM_WA_ADAPTER: 'sim',
       PLATFORM_WA_WEBHOOK_SECRET: 'test-secret',
-    }),
+    } as NodeJS.ProcessEnv),
     ...overrides,
   };
 }
@@ -262,7 +262,7 @@ describe('wa-entry router (local sim)', () => {
       rawBody,
     });
     expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.status).toBe(401);
+    if (bad.ok === false) expect(bad.status).toBe(401);
 
     const goodShared = verifyWaEntryWebhook({
       config,

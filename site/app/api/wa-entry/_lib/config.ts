@@ -4,7 +4,7 @@
  * an explicit activation review. Local sim never needs real WaSender keys.
  */
 
-export type WaEntryAdapterKind = 'sim' | 'wasender';
+export type WaEntryAdapterKind = 'sim' | 'preview_isolated' | 'wasender';
 export type WaEntryStoreKind = 'memory' | 'file' | 'supabase_preview';
 
 export type WaEntryConfig = {
@@ -20,6 +20,10 @@ export type WaEntryConfig = {
   maxRepliesPerHour: number;
   /** Window to treat fromMe text as our own bot echo. */
   echoWindowMs: number;
+  /** Max inbound JSON body bytes. */
+  maxBodyBytes: number;
+  /** Soft per-IP webhook accepts per minute (process-local). */
+  webhookRatePerMinute: number;
   consumerAssistantUrl: string;
   businessLandingUrl: string;
   businessRegisterUrl: string;
@@ -63,12 +67,19 @@ function parseAllowlist(raw: string): string[] {
 
 export function loadWaEntryConfig(env: NodeJS.ProcessEnv = process.env): WaEntryConfig {
   const adapterRaw = envStr(env, 'PLATFORM_WA_ADAPTER', 'sim').toLowerCase();
-  const adapter: WaEntryAdapterKind = adapterRaw === 'wasender' ? 'wasender' : 'sim';
+  let adapter: WaEntryAdapterKind = 'sim';
+  if (adapterRaw === 'wasender') adapter = 'wasender';
+  if (adapterRaw === 'preview_isolated' || adapterRaw === 'preview') adapter = 'preview_isolated';
 
   const storeRaw = envStr(env, 'PLATFORM_WA_STORE', 'file').toLowerCase();
   let storeKind: WaEntryStoreKind = 'file';
   if (storeRaw === 'memory') storeKind = 'memory';
   if (storeRaw === 'supabase_preview' || storeRaw === 'preview') storeKind = 'supabase_preview';
+
+  // Isolated Preview path defaults store to supabase_preview when adapter says so.
+  if (adapter === 'preview_isolated' && storeRaw === 'file') {
+    storeKind = 'supabase_preview';
+  }
 
   return {
     inboundEnabled: envBool(env, 'PLATFORM_WA_INBOUND', false),
@@ -81,6 +92,8 @@ export function loadWaEntryConfig(env: NodeJS.ProcessEnv = process.env): WaEntry
     humanPauseMs: envInt(env, 'PLATFORM_WA_HUMAN_PAUSE_MS', 1000 * 60 * 30),
     maxRepliesPerHour: envInt(env, 'PLATFORM_WA_MAX_REPLIES_PER_HOUR', 20),
     echoWindowMs: envInt(env, 'PLATFORM_WA_ECHO_WINDOW_MS', 1000 * 60 * 5),
+    maxBodyBytes: envInt(env, 'PLATFORM_WA_MAX_BODY_BYTES', 64 * 1024),
+    webhookRatePerMinute: envInt(env, 'PLATFORM_WA_WEBHOOK_RATE_PER_MINUTE', 120),
     consumerAssistantUrl: envStr(
       env,
       'PLATFORM_WA_CONSUMER_URL',

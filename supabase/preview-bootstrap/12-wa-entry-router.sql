@@ -140,6 +140,11 @@ revoke all on table public.wa_entry_seen_messages from anon, authenticated;
 revoke all on table public.wa_entry_outbound from anon, authenticated;
 revoke all on table public.wa_entry_send_locks from anon, authenticated;
 
+grant select, insert, update, delete on table public.wa_entry_threads to service_role;
+grant select, insert, update, delete on table public.wa_entry_seen_messages to service_role;
+grant select, insert, update, delete on table public.wa_entry_outbound to service_role;
+grant select, insert, update, delete on table public.wa_entry_send_locks to service_role;
+
 grant execute on function public.wa_entry_try_claim_message(text, text) to service_role;
 grant execute on function public.wa_entry_match_bot_echo(text, text, bigint, bigint) to service_role;
 grant execute on function public.wa_entry_try_acquire_send_lock(text, bigint, bigint) to service_role;

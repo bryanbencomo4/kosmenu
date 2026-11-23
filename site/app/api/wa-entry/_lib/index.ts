@@ -38,6 +38,7 @@ export {
   createRefusingWasenderSender,
   type WaEntrySender,
 } from './sender';
+export { createIsolatedPreviewSender } from './sender-isolated';
 export { verifyWaEntryWebhook } from './auth';
 export { processWaEntryEvent, type WaEntryProcessResult } from './process';
 export { getWaEntryRuntime, resetWaEntryRuntime, setWaEntryRuntime } from './runtime';
