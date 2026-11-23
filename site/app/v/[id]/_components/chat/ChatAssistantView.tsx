@@ -98,6 +98,7 @@ import {
 } from './chat-hours';
 import {
   matchLocationIntent,
+  reverseGeocodeLabel,
   type ChatBusinessLocation,
 } from './chat-location';
 import {
@@ -2811,9 +2812,16 @@ export function ChatAssistantView({
     async (location: ChatSharedLocation) => {
       if (isTyping) return;
       setErrorText(null);
+      setIsTyping(true);
+      const geocoded = await reverseGeocodeLabel(location.lat, location.lng);
       const label =
+        geocoded ||
         location.label?.trim() ||
-        `📍 ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+        `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+      const enriched: ChatSharedLocation = { ...location, label };
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${location.lat},${location.lng}`,
+      )}`;
       const reply = replyToRef.current;
       setReplyTo(null);
       const userMsg = createMessage(
@@ -2826,7 +2834,9 @@ export function ChatAssistantView({
             lat: location.lat,
             lng: location.lng,
             label,
+            address: geocoded,
             kind: 'customer',
+            mapsUrl,
           },
         },
       );
@@ -2834,7 +2844,7 @@ export function ChatAssistantView({
       setMessages(withUser);
       saveChatHistory(comercioId, withUser);
 
-      const quoted = onQuoteDeliveryAt?.(location);
+      const quoted = onQuoteDeliveryAt?.(enriched);
       const result = buildDeliveryLocationReply({
         supportsDelivery: quoted?.supportsDelivery ?? false,
         pickupAvailable: quoted?.pickupAvailable,
@@ -2843,7 +2853,15 @@ export function ChatAssistantView({
         currency: quoted?.currency ?? null,
       });
 
-      setIsTyping(true);
+      // Seed pin for later checkout — never auto-open the sheet.
+      if (
+        result.kind === 'quoted' ||
+        result.kind === 'free' ||
+        result.kind === 'blocked'
+      ) {
+        onShareLocationForDelivery?.(enriched);
+      }
+
       await sleep(humanLocalReplyMs());
       const assistantMsg = createMessage('assistant', result.message, {
         cartActions:
@@ -2864,10 +2882,6 @@ export function ChatAssistantView({
       saveChatHistory(comercioId, next);
       playAssistantReceivedOnce(assistantMsg);
       setIsTyping(false);
-
-      if (result.openCheckout) {
-        onShareLocationForDelivery?.(location);
-      }
     },
     [
       isTyping,

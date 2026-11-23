@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, Mic, Reply } from 'lucide-react';
+import { FileText, MapPin, Mic, Reply } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -247,6 +247,118 @@ function formatChatTime(ts: number) {
   } catch {
     return null;
   }
+}
+
+function ChatLocationCard({
+  location,
+}: {
+  location: NonNullable<ChatMessage['location']>;
+}) {
+  const [mapFailed, setMapFailed] = useState(false);
+  const mapsHref =
+    location.mapsUrl ||
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      `${location.lat},${location.lng}`,
+    )}`;
+  const title =
+    location.kind === 'business'
+      ? '📍 Ubicación del local'
+      : '📍 Ubicación para delivery';
+  const subtitle =
+    location.address ||
+    location.label ||
+    `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+
+  return (
+    <div
+      className="mb-1 w-full max-w-[16.5rem] overflow-hidden rounded-xl bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)]"
+      data-chat-location="1"
+      data-chat-location-kind={location.kind || 'customer'}
+    >
+      <a
+        href={mapsHref}
+        target="_blank"
+        rel="noreferrer"
+        className="relative block h-[120px] w-full overflow-hidden"
+        data-chat-location-map="1"
+        aria-label={title}
+      >
+        {!mapFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={staticMapPreviewUrl(location.lat, location.lng)}
+            alt=""
+            className="h-full w-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setMapFailed(true)}
+          />
+        ) : (
+          <div
+            className="flex h-full w-full flex-col items-center justify-center gap-1.5"
+            style={{
+              background:
+                'linear-gradient(160deg, color-mix(in srgb, var(--chat-send) 18%, #dce8df) 0%, color-mix(in srgb, var(--chat-input) 80%, #b8c9bc) 100%)',
+            }}
+            aria-hidden
+          >
+            <span
+              className="grid h-11 w-11 place-items-center rounded-full shadow-sm"
+              style={{
+                backgroundColor: 'var(--chat-send)',
+                color: 'var(--chat-send-fg)',
+              }}
+            >
+              <MapPin className="h-5 w-5" strokeWidth={2.4} />
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--chat-text-muted)]">
+              Ver en el mapa
+            </span>
+          </div>
+        )}
+        {!mapFailed ? (
+          <span
+            className="pointer-events-none absolute left-1/2 top-1/2 grid h-9 w-9 -translate-x-1/2 -translate-y-[70%] place-items-center rounded-full shadow-md"
+            style={{
+              backgroundColor: 'var(--chat-send)',
+              color: 'var(--chat-send-fg)',
+            }}
+            aria-hidden
+          >
+            <MapPin className="h-4 w-4" strokeWidth={2.5} />
+          </span>
+        ) : null}
+      </a>
+      <div className="px-2.5 py-2 text-[13px]">
+        <p className="font-semibold leading-snug text-[var(--chat-text)]">
+          {title}
+        </p>
+        <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-[var(--chat-text-muted)]">
+          {subtitle}
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+          <a
+            className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
+            href={mapsHref}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Abrir en Maps
+          </a>
+          {location.directionsUrl ? (
+            <a
+              className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
+              href={location.directionsUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Cómo llegar
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ChatMessageBubble({
@@ -562,69 +674,7 @@ export function ChatMessageBubble({
             ),
           )}
           {hasLocation && message.location ? (
-            <div
-              className="mb-1 w-full max-w-[16.5rem] overflow-hidden rounded-xl bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)]"
-              data-chat-location="1"
-              data-chat-location-kind={message.location.kind || 'customer'}
-            >
-              <a
-                href={
-                  message.location.mapsUrl ||
-                  `https://maps.google.com/?q=${message.location.lat},${message.location.lng}`
-                }
-                target="_blank"
-                rel="noreferrer"
-                className="block"
-                data-chat-location-map="1"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={staticMapPreviewUrl(
-                    message.location.lat,
-                    message.location.lng,
-                  )}
-                  alt=""
-                  className="h-[120px] w-full object-cover"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-              </a>
-              <div className="px-2.5 py-2 text-[13px]">
-                <p className="font-semibold leading-snug text-[var(--chat-text)]">
-                  {message.location.kind === 'business'
-                    ? '📍 Ubicación del local'
-                    : '📍 Ubicación para delivery'}
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-[var(--chat-text-muted)]">
-                  {message.location.address ||
-                    message.location.label ||
-                    `${message.location.lat.toFixed(5)}, ${message.location.lng.toFixed(5)}`}
-                </p>
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-                  <a
-                    className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
-                    href={
-                      message.location.mapsUrl ||
-                      `https://maps.google.com/?q=${message.location.lat},${message.location.lng}`
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir en Maps
-                  </a>
-                  {message.location.directionsUrl ? (
-                    <a
-                      className="text-[12px] font-semibold text-[var(--chat-send)] underline-offset-2 hover:underline"
-                      href={message.location.directionsUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Cómo llegar
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <ChatLocationCard location={message.location} />
           ) : null}
           {hasText ? (
             <div className="break-words" data-chat-text="1">

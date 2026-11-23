@@ -54,7 +54,59 @@ export function buildBusinessLocation(input: {
   };
 }
 
-/** Lightweight map preview (no Google billing). */
-export function staticMapPreviewUrl(lat: number, lng: number): string {
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=16&size=560x280&markers=${lat},${lng},red-pushpin`;
+/** Convert WGS84 → OSM slippy-map tile indices. */
+export function latLngToTile(
+  lat: number,
+  lng: number,
+  zoom: number,
+): { x: number; y: number; z: number } {
+  const z = Math.max(0, Math.min(18, Math.floor(zoom)));
+  const n = 2 ** z;
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
+  );
+  return {
+    x: Math.min(n - 1, Math.max(0, x)),
+    y: Math.min(n - 1, Math.max(0, y)),
+    z,
+  };
+}
+
+/**
+ * Lightweight map preview via a single OSM raster tile (no Google billing).
+ * Prefer this over staticmap.openstreetmap.de which often fails in browsers.
+ */
+export function staticMapPreviewUrl(lat: number, lng: number, zoom = 16): string {
+  const { x, y, z } = latLngToTile(lat, lng, zoom);
+  return `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+}
+
+/** Best-effort reverse geocode for a friendlier delivery label. */
+export async function reverseGeocodeLabel(
+  lat: number,
+  lng: number,
+): Promise<string | null> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (typeof fetch === 'undefined') return null;
+  try {
+    const url =
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
+      `&lat=${encodeURIComponent(String(lat))}` +
+      `&lon=${encodeURIComponent(String(lng))}` +
+      `&zoom=18&addressdetails=0`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(4500),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { display_name?: string };
+    const name = (data.display_name || '').trim();
+    return name ? name.slice(0, 140) : null;
+  } catch {
+    return null;
+  }
 }

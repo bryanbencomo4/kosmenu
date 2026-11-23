@@ -4,7 +4,10 @@ export type ChatDeliveryLocationResult = {
   kind: 'quoted' | 'free' | 'out_of_zone' | 'blocked' | 'no_delivery' | 'pickup_only';
   /** Human reply for the assistant bubble. */
   message: string;
-  /** Whether checkout should open in delivery mode with this pin. */
+  /**
+   * Whether to offer a “Continuar al checkout” CTA.
+   * Does NOT auto-open checkout — the guest must confirm.
+   */
   openCheckout: boolean;
   fee: number | null;
   currency: string | null;
@@ -59,7 +62,7 @@ export function buildDeliveryLocationReply(input: {
   if (quote.free || quote.fee <= 0) {
     return {
       kind: 'free',
-      message: `Perfecto, hasta esa zona el delivery va *sin costo extra* (según el carrito actual).${pickupHint} ¿Seguimos al checkout?`,
+      message: `Perfecto, hasta esa zona el delivery va *sin costo extra* (según el carrito actual).${pickupHint} Cuando quieras, continúa al checkout.`,
       openCheckout: true,
       fee: 0,
       currency: input.currency ?? null,
@@ -69,7 +72,7 @@ export function buildDeliveryLocationReply(input: {
   const label = (input.feeLabel || '').trim() || `${quote.fee}`;
   return {
     kind: 'quoted',
-    message: `Recibí tu ubicación. Hasta esa zona el delivery sale aprox. *${label}* (el checkout confirma el monto final).${pickupHint}`,
+    message: `Recibí tu ubicación. Hasta esa zona el delivery sale aprox. *${label}* (el checkout confirma el monto final).${pickupHint} Cuando quieras, continúa al checkout.`,
     openCheckout: true,
     fee: quote.fee,
     currency: input.currency ?? null,

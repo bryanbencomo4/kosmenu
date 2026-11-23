@@ -7423,25 +7423,24 @@ export default function PublicMenuPage() {
               };
             }}
             onShareLocationForDelivery={(location) => {
-              if (supportsDelivery) {
-                setDeliveryMode('delivery');
-                setKioskFulfillment('delivery');
-                try {
-                  window.sessionStorage.setItem(
-                    `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
-                    'delivery',
-                  );
-                } catch {
-                  /* ignore */
-                }
-                setDeliveryPoint({ lat: location.lat, lng: location.lng });
-                setDeliveryPointSource('user');
-                setDeliveryAddress(
-                  location.label?.trim() ||
-                    `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
+              // Seed delivery pin only — checkout opens when the guest taps Continuar.
+              if (!supportsDelivery) return;
+              setDeliveryMode('delivery');
+              setKioskFulfillment('delivery');
+              try {
+                window.sessionStorage.setItem(
+                  `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+                  'delivery',
                 );
+              } catch {
+                /* ignore */
               }
-              openCheckoutFromChat();
+              setDeliveryPoint({ lat: location.lat, lng: location.lng });
+              setDeliveryPointSource('user');
+              setDeliveryAddress(
+                location.label?.trim() ||
+                  `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
+              );
             }}
             incomingProposal={chatIncomingProposal}
             onIncomingProposalConsumed={() => setChatIncomingProposal(null)}

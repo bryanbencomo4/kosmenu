@@ -73,6 +73,17 @@ describe('chat delivery location replies', () => {
     expect(quoted.kind).toBe('quoted');
     expect(quoted.openCheckout).toBe(true);
     expect(quoted.message).toMatch(/2,50 USD/);
+    expect(quoted.message).toMatch(/Cuando quieras, continúa al checkout/i);
+  });
+
+  it('does not auto-open checkout from the location share handler', () => {
+    const page = read('app/v/[id]/page.tsx');
+    const shareBlock = page.slice(
+      page.indexOf('onShareLocationForDelivery'),
+      page.indexOf('onShareLocationForDelivery') + 900,
+    );
+    expect(shareBlock).toMatch(/Seed delivery pin only/);
+    expect(shareBlock).not.toMatch(/openCheckoutFromChat\(\)/);
   });
 });
 
