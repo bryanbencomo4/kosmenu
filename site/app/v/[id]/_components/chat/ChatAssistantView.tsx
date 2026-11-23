@@ -43,6 +43,7 @@ import { buildDeliveryLocationReply } from './chat-delivery-quote';
 import { ChatHeader } from './ChatHeader';
 import { chatRichFieldsFromPayload } from '../../../../panel/_lib/panel-chat-messages';
 import { fileToPersistedDataUrl } from './chat-media-persist';
+import { syncLocalSupervisionTurn } from './chat-supervision-sync';
 import {
   ChatMediaLightbox,
   type ChatMediaLightboxState,
@@ -250,7 +251,7 @@ function createMessage(
     replyTo: options?.replyTo ?? undefined,
     catalogCategories: options?.catalogCategories,
     catalogProducts: options?.catalogProducts,
-    catalogCategoryId: options?.catalogCategoryId,
+    catalogCategoryId: options?.catalogCategoryId ?? undefined,
     paymentMethods: options?.paymentMethods,
     hoursSchedule: options?.hoursSchedule ?? undefined,
     contactCard: options?.contactCard ?? undefined,
@@ -494,6 +495,7 @@ export function ChatAssistantView({
   );
   const supervisionConversationIdRef = useRef<string | null>(null);
   const supervisionFeedTickRef = useRef<(() => void) | null>(null);
+  const welcomeSyncedRef = useRef(false);
   /** Coalesce close-sale when several proposals confirm in a short burst. */
   const closeSaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeSaleBatchRef = useRef<{
@@ -873,6 +875,7 @@ export function ChatAssistantView({
     supervisionSeenIdsRef.current = new Set();
     supervisionFeedTokenRef.current = null;
     supervisionConversationIdRef.current = null;
+    welcomeSyncedRef.current = false;
     setMessages([
       createMessage('assistant', welcome, {
         demo: !live,
@@ -894,6 +897,48 @@ export function ChatAssistantView({
     setCatalogSheetCategoryId(categoryId ?? null);
     setCatalogSheetOpen(true);
   }, []);
+
+  /** Mirror deterministic UI turns so the merchant panel sees the same cards. */
+  const mirrorLocalTurn = useCallback(
+    (opts: {
+      consumerText?: string;
+      consumerMessageId?: string;
+      assistant: ChatMessage;
+    }) => {
+      void (async () => {
+        await syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          consumerText: opts.consumerText,
+          consumerMessageId: opts.consumerMessageId,
+          assistant: opts.assistant,
+          onWatch: () => {
+            setSupervisionWatchActive(true);
+          },
+        });
+        // Once a conversation exists, also mirror the welcome + categories.
+        if (welcomeSyncedRef.current) return;
+        const welcomeMsg = messagesRef.current.find((m) => m.isWelcome);
+        if (!welcomeMsg?.catalogCategories?.length) return;
+        if (!supervisionConversationIdRef.current) return;
+        welcomeSyncedRef.current = true;
+        await syncLocalSupervisionTurn({
+          comercioId,
+          businessName,
+          refs: {
+            feedTokenRef: supervisionFeedTokenRef,
+            conversationIdRef: supervisionConversationIdRef,
+          },
+          assistant: welcomeMsg,
+        });
+      })();
+    },
+    [comercioId, businessName],
+  );
 
   /** Deterministic (no Gemini): show the category's products as a carousel. */
   const buildCategoryMessage = useCallback(
@@ -921,15 +966,29 @@ export function ChatAssistantView({
     (categoryId: string) => {
       const msg = buildCategoryMessage(categoryId);
       if (!msg || isTyping) return;
+      const categoryName =
+        catalog?.categories.find((c) => c.id === categoryId)?.name ||
+        'categoría';
       setIsTyping(true);
       void (async () => {
         await sleep(humanLocalReplyMs());
         setMessages((prev) => [...prev, msg]);
         playAssistantReceivedOnce(msg);
+        mirrorLocalTurn({
+          consumerText: categoryName,
+          consumerMessageId: `cat_${categoryId}_${msg.id}`,
+          assistant: msg,
+        });
         setIsTyping(false);
       })();
     },
-    [buildCategoryMessage, playAssistantReceivedOnce, isTyping],
+    [
+      buildCategoryMessage,
+      playAssistantReceivedOnce,
+      isTyping,
+      catalog,
+      mirrorLocalTurn,
+    ],
   );
 
   /**
@@ -938,7 +997,7 @@ export function ChatAssistantView({
    * Returns true when the turn was fully handled locally.
    */
   const answerCatalogIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       const intent = matchCatalogIntent(text, catalog);
       if (!intent || !catalog) return false;
       const reply =
@@ -952,15 +1011,20 @@ export function ChatAssistantView({
       await sleep(humanLocalReplyMs());
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
-    [catalog, buildCategoryMessage, playAssistantReceivedOnce],
+    [catalog, buildCategoryMessage, playAssistantReceivedOnce, mirrorLocalTurn],
   );
 
   /** Deterministic "dónde están / cómo llego" → WhatsApp-like location pin. */
   const answerLocationIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchLocationIntent(text)) return false;
       setIsTyping(true);
       await sleep(humanLocalReplyMs());
@@ -971,6 +1035,11 @@ export function ChatAssistantView({
         );
         setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
         playAssistantReceivedOnce(empty);
+        mirrorLocalTurn({
+          consumerText: text,
+          consumerMessageId,
+          assistant: empty,
+        });
         setIsTyping(false);
         return true;
       }
@@ -993,15 +1062,20 @@ export function ChatAssistantView({
       );
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
-    [businessLocation, playAssistantReceivedOnce],
+    [businessLocation, playAssistantReceivedOnce, mirrorLocalTurn],
   );
 
   /** Deterministic "cómo pago / métodos de pago" → payment methods card. */
   const answerPaymentIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchPaymentIntent(text)) return false;
       setIsTyping(true);
       await sleep(humanLocalReplyMs());
@@ -1025,6 +1099,11 @@ export function ChatAssistantView({
         );
         setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
         playAssistantReceivedOnce(empty);
+        mirrorLocalTurn({
+          consumerText: text,
+          consumerMessageId,
+          assistant: empty,
+        });
         setIsTyping(false);
         return true;
       }
@@ -1049,6 +1128,11 @@ export function ChatAssistantView({
       );
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
@@ -1057,12 +1141,13 @@ export function ChatAssistantView({
       cartCount,
       onOpenCheckout,
       playAssistantReceivedOnce,
+      mirrorLocalTurn,
     ],
   );
 
   /** Deterministic "horario / ¿están abiertos?". */
   const answerHoursIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchHoursIntent(text)) return false;
       setIsTyping(true);
       await sleep(humanLocalReplyMs());
@@ -1082,6 +1167,11 @@ export function ChatAssistantView({
         );
         setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
         playAssistantReceivedOnce(empty);
+        mirrorLocalTurn({
+          consumerText: text,
+          consumerMessageId,
+          assistant: empty,
+        });
         setIsTyping(false);
         return true;
       }
@@ -1091,6 +1181,11 @@ export function ChatAssistantView({
       });
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
@@ -1100,12 +1195,13 @@ export function ChatAssistantView({
       whatsappDisplay,
       businessName,
       playAssistantReceivedOnce,
+      mirrorLocalTurn,
     ],
   );
 
   /** Deterministic WhatsApp / "hablar con un humano". */
   const answerContactIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchContactIntent(text)) return false;
       setIsTyping(true);
       await sleep(humanLocalReplyMs());
@@ -1121,6 +1217,11 @@ export function ChatAssistantView({
         );
         setMessages((prev) => [...markLatestUserMessage(prev, 'read'), empty]);
         playAssistantReceivedOnce(empty);
+        mirrorLocalTurn({
+          consumerText: text,
+          consumerMessageId,
+          assistant: empty,
+        });
         setIsTyping(false);
         return true;
       }
@@ -1131,30 +1232,46 @@ export function ChatAssistantView({
       );
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
-    [whatsappUrl, whatsappDisplay, businessName, playAssistantReceivedOnce],
+    [
+      whatsappUrl,
+      whatsappDisplay,
+      businessName,
+      playAssistantReceivedOnce,
+      mirrorLocalTurn,
+    ],
   );
 
   /** Deterministic "elmenuxfa / cómo creo un menú". */
   const answerPlatformIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchPlatformIntent(text)) return false;
       setIsTyping(true);
       await sleep(humanLocalReplyMs());
       const reply = createMessage('assistant', buildPlatformPitchText());
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
-    [playAssistantReceivedOnce],
+    [playAssistantReceivedOnce, mirrorLocalTurn],
   );
 
   /** Deterministic delivery / pickup explanation. */
   const answerFulfillmentIntent = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, consumerMessageId?: string): Promise<boolean> => {
       if (!matchFulfillmentIntent(text)) return false;
       const options = fulfillmentOptions ?? {
         delivery: false,
@@ -1182,10 +1299,20 @@ export function ChatAssistantView({
       );
       setMessages((prev) => [...markLatestUserMessage(prev, 'read'), reply]);
       playAssistantReceivedOnce(reply);
+      mirrorLocalTurn({
+        consumerText: text,
+        consumerMessageId,
+        assistant: reply,
+      });
       setIsTyping(false);
       return true;
     },
-    [fulfillmentOptions, onOpenCheckout, playAssistantReceivedOnce],
+    [
+      fulfillmentOptions,
+      onOpenCheckout,
+      playAssistantReceivedOnce,
+      mirrorLocalTurn,
+    ],
   );
 
   useEffect(() => {
@@ -1569,6 +1696,21 @@ export function ChatAssistantView({
         if (data?.supervision?.conversationId) {
           supervisionConversationIdRef.current = data.supervision.conversationId;
           setSupervisionWatchActive(true);
+          if (!welcomeSyncedRef.current) {
+            const welcomeMsg = messagesRef.current.find((m) => m.isWelcome);
+            if (welcomeMsg?.catalogCategories?.length) {
+              welcomeSyncedRef.current = true;
+              void syncLocalSupervisionTurn({
+                comercioId,
+                businessName,
+                refs: {
+                  feedTokenRef: supervisionFeedTokenRef,
+                  conversationIdRef: supervisionConversationIdRef,
+                },
+                assistant: welcomeMsg,
+              });
+            }
+          }
         }
         if (
           data?.supervision?.mode === 'human_handling' ||
@@ -1717,13 +1859,13 @@ export function ChatAssistantView({
       }
 
       // Local UX answers first (carousels / location / hours / contact / …), then Gemini.
-      if (await answerCatalogIntent(text)) return;
-      if (await answerLocationIntent(text)) return;
-      if (await answerHoursIntent(text)) return;
-      if (await answerContactIntent(text)) return;
-      if (await answerPlatformIntent(text)) return;
-      if (await answerFulfillmentIntent(text)) return;
-      if (await answerPaymentIntent(text)) return;
+      if (await answerCatalogIntent(text, userMsg.id)) return;
+      if (await answerLocationIntent(text, userMsg.id)) return;
+      if (await answerHoursIntent(text, userMsg.id)) return;
+      if (await answerContactIntent(text, userMsg.id)) return;
+      if (await answerPlatformIntent(text, userMsg.id)) return;
+      if (await answerFulfillmentIntent(text, userMsg.id)) return;
+      if (await answerPaymentIntent(text, userMsg.id)) return;
       await runAssistantTurn(text, nextMessages);
     },
     [

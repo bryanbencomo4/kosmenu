@@ -5,6 +5,9 @@ import type {
   ChatMessage,
   ChatProductCardData,
 } from '../../v/[id]/_components/chat/chat-types';
+import type { ChatContactCardData } from '../../v/[id]/_components/chat/chat-contact';
+import type { ChatHoursSnapshot } from '../../v/[id]/_components/chat/chat-hours';
+import type { ChatPaymentMethod } from '../../v/[id]/_components/chat/chat-payments';
 
 export type PanelMessageRow = {
   id: string;
@@ -98,10 +101,14 @@ export function chatRichFieldsFromPayload(
     | 'cartActions'
     | 'catalogCategories'
     | 'catalogProducts'
+    | 'catalogCategoryId'
     | 'attachments'
     | 'voiceUrl'
     | 'voiceDurationMs'
     | 'location'
+    | 'paymentMethods'
+    | 'hoursSchedule'
+    | 'contactCard'
   >
 > {
   if (!payload || typeof payload !== 'object') return {};
@@ -124,17 +131,39 @@ export function chatRichFieldsFromPayload(
       : attachments.find((a) => a.kind === 'audio')?.url || undefined;
   const voiceDurationMs = Number(payload.voiceDurationMs);
   const location = asLocation(payload.location);
+  const paymentRaw = payload.payment_methods ?? payload.paymentMethods;
+  const paymentMethods = Array.isArray(paymentRaw)
+    ? (paymentRaw as ChatPaymentMethod[])
+    : [];
+  const hoursSchedule =
+    (payload.hours_schedule as ChatHoursSnapshot | null | undefined) ??
+    (payload.hoursSchedule as ChatHoursSnapshot | null | undefined) ??
+    null;
+  const contactCard =
+    (payload.contact_card as ChatContactCardData | null | undefined) ??
+    (payload.contactCard as ChatContactCardData | null | undefined) ??
+    null;
+  const catalogCategoryId =
+    typeof payload.catalog_category_id === 'string'
+      ? payload.catalog_category_id
+      : typeof payload.catalogCategoryId === 'string'
+        ? payload.catalogCategoryId
+        : undefined;
   return {
     ...(productCards.length ? { productCards } : {}),
     ...(cartActions.length ? { cartActions } : {}),
     ...(catalogCategories.length ? { catalogCategories } : {}),
     ...(catalogProducts.length ? { catalogProducts } : {}),
+    ...(catalogCategoryId != null ? { catalogCategoryId } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(voiceUrl ? { voiceUrl } : {}),
     ...(Number.isFinite(voiceDurationMs) && voiceDurationMs > 0
       ? { voiceDurationMs }
       : {}),
     ...(location ? { location } : {}),
+    ...(paymentMethods.length ? { paymentMethods } : {}),
+    ...(hoursSchedule ? { hoursSchedule } : {}),
+    ...(contactCard ? { contactCard } : {}),
   };
 }
 
