@@ -1,0 +1,14 @@
+{
+  "event": "messages.upsert",
+  "sessionId": "ELMENUXFA1",
+  "data": {
+    "message": {
+      "id": "wamid.GROUP001",
+      "from": "120363000000000000@g.us",
+      "fromMe": false,
+      "isGroup": true,
+      "timestamp": 1700000011,
+      "text": "Hola grupo"
+    }
+  }
+}

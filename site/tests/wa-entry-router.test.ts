@@ -1,0 +1,322 @@
+import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { verifyWaEntryWebhook } from '../app/api/wa-entry/_lib/auth';
+import { loadWaEntryConfig, type WaEntryConfig } from '../app/api/wa-entry/_lib/config';
+import { normalizeWaInboundPayload } from '../app/api/wa-entry/_lib/contract';
+import {
+  businessManageMessage,
+  businessMenuMessage,
+  businessRegisterMessage,
+  consumerLinkMessage,
+  welcomeMessage,
+} from '../app/api/wa-entry/_lib/messages';
+import { processWaEntryEvent } from '../app/api/wa-entry/_lib/process';
+import { createRefusingWasenderSender, createSimWaEntrySender } from '../app/api/wa-entry/_lib/sender';
+import { createMemoryWaEntryStore } from '../app/api/wa-entry/_lib/store';
+
+const FIXTURES = path.join(__dirname, 'fixtures', 'wa-entry');
+
+function fixture(name: string): unknown {
+  return JSON.parse(readFileSync(path.join(FIXTURES, name), 'utf8'));
+}
+
+function testConfig(overrides: Partial<WaEntryConfig> = {}): WaEntryConfig {
+  return {
+    ...loadWaEntryConfig({
+      PLATFORM_WA_INBOUND: '1',
+      PLATFORM_WA_ROUTER: '1',
+      PLATFORM_WA_ADAPTER: 'sim',
+      PLATFORM_WA_WEBHOOK_SECRET: 'test-secret',
+    }),
+    ...overrides,
+  };
+}
+
+function makePayload(opts: {
+  id: string;
+  text: string;
+  from?: string;
+  fromMe?: boolean;
+  isGroup?: boolean;
+  isStatus?: boolean;
+}): Record<string, unknown> {
+  const from =
+    opts.from ||
+    (opts.isStatus
+      ? 'status@broadcast'
+      : opts.isGroup
+        ? '120363000000000000@g.us'
+        : '584120000001@s.whatsapp.net');
+  return {
+    event: 'messages.upsert',
+    sessionId: 'ELMENUXFA1',
+    data: {
+      message: {
+        id: opts.id,
+        from,
+        fromMe: Boolean(opts.fromMe),
+        isGroup: Boolean(opts.isGroup),
+        isStatus: Boolean(opts.isStatus),
+        timestamp: Math.floor(Date.now() / 1000),
+        text: opts.text,
+      },
+    },
+  };
+}
+
+async function run(
+  payload: unknown,
+  opts: {
+    config?: WaEntryConfig;
+    store?: ReturnType<typeof createMemoryWaEntryStore>;
+    forceSendFail?: boolean;
+    nowMs?: number;
+  } = {},
+) {
+  const config = opts.config ?? testConfig();
+  const store = opts.store ?? createMemoryWaEntryStore();
+  const sender = createSimWaEntrySender(store);
+  const rawBody = JSON.stringify(payload);
+  const result = await processWaEntryEvent({
+    config,
+    store,
+    sender,
+    rawBody,
+    payload,
+    forceSendFail: opts.forceSendFail,
+    nowMs: opts.nowMs,
+  });
+  return { result, store, config };
+}
+
+describe('wa-entry router (local sim)', () => {
+  let store: ReturnType<typeof createMemoryWaEntryStore>;
+
+  beforeEach(() => {
+    store = createMemoryWaEntryStore();
+  });
+
+  afterEach(() => {
+    store.clear();
+  });
+
+  it('A) Hola → bienvenida', async () => {
+    const { result } = await run(fixture('hello.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(welcomeMessage());
+    expect(result.state).toBe('awaiting_audience');
+  });
+
+  it('B) 1 → enlace consumidor', async () => {
+    await run(fixture('hello.json'), { store });
+    const { result, config } = await run(fixture('choose-consumer.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(consumerLinkMessage(config));
+    expect(result.replies[0]?.text).toContain('https://elmenuxfa.com/asistente?ref=wa');
+    expect(result.state).toBe('consumer_link_sent');
+  });
+
+  it('C) 2 → submenú negocio', async () => {
+    await run(fixture('hello.json'), { store });
+    const { result } = await run(fixture('choose-business.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(businessMenuMessage());
+    expect(result.state).toBe('awaiting_business_action');
+  });
+
+  it('D) Negocio/1 → registro', async () => {
+    await run(fixture('hello.json'), { store });
+    await run(fixture('choose-business.json'), { store });
+    const { result, config } = await run(fixture('business-register.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(businessRegisterMessage(config));
+    expect(result.replies[0]?.text).toContain('https://business.elmenuxfa.com/');
+    expect(result.replies[0]?.text).toContain('https://app.elmenuxfa.com/?tab=register');
+    expect(result.state).toBe('business_link_sent');
+  });
+
+  it('E) Negocio/2 → panel', async () => {
+    await run(fixture('hello.json'), { store });
+    await run(fixture('choose-business.json'), { store });
+    const { result, config } = await run(fixture('business-manage.json'), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(businessManageMessage(config));
+    expect(result.replies[0]?.text).toContain('https://app.elmenuxfa.com/');
+    expect(result.state).toBe('business_link_sent');
+  });
+
+  it('F) MENÚ → inicio', async () => {
+    await run(fixture('hello.json'), { store });
+    await run(fixture('choose-consumer.json'), { store });
+    const { result } = await run(makePayload({ id: 'wamid.MENU1', text: 'MENÚ' }), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toBe(welcomeMessage());
+    expect(result.state).toBe('awaiting_audience');
+  });
+
+  it('G) texto inesperado → ayuda breve', async () => {
+    await run(fixture('hello.json'), { store });
+    const { result } = await run(makePayload({ id: 'wamid.HELP1', text: 'asdfgh' }), { store });
+    expect(result.action).toBe('replied');
+    expect(result.replies[0]?.text).toMatch(/Responde \*1\*/);
+  });
+
+  it('H) mensaje repetido → sin respuesta duplicada', async () => {
+    const first = await run(fixture('hello.json'), { store });
+    expect(first.result.action).toBe('replied');
+    const second = await run(fixture('hello.json'), { store });
+    expect(second.result.action).toBe('ignored');
+    expect(second.result.reason).toBe('duplicate');
+    expect(store.listOutbound()).toHaveLength(1);
+  });
+
+  it('I) fromMe → ignorado + pausa humana', async () => {
+    await run(fixture('hello.json'), { store });
+    const { result } = await run(fixture('from-me.json'), { store });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('from_me');
+    const thread = store.getThread('584120000001');
+    expect(thread?.state).toBe('human_handling');
+    expect(thread?.humanPausedUntilMs).toBeGreaterThan(Date.now());
+  });
+
+  it('J) grupo → ignorado', async () => {
+    const { result } = await run(fixture('group.json'), { store });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('group');
+  });
+
+  it('K) status → ignorado', async () => {
+    const { result } = await run(fixture('status.json'), { store });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('status');
+  });
+
+  it('L) reconexión → conserva sesión (file/memory snapshot)', async () => {
+    await run(fixture('hello.json'), { store });
+    const snap = store.snapshot();
+    const restored = createMemoryWaEntryStore(snap);
+    const { result } = await run(fixture('choose-consumer.json'), { store: restored });
+    expect(result.action).toBe('replied');
+    expect(result.state).toBe('consumer_link_sent');
+  });
+
+  it('M) dos eventos simultáneos → una sola transición válida', async () => {
+    const a = makePayload({ id: 'wamid.RACE_A', text: 'Hola' });
+    const b = makePayload({ id: 'wamid.RACE_A', text: 'Hola' }); // same id
+    const [r1, r2] = await Promise.all([run(a, { store }), run(b, { store })]);
+    const actions = [r1.result.action, r2.result.action].sort();
+    expect(actions).toEqual(['ignored', 'replied']);
+    expect(store.listOutbound()).toHaveLength(1);
+  });
+
+  it('N) WaSender caído → reintento acotado', async () => {
+    await run(fixture('hello.json'), { store });
+    // First send fails, retry succeeds → still one logical reply path with retry outbound
+    const { result } = await run(fixture('choose-consumer.json'), {
+      store,
+      forceSendFail: true,
+    });
+    expect(result.action).toBe('replied');
+    const outbound = store.listOutbound();
+    expect(outbound.some((o) => o.result === 'simulated_fail')).toBe(true);
+    expect(outbound.some((o) => o.result === 'simulated_ok' && o.dedupeKey.includes('retry'))).toBe(
+      true,
+    );
+  });
+
+  it('O) operador humano activo → sin respuesta automática', async () => {
+    await run(fixture('hello.json'), { store });
+    await run(fixture('from-me.json'), { store });
+    const { result } = await run(makePayload({ id: 'wamid.AFTERHUMAN', text: '1' }), { store });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('human_handling');
+  });
+
+  it('P) kill switch OFF → sin acciones', async () => {
+    const config = testConfig({ inboundEnabled: false, routerEnabled: false });
+    const { result } = await run(fixture('hello.json'), { store, config });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('kill_switch');
+    expect(store.listOutbound()).toHaveLength(0);
+  });
+
+  it('Q) webhook inválido → rechazo seguro', () => {
+    const config = testConfig();
+    const rawBody = JSON.stringify(fixture('hello.json'));
+    const bad = verifyWaEntryWebhook({
+      config,
+      headers: { 'x-platform-wa-secret': 'wrong' },
+      rawBody,
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.status).toBe(401);
+
+    const goodShared = verifyWaEntryWebhook({
+      config,
+      headers: { 'x-platform-wa-secret': 'test-secret' },
+      rawBody,
+    });
+    expect(goodShared.ok).toBe(true);
+
+    const sig = createHmac('sha256', 'test-secret').update(rawBody).digest('hex');
+    const goodHmac = verifyWaEntryWebhook({
+      config,
+      headers: { 'x-platform-wa-signature': sig },
+      rawBody,
+    });
+    expect(goodHmac.ok).toBe(true);
+  });
+
+  it('R) fromMe / outbound echo → sin loop', async () => {
+    await run(fixture('hello.json'), { store });
+    // Simulate our own outbound echo coming back as fromMe
+    const { result } = await run(
+      makePayload({
+        id: 'wamid.ECHO_OUT',
+        text: welcomeMessage(),
+        fromMe: true,
+      }),
+      { store },
+    );
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('from_me');
+    // Only the original welcome outbound exists
+    expect(store.listOutbound().filter((o) => o.result === 'simulated_ok')).toHaveLength(1);
+  });
+
+  it('real wasender sender refuses in this phase', async () => {
+    const sender = createRefusingWasenderSender();
+    await expect(
+      sender.send({
+        to: '584120000001',
+        text: 'nope',
+        eventId: 'x',
+        dedupeKey: 'x',
+      }),
+    ).rejects.toThrow(/wa_entry_refused/);
+  });
+
+  it('normalize rejects malformed payloads', () => {
+    expect(normalizeWaInboundPayload(null)).toBeNull();
+    expect(normalizeWaInboundPayload({ foo: 1 })).toBeNull();
+    expect(normalizeWaInboundPayload(fixture('hello.json'))?.text).toBe('Hola');
+  });
+
+  it('isolation: sim never imports production wasender queue symbols', async () => {
+    // Static isolation check — process path uses only local sender
+    const src = readFileSync(
+      path.join(__dirname, '../app/api/wa-entry/_lib/process.ts'),
+      'utf8',
+    );
+    expect(src).not.toMatch(/sendWhatsappText|wasender_message_queue|SUPABASE_SERVICE_ROLE/);
+    const senderSrc = readFileSync(
+      path.join(__dirname, '../app/api/wa-entry/_lib/sender.ts'),
+      'utf8',
+    );
+    expect(senderSrc).not.toMatch(/wasenderapi\.com|service_role/);
+  });
+});

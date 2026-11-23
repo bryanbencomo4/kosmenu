@@ -1,0 +1,13 @@
+{
+  "event": "messages.upsert",
+  "sessionId": "ELMENUXFA1",
+  "data": {
+    "message": {
+      "id": "wamid.FROMME001",
+      "from": "584120000001@s.whatsapp.net",
+      "fromMe": true,
+      "timestamp": 1700000010,
+      "text": "Respuesta humana de prueba"
+    }
+  }
+}

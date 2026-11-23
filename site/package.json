@@ -4,10 +4,12 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "next dev",
+    "dev:wa-entry": "next dev -p 3030",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:wa-entry": "vitest run tests/wa-entry-router.test.ts",
     "test:supervision-e2e": "node scripts/chat-supervision-ci-e2e.mjs",
     "typecheck": "tsc --noEmit"
   },

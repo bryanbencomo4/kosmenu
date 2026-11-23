@@ -1,0 +1,14 @@
+{
+  "event": "messages.upsert",
+  "sessionId": "ELMENUXFA1",
+  "data": {
+    "message": {
+      "id": "wamid.STATUS001",
+      "from": "status@broadcast",
+      "fromMe": false,
+      "isStatus": true,
+      "timestamp": 1700000012,
+      "text": ""
+    }
+  }
+}

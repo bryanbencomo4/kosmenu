@@ -1,0 +1,16 @@
+# Copy values into site/.env.wa-entry.local (gitignored) for local wa-entry testing.
+# Never commit real secrets. Never set these in Vercel Production without review.
+
+PLATFORM_WA_INBOUND=1
+PLATFORM_WA_ROUTER=1
+PLATFORM_WA_ADAPTER=sim
+PLATFORM_WA_WEBHOOK_SECRET=local-dev-secret-change-me
+PLATFORM_WA_LOCAL_DIR=.wa-entry-local
+PLATFORM_WA_ALLOW_REAL_WASENDER=0
+PLATFORM_WA_ALLOW_INSECURE_LOCAL=1
+
+# Optional link overrides (defaults are production public URLs — read-only destinations)
+# PLATFORM_WA_CONSUMER_URL=https://elmenuxfa.com/asistente?ref=wa
+# PLATFORM_WA_BUSINESS_LANDING_URL=https://business.elmenuxfa.com/
+# PLATFORM_WA_BUSINESS_REGISTER_URL=https://app.elmenuxfa.com/?tab=register
+# PLATFORM_WA_BUSINESS_MANAGE_URL=https://app.elmenuxfa.com/
