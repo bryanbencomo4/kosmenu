@@ -997,14 +997,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     if (conversationId == null || conversationId.isEmpty || !mounted) {
       return;
     }
-    final comercioId = SupabaseConfig.currentComercioId.trim();
+    final deepComercio =
+        (MerchantDeepLink.peekConversationComercioId() ?? '').trim();
+    final comercioId =
+        deepComercio.isNotEmpty
+            ? deepComercio
+            : SupabaseConfig.currentComercioId.trim();
     if (comercioId.isEmpty) return;
     MerchantDeepLink.consumeConversation();
-    await _openChatConversations(initialConversationId: conversationId);
+    await _openChatConversations(
+      initialConversationId: conversationId,
+      comercioIdOverride: deepComercio.isNotEmpty ? deepComercio : null,
+    );
   }
 
-  Future<void> _openChatConversations({String? initialConversationId}) async {
-    final comercioId = SupabaseConfig.currentComercioId.trim();
+  Future<void> _openChatConversations({
+    String? initialConversationId,
+    String? comercioIdOverride,
+  }) async {
+    final comercioId =
+        (comercioIdOverride ?? SupabaseConfig.currentComercioId).trim();
     if (comercioId.isEmpty || !mounted) return;
     if (!MerchantSession.isAdmin &&
         MerchantSession.role != MerchantStaffRole.caja &&

@@ -31,7 +31,8 @@ jobs:
 
   supervision-e2e:
     name: supervision dual e2e
-    runs-on: ubuntu-latest
+    # Pin 24.04 — ubuntu-latest (26+) is not supported by Playwright 1.51 browsers.
+    runs-on: ubuntu-24.04
     needs: site
     timeout-minutes: 15
     steps:
