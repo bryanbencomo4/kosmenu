@@ -13,6 +13,7 @@ type DirectoryResult = {
   categoria: string | null;
   direccion: string | null;
   negocioVirtual: boolean;
+  zonaOperacion?: string | null;
   menuUrl: string;
 };
 
@@ -305,7 +306,12 @@ export function MenuDirectorySearch() {
                           {result.categoria}
                         </span>
                       ) : null}
-                      {result.direccion && !result.negocioVirtual ? (
+                      {result.negocioVirtual && result.zonaOperacion ? (
+                        <span className="inline-flex min-w-0 items-center gap-1 truncate">
+                          <MapPin className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">Opera en {result.zonaOperacion}</span>
+                        </span>
+                      ) : result.direccion && !result.negocioVirtual ? (
                         <span className="inline-flex min-w-0 items-center gap-1 truncate">
                           <MapPin className="h-3.5 w-3.5 shrink-0" />
                           <span className="truncate">{result.direccion}</span>

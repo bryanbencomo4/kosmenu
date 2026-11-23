@@ -7,9 +7,10 @@ import {
   isPedidoEstadoEnumError,
 } from '../../_lib/order-customer-actions';
 import { extractComercioId } from '../../_lib/order-utils';
-import { hashPublicTrackingToken } from '../../_lib/order-tracking-token';
+import { hashPublicTrackingToken, verifyPublicTrackingToken } from '../../_lib/order-tracking-token';
 import {
   CONFIRM_RECEIVED_ALLOWED_STATUSES,
+  extractTokenHashFromPedido,
   normalizePublicStatus,
   toPublicOrderTrackingResponse,
 } from '../../_lib/public-order';
@@ -65,6 +66,10 @@ const GENERIC_DENIED = { error: 'Pedido no disponible.' } as const;
 
 function extractShortCode(request: Request): string {
   return (new URL(request.url).searchParams.get('s') ?? '').trim();
+}
+
+function extractTrackingToken(request: Request): string {
+  return (new URL(request.url).searchParams.get('t') ?? '').trim();
 }
 
 function extractCustomerEmail(request: Request) {
@@ -135,17 +140,28 @@ async function loadComercio(
 function authorizeCustomer(
   request: Request,
   order: PedidoRow | null,
-  shortCode: string,
+  options: { shortCode: string; shortLinkValid: boolean },
 ) {
   if (!order) return false;
+
+  // Email / WhatsApp short links are capability URLs — possession is enough.
+  if (options.shortCode && options.shortLinkValid) {
+    return true;
+  }
+
+  const trackingToken = extractTrackingToken(request);
+  if (trackingToken && verifyPublicTrackingToken(trackingToken, extractTokenHashFromPedido(order))) {
+    return true;
+  }
+
   const detalles = order.detalles ?? {};
   const accessHash = (detalles.customer_access_token_hash ?? '').toString().trim();
-  const cookieToken = shortCode
+  const cookieToken = options.shortCode
     ? request.headers.get('cookie')?.match(
-        new RegExp(`(?:^|;\\s*)elmenuxfa_order_${shortCode}=([^;]+)`),
+        new RegExp(`(?:^|;\\s*)elmenuxfa_order_${options.shortCode}=([^;]+)`),
       )?.[1] ?? ''
     : '';
-  if (accessHash && cookieToken && hashPublicTrackingToken(cookieToken) === accessHash) {
+  if (accessHash && cookieToken && hashPublicTrackingToken(decodeURIComponent(cookieToken)) === accessHash) {
     return true;
   }
 
@@ -182,11 +198,14 @@ export async function GET(request: Request, { params }: Params) {
     if (shortCode && (!shortLink || shortLink.order_id !== orderId)) {
       return denyUnauthorized();
     }
-    if (!authorizeCustomer(request, order, shortCode)) {
-      return NextResponse.json(
-        { error: 'customer_verification_required' },
-        { status: 401, headers: { 'Cache-Control': 'no-store' } },
-      );
+    if (
+      !order ||
+      !authorizeCustomer(request, order, {
+        shortCode,
+        shortLinkValid: Boolean(shortLink),
+      })
+    ) {
+      return denyUnauthorized();
     }
 
     const comercio = await loadComercio(supabase, order.comercio_id);
@@ -230,15 +249,23 @@ export async function PATCH(request: Request, { params }: Params) {
     if (shortCode && (!shortLink || shortLink.order_id !== orderId)) {
       return denyUnauthorized();
     }
-    if (!authorizeCustomer(request, order, shortCode)) {
-      return NextResponse.json(
-        { error: 'customer_verification_required' },
-        { status: 401, headers: { 'Cache-Control': 'no-store' } },
-      );
+    if (
+      !order ||
+      !authorizeCustomer(request, order, {
+        shortCode,
+        shortLinkValid: Boolean(shortLink),
+      })
+    ) {
+      return denyUnauthorized();
     }
 
     const action = parsed.data;
-    if (isWhatsappManualOrder(order.detalles) && action.action !== 'set_whatsapp_notifications') {
+    const whatsappManual = isWhatsappManualOrder(order.detalles);
+    if (
+      whatsappManual &&
+      action.action !== 'set_whatsapp_notifications' &&
+      action.action !== 'submit_rating'
+    ) {
       return NextResponse.json(
         { error: 'Este pedido se gestiona por WhatsApp y solo permite consulta de su estado.' },
         { status: 409 },
@@ -249,9 +276,10 @@ export async function PATCH(request: Request, { params }: Params) {
       const deliveryDelegate = order.detalles?.delivery_delegate;
       const deliveryStatus =
         deliveryDelegate && typeof deliveryDelegate === 'object'
-          ? deliveryDelegate.status
+          ? (deliveryDelegate as { status?: unknown }).status
           : null;
-      if (!isRateableOrderStatus(order.estado, deliveryStatus)) {
+      // WhatsApp-managed orders can be rated immediately; platform orders when terminal.
+      if (!whatsappManual && !isRateableOrderStatus(order.estado, deliveryStatus)) {
         return NextResponse.json(
           { error: 'Solo puedes calificar cuando el pedido termina o se cancela.' },
           { status: 409 },
@@ -270,9 +298,6 @@ export async function PATCH(request: Request, { params }: Params) {
         p_customer_key: customerKey,
       });
       if (error) {
-        if ((error as { code?: string }).code === '23505') {
-          return NextResponse.json({ error: 'Ya calificaste este pedido.' }, { status: 409 });
-        }
         if (error.message?.includes('ORDER_NOT_RATEABLE')) {
           return NextResponse.json({ error: 'El pedido ya no está disponible para calificar.' }, { status: 409 });
         }

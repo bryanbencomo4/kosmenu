@@ -25,23 +25,115 @@ export function currencyAllowsDecimals(currency: string) {
   return currencyCode(currency) !== 'COP';
 }
 
-/** Digits only. COP treats "." as a thousands separator; other currencies keep one decimal. */
+export function currencyPrefix(currency: string) {
+  const code = currencyCode(currency);
+  if (code === 'VES') return 'Bs';
+  if (code === 'COP') return '$';
+  if (code === 'USD') return 'US$';
+  if (code === 'EUR') return '€';
+  return code;
+}
+
+/** Next makeable cash amount at or above `amount` (bill step). */
+export function snapCashAmountUp(amount: number, currency: string) {
+  const step = cashBills(currency)[0];
+  if (!Number.isFinite(amount) || amount <= 0 || !step) return amount;
+  const snapped = Math.ceil((amount - 0.0001) / step) * step;
+  return Number(snapped.toFixed(2));
+}
+
+/** Canonical string for a makeable cash amount (for controlled input state). */
+export function toCashAmountCanonical(amount: number, currency: string) {
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const decimals = currencyAllowsDecimals(currency) ? 2 : 0;
+  return parseCashAmountInput(amount.toFixed(decimals), currency);
+}
+
+/**
+ * Normalize typed/pasted cash text to a canonical numeric string ("15000", "14.80").
+ * Supports LATAM (1.234,56) and US (1,234.56) separators.
+ */
 export function parseCashAmountInput(raw: string, currency: string) {
   const allowDecimals = currencyAllowsDecimals(currency);
-  const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
+  const cleaned = raw.replace(/[^\d.,]/g, '');
   if (!cleaned) return '';
-  if (!allowDecimals) {
-    return cleaned.replace(/\./g, '').replace(/^0+(?=\d)/, '');
+
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+
+  let normalized: string;
+  if (lastComma > lastDot) {
+    // 32.370,00 or 32370,50
+    normalized = cleaned.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    const fraction = cleaned.slice(lastDot + 1);
+    if (!allowDecimals) {
+      normalized = cleaned.replace(/[.,]/g, '');
+    } else if (fraction.length === 3 && lastComma < 0 && cleaned.indexOf('.') === lastDot) {
+      // 32.370 → thousands (LATAM) when no decimal comma
+      normalized = cleaned.replace(/\./g, '');
+    } else {
+      // 14.80 or 1,234.56
+      normalized = cleaned.replace(/,/g, '');
+    }
+  } else if (lastComma >= 0) {
+    normalized = cleaned.replace(',', '.');
+  } else {
+    normalized = cleaned;
   }
-  const [integerPart = '', ...fractionParts] = cleaned.split('.');
-  const safeInteger = integerPart.replace(/^0+(?=\d)/, '') || (cleaned.includes('.') ? '0' : '');
+
+  if (!allowDecimals) {
+    return normalized.replace(/\./g, '').replace(/^0+(?=\d)/, '');
+  }
+
+  const trailingDot = normalized.endsWith('.');
+  const [integerPart = '', ...fractionParts] = normalized.split('.');
+  const safeInteger = integerPart.replace(/^0+(?=\d)/, '') || (normalized.includes('.') ? '0' : '');
   const fraction = fractionParts.join('').slice(0, 2);
-  return fraction.length > 0 || cleaned.endsWith('.') ? `${safeInteger}.${fraction}` : safeInteger;
+  if (fraction.length > 0) return `${safeInteger}.${fraction}`;
+  if (trailingDot) return `${safeInteger}.`;
+  return safeInteger;
 }
 
 export function parseCashAmount(raw: string, currency: string) {
-  const parsed = Number(parseCashAmountInput(raw, currency));
+  const canonical = parseCashAmountInput(raw, currency);
+  if (!canonical) return null;
+  const parsed = Number(canonical.endsWith('.') ? canonical.slice(0, -1) : canonical);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Locale number for the cash input (no currency symbol — prefix is separate). */
+export function formatCashAmountInputValue(canonical: string, currency: string) {
+  if (!canonical) return '';
+  const allowDecimals = currencyAllowsDecimals(currency);
+  const code = currencyCode(currency);
+  const locale = code === 'VES' ? 'es-VE' : 'es-CO';
+  const trailingDot = allowDecimals && canonical.endsWith('.');
+  const [intPart, frac = ''] = canonical.split('.');
+  const intNum = Number(intPart || '0');
+  if (!Number.isFinite(intNum)) return canonical;
+
+  const intFormatted = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(intNum);
+  if (!allowDecimals) return intFormatted;
+
+  const decimalSep = locale === 'es-VE' || locale === 'es-CO' ? ',' : '.';
+  if (trailingDot) return `${intFormatted}${decimalSep}`;
+  if (canonical.includes('.')) return `${intFormatted}${decimalSep}${frac.slice(0, 2)}`;
+  return intFormatted;
+}
+
+/** Placeholder / chip helper: locale number without currency symbol. */
+export function formatCashAmountDisplay(value: number, currency: string) {
+  if (!Number.isFinite(value)) return '';
+  const code = currencyCode(currency);
+  const locale = code === 'VES' ? 'es-VE' : 'es-CO';
+  if (!currencyAllowsDecimals(currency)) {
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value);
+  }
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 /** True when the amount is a sum of that currency's bills (the smallest bill is the step). */

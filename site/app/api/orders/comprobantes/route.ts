@@ -1,16 +1,44 @@
 import { NextResponse } from 'next/server';
 
+import {
+  appCorsPreflight,
+  withAppCors,
+} from '../../_lib/app-cors';
 import { verifyComprobantePermit } from '../../_lib/comprobante-permit';
-import { COMPROBANTE_MAX_BYTES } from '../../_lib/comprobante-upload';
+import { COMPROBANTE_MAX_BYTES, resolveComprobanteMime } from '../../_lib/comprobante-upload';
 import { uploadComprobanteObject } from '../../_lib/comprobante-storage';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
+
+const CORS = {
+  methods: 'POST, OPTIONS',
+  headers: 'authorization, content-type, accept, x-comprobante-permit',
+} as const;
 
 /**
  * Server-side comprobante upload (service role).
  * Requires a short-lived HMAC permit issued for an online comercio.
  * Returns an opaque storage ref — never a permanent public URL.
  */
+export async function OPTIONS(request: Request) {
+  return appCorsPreflight(request, CORS);
+}
+
 export async function POST(request: Request) {
+  const { isChatbotOrdersBlocked } = await import('../../_lib/staging-guards');
+  if (isChatbotOrdersBlocked()) {
+    return withAppCors(
+      request,
+      NextResponse.json(
+        { ok: false, error: 'orders_blocked_staging' },
+        { status: 403 },
+      ),
+      CORS,
+    );
+  }
+  return withAppCors(request, await postUpload(request), CORS);
+}
+
+async function postUpload(request: Request): Promise<NextResponse> {
   try {
     const ip = getClientIp(request);
     const ipLimit = consumeRateLimit(`comprobantes:upload:${ip}`, 8, 60_000);
@@ -18,6 +46,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Too many requests.' },
         { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSec) } },
+      );
+    }
+
+    // Multipart only. JSON/empty bodies can hang inside request.formData() in
+    // some runtimes — reject early so probes and bad clients fail fast.
+    const contentType = (request.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json(
+        { error: 'Expected multipart/form-data.' },
+        { status: 415 },
       );
     }
 
@@ -48,10 +86,12 @@ export async function POST(request: Request) {
     }
 
     const bytes = await file.arrayBuffer();
+    // Camera picks often omit File.type; sniff magic bytes before validating.
+    const mimeType = resolveComprobanteMime({ declaredMime: file.type, bytes });
     const uploaded = await uploadComprobanteObject({
       comercioId,
       fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType,
       bytes,
     });
 

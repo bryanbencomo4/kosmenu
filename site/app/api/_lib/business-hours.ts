@@ -123,6 +123,46 @@ export function isScheduleConfigured(schedule: BusinessSchedule) {
   return DAY_KEYS.some((key) => schedule.days[key]?.open && schedule.days[key].ranges.length > 0);
 }
 
+export type BusinessScheduleDayRow = {
+  key: (typeof DAY_KEYS)[number];
+  label: string;
+  isToday: boolean;
+  closed: boolean;
+  hoursLabel: string;
+};
+
+/** Weekly rows for public hours sheets (Caracas weekday + 12h labels). */
+export function listBusinessScheduleDayRows(
+  raw: unknown,
+  now = new Date(),
+): BusinessScheduleDayRow[] {
+  const schedule = parseBusinessSchedule(raw);
+  const todayKey = caracasParts(now).key;
+  return DAY_KEYS.map((key) => {
+    const day = schedule.days[key];
+    const rawLabel = DAY_LABELS[key];
+    const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+    if (!day?.open || day.ranges.length === 0) {
+      return { key, label, isToday: key === todayKey, closed: true, hoursLabel: 'Cerrado' };
+    }
+    const ranges = [...day.ranges].sort(
+      (a, b) => parseMinutes(a.start) - parseMinutes(b.start),
+    );
+    const allDay = ranges.some(
+      (range) => parseMinutes(range.start) === 0 && parseMinutes(range.end) >= 23 * 60 + 59,
+    );
+    return {
+      key,
+      label,
+      isToday: key === todayKey,
+      closed: false,
+      hoursLabel: allDay
+        ? '24 horas'
+        : ranges.map((range) => `${formatHour(range.start)} – ${formatHour(range.end)}`).join(', '),
+    };
+  });
+}
+
 function nextOpenLabel(schedule: BusinessSchedule, now = new Date()): string | null {
   const current = caracasParts(now);
   const startIndex = DAY_KEYS.indexOf(current.key);
@@ -228,9 +268,26 @@ export function detectMenuDevice(userAgent: string) {
 }
 
 export function detectMenuOrigin(search: string, referrer: string) {
+  // Keep in sync with shouldForceCatalogModeFromQuery:
+  // ?src=qr, ?source=qr, ?qr=1, ?catalogo=1, ?modo=catalogo|qr
   const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
-  const src = (params.get('src') || params.get('utm_source') || '').trim().toLowerCase();
+  const src = (
+    params.get('src') ||
+    params.get('source') ||
+    params.get('utm_source') ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+  const qrFlag = (params.get('qr') ?? '').trim().toLowerCase();
+  const catalogo = (params.get('catalogo') ?? '').trim().toLowerCase();
+  const modo = (params.get('modo') ?? '').trim().toLowerCase();
   if (src === 'qr' || src === 'qr_code') return 'qr';
+  if (qrFlag === '1' || qrFlag === 'true' || qrFlag === 'yes') return 'qr';
+  if (catalogo === '1' || catalogo === 'true' || catalogo === 'yes' || catalogo === 'catalogo') {
+    return 'qr';
+  }
+  if (modo === 'catalogo' || modo === 'catalog' || modo === 'qr') return 'qr';
   if (referrer.trim()) {
     try {
       return new URL(referrer).host || 'referral';

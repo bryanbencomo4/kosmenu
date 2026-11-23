@@ -14,6 +14,9 @@ export type OrderItemInput = {
   nombre: string;
   cantidad: number;
   precio: number;
+  /** Weight-sold lines: precio is per kg, cantidad is kg. */
+  unidad?: 'kg';
+  venta_por_peso?: boolean;
 };
 
 export type StoredOrderItem = OrderItemInput & {
@@ -72,13 +75,60 @@ function hasAnySelection(selection: CartLineSelection) {
   );
 }
 
+function toBaseUnitPrice(product: SnapshotProductRow): number | null {
+  const base = Number(product.precio);
+  if (!Number.isFinite(base) || base <= 0) return null;
+  return roundMoney(base);
+}
+
+function productUnavailable(
+  productName: string,
+): Extract<OrderItemSnapshotResult, { ok: false }> {
+  return {
+    ok: false,
+    status: 409,
+    code: 'PRODUCT_UNAVAILABLE',
+    message: `"${productName}" ya no está disponible. Actualiza el menú e inténtalo de nuevo.`,
+  };
+}
+
+function assertProductUsable(
+  product: SnapshotProductRow,
+  item: OrderItemInput,
+  comercioId: string | undefined,
+): Extract<OrderItemSnapshotResult, { ok: false }> | null {
+  const productName = (product.nombre ?? '').toString().trim() || item.nombre;
+  if (product.disponible === false) {
+    return productUnavailable(productName);
+  }
+  if (comercioId && product.comercio_id && product.comercio_id !== comercioId) {
+    return productUnavailable(productName);
+  }
+  if (comercioId && !product.comercio_id) {
+    // Scoped loaders always return comercio_id; missing tenant id is unsafe to trust.
+    return productUnavailable(productName);
+  }
+  return null;
+}
+
+function priceChanged(productName: string): Extract<OrderItemSnapshotResult, { ok: false }> {
+  return {
+    ok: false,
+    status: 409,
+    code: 'PRICE_CHANGED',
+    message: `El precio de "${productName}" cambió. Actualiza el menú e inténtalo de nuevo.`,
+  };
+}
+
 /**
  * Freezes each line's chosen options (names + prices read from the DB at
  * order time) so later menu edits never alter historical orders.
  *
- * Lines whose client didn't send `opciones` (e.g. older app builds) are
- * stored exactly as before. Lines for products with option groups are
- * re-priced server-side and rejected when the rules or the price don't match.
+ * Client-supplied `precio` is never trusted when the catalog row exists.
+ * Lines without `opciones` (Flutter / older clients) are re-priced from the
+ * product's base `precio` column so the request contract stays the same.
+ * Lines that send option selections are re-priced with the shared cart engine
+ * and rejected when the rules or the quoted unit price don't match.
  */
 export async function buildOrderItemSnapshots(params: {
   items: OrderItemInput[];
@@ -116,30 +166,23 @@ export async function buildOrderItemSnapshots(params: {
     const selection = selections[index];
     const product = productById.get(item.product_id);
     if (!product) {
-      if (Object.keys(selection?.grupos ?? {}).length > 0 || selection?.combinacion || selection?.exclusionesIds?.length) {
-        return {
-          ok: false,
-          status: 409,
-          code: 'PRODUCT_UNAVAILABLE',
-          message: `"${item.nombre}" ya no está disponible. Actualiza el menú e inténtalo de nuevo.`,
-        };
-      }
-      stored.push({ ...item });
-      continue;
+      // Missing / foreign products must not keep a client-forged price.
+      return productUnavailable(item.nombre || 'Producto');
     }
+
+    const usabilityError = assertProductUsable(product, item, params.comercioId);
+    if (usabilityError) return usabilityError;
 
     const category = categoryById.get((product.categoria_id ?? '').toString().trim()) ?? null;
     const catalogSnapshot = {
       imagen_url: product.imagen_url ?? null,
       categoria_nombre: category?.nombre ?? null,
     };
+    const productName = (product.nombre ?? '').toString().trim() || item.nombre;
     const customization = parseProductMenuOptions(product.opciones_menu)?.personalizacion;
     if (customization || selection?.combinacion || selection?.exclusionesIds?.length) {
       const picked = selection ?? {};
       const errors = validateCustomizationSelection(product, picked);
-      if (product.disponible === false || (params.comercioId && product.comercio_id !== params.comercioId)) {
-        return { ok: false, status: 409, code: 'PRODUCT_UNAVAILABLE', message: 'Producto no disponible.' };
-      }
       let partner: SnapshotProductRow | undefined;
       let partnerCategory: SnapshotCategoryRow | null = null;
       if (picked.combinacion) {
@@ -188,13 +231,25 @@ export async function buildOrderItemSnapshots(params: {
       });
       continue;
     }
+
+    // Flutter / older clients omit `opciones`. Re-price from the catalog base
+    // column so forged unit prices cannot stick, without requiring option groups
+    // that those clients never send.
     if (selection == null) {
-      stored.push({ ...item, ...catalogSnapshot });
+      const serverPrice = toBaseUnitPrice(product);
+      if (serverPrice == null) {
+        return productUnavailable(productName);
+      }
+      stored.push({
+        ...item,
+        ...catalogSnapshot,
+        nombre: productName,
+        precio: serverPrice,
+      });
       continue;
     }
 
     const selectsGroups = Object.keys(selection.grupos ?? {}).length > 0;
-    const productName = (product.nombre ?? '').toString().trim() || item.nombre;
     const hasGroups = (parseProductMenuOptions(product.opciones_menu)?.grupos?.length ?? 0) > 0;
 
     if (hasGroups || selectsGroups) {
@@ -208,35 +263,65 @@ export async function buildOrderItemSnapshots(params: {
         };
       }
       const serverUnitPrice = resolveCartLineUnitPrice(product, category, selection);
+      if (!Number.isFinite(serverUnitPrice) || serverUnitPrice <= 0) {
+        return productUnavailable(productName);
+      }
       if (Math.abs(serverUnitPrice - item.precio) > PRICE_TOLERANCE) {
-        return {
-          ok: false,
-          status: 409,
-          code: 'PRICE_CHANGED',
-          message: `El precio de "${productName}" cambió. Actualiza el menú e inténtalo de nuevo.`,
-        };
+        return priceChanged(productName);
       }
     }
 
     if (!hasAnySelection(selection)) {
-      stored.push({ ...item, ...catalogSnapshot });
+      const serverPrice = toBaseUnitPrice(product);
+      if (serverPrice == null) {
+        return productUnavailable(productName);
+      }
+      if (Math.abs(serverPrice - item.precio) > PRICE_TOLERANCE) {
+        return priceChanged(productName);
+      }
+      stored.push({
+        ...item,
+        ...catalogSnapshot,
+        nombre: productName,
+        precio: serverPrice,
+      });
       continue;
     }
 
     const snapshot = buildOrderLineSnapshot(product, category, selection);
     if (snapshot.selecciones.length === 0) {
-      stored.push({ ...item, ...catalogSnapshot, seleccion: selection });
+      const serverPrice = resolveCartLineUnitPrice(product, category, selection);
+      if (!Number.isFinite(serverPrice) || serverPrice <= 0) {
+        return productUnavailable(productName);
+      }
+      if (Math.abs(serverPrice - item.precio) > PRICE_TOLERANCE) {
+        return priceChanged(productName);
+      }
+      stored.push({
+        ...item,
+        ...catalogSnapshot,
+        nombre: productName,
+        precio: serverPrice,
+        seleccion: selection,
+      });
       continue;
     }
 
-    // Legacy size/adjustment lines keep the price the customer saw; the
-    // base is derived so precio_base + sum(selecciones) === precio_final.
-    const precioFinal = hasGroups || selectsGroups ? snapshot.precioFinal : roundMoney(item.precio);
+    // Size / adjustment / group lines always freeze the server unit price.
+    const precioFinal = snapshot.precioFinal;
+    if (!Number.isFinite(precioFinal) || precioFinal <= 0) {
+      return productUnavailable(productName);
+    }
+    if (Math.abs(precioFinal - item.precio) > PRICE_TOLERANCE) {
+      return priceChanged(productName);
+    }
     const seleccionesTotal = snapshot.selecciones.reduce((sum, option) => sum + option.precio, 0);
     stored.push({
       ...item,
       ...catalogSnapshot,
+      nombre: productName,
       producto: snapshot.producto,
+      precio: precioFinal,
       precio_base: roundMoney(precioFinal - seleccionesTotal),
       selecciones: snapshot.selecciones,
       precio_final: precioFinal,

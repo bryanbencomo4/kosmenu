@@ -1,0 +1,25 @@
+-- =============================================================================
+-- PROPOSAL ONLY — emergency chatbot kill for ONE commerce.
+-- Do NOT run against production without explicit owner authorization.
+-- Does not require a Vercel redeploy; app + RPC re-read chatbot_enabled each request.
+-- =============================================================================
+--
+-- Replace :commerce_id with the authorized test restaurant UUID.
+--
+-- Verify first (read-only):
+--   select id, slug, nombre, chatbot_enabled
+--   from public.comercios
+--   where id = ':commerce_id';
+--
+-- Disable (WRITE — requires authorization):
+--   update public.comercios
+--   set chatbot_enabled = false
+--   where id = ':commerce_id'
+--   returning id, slug, chatbot_enabled;
+--
+-- Re-enable later (WRITE — requires authorization):
+--   update public.comercios
+--   set chatbot_enabled = true
+--   where id = ':commerce_id'
+--     and slug = 'meal4fit'  -- optional extra guard
+--   returning id, slug, chatbot_enabled;

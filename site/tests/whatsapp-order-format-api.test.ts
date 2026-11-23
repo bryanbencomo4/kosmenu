@@ -72,6 +72,22 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
 
 import { POST } from '../app/api/orders/route';
 
+function seedCatalogProduct(overrides: Record<string, unknown> = {}) {
+  state.products = [
+    {
+      id: 'legacy-product',
+      comercio_id: state.commerceId,
+      disponible: true,
+      nombre: 'Pizza',
+      precio: 18000,
+      categoria_id: null,
+      imagen_url: null,
+      opciones_menu: null,
+      ...overrides,
+    },
+  ];
+}
+
 async function submit(extra: Record<string, unknown> = {}) {
   const response = await POST(new Request('https://preview.example/api/orders', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -99,7 +115,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     state.commerceId = '11111111-1111-4111-8111-111111111111';
     state.inserts = [];
     state.commerceReads = [];
-    state.products = [];
+    seedCatalogProduct();
   });
 
   it('default response remains summary even when the request tries to opt in', async () => {
@@ -119,9 +135,11 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     const trackingUrl = detailed.trackingUrl;
     state.commerceId = '22222222-2222-4222-8222-222222222222';
     state.format = undefined;
+    seedCatalogProduct();
     expect(await submit()).not.toHaveProperty('merchantWhatsappText');
     state.commerceId = '11111111-1111-4111-8111-111111111111';
     state.format = 'summary';
+    seedCatalogProduct();
     const rollback = await submit();
     expect(rollback).not.toHaveProperty('merchantWhatsappText');
     expect(rollback.trackingUrl).toBe(trackingUrl);
@@ -137,7 +155,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     state.managementMode = 'whatsapp_manual';
     const manual = await submit();
     expect(manual.managementMode).toBe('whatsapp_manual');
-    expect(manual.merchantWhatsappText).toContain('Gestión: Por WhatsApp');
+    expect(manual.merchantWhatsappText).toContain('Canal: WhatsApp');
     expect(manual.merchantWhatsappText).not.toContain('Estado: Pendiente');
     const oldManual = state.inserts[0].detalles as Record<string, unknown>;
     state.managementMode = 'platform';
@@ -150,6 +168,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     expect(oldPlatform.management_mode).toBe('platform');
     state.commerceId = '22222222-2222-4222-8222-222222222222';
     state.managementMode = undefined;
+    seedCatalogProduct();
     expect((await submit()).managementMode).toBe('platform');
     expect(state.inserts).toHaveLength(4);
   });
@@ -161,7 +180,8 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     });
     expect(result.managementMode).toBe('whatsapp_manual');
     expect(result.estado).toBe('pendiente');
-    expect(result.merchantWhatsappText).toContain('DELIVERY');
+    expect(result.merchantWhatsappText).toContain('DATOS DE ENTREGA');
+    expect(result.merchantWhatsappText).toContain('Costo de delivery: $ 2.000');
     expect(result.merchantWhatsappText).toContain('Calle Preview 1');
     const details = state.inserts[0].detalles as Record<string, unknown>;
     expect(details).not.toHaveProperty('delivery_delegate');
@@ -182,7 +202,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
       paymentMethod: { nombre: 'Pago móvil' },
       paymentProofUrl: `storage://comprobantes/${state.commerceId}/proof.png`,
     });
-    expect(data.merchantWhatsappText).toMatch(/Comprobante: https:\/\/[^\s]+\/p\/AbCdEf1234/);
+    expect(data.merchantWhatsappText).toMatch(/Comprobante:\nhttps:\/\/[^\s]+\/p\/AbCdEf1234/);
     expect(data.merchantWhatsappText).not.toContain('storage://');
     expect(data.merchantWhatsappText).not.toContain('proof.png');
     expect((state.inserts[0].detalles as Record<string, unknown>).comprobante_url)

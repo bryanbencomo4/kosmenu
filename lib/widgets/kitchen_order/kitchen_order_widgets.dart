@@ -1527,11 +1527,17 @@ class PaymentProofContent extends StatelessWidget {
     required this.image,
     this.reference,
     this.pedido,
+    this.showZoomHint = true,
+    this.onShare,
+    this.onDownload,
   });
 
   final Widget image;
   final String? reference;
   final PedidoModel? pedido;
+  final bool showZoomHint;
+  final VoidCallback? onShare;
+  final VoidCallback? onDownload;
 
   static double? _paymentAmount(Object? value) {
     if (value == null) return null;
@@ -1733,16 +1739,266 @@ class PaymentProofContent extends StatelessWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: InteractiveViewer(
-                minScale: 1,
-                maxScale: 5,
-                child: SizedBox.expand(child: image),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final hasActions = onShare != null || onDownload != null;
+                  final frameWidth = constraints.maxWidth > 220
+                      ? 220.0
+                      : constraints.maxWidth;
+                  return Column(
+                    children: [
+                      if (showZoomHint) ...[
+                        Text(
+                          'Pellizca para ampliar',
+                          style: GoogleFonts.manrope(
+                            color: KitchenMockupColors.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Flexible(
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: frameWidth,
+                              maxHeight: 280,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: ColoredBox(
+                                color: Colors.white,
+                                child: SizedBox.expand(
+                                  child: InteractiveViewer(
+                                    minScale: 1,
+                                    maxScale: 4,
+                                    child: SizedBox.expand(child: image),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (hasActions) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (onShare != null)
+                              OutlinedButton.icon(
+                                onPressed: onShare,
+                                icon: const Icon(Icons.share_outlined, size: 18),
+                                label: const Text('Compartir'),
+                              ),
+                            if (onDownload != null)
+                              FilledButton.icon(
+                                onPressed: onDownload,
+                                icon: const Icon(
+                                  Icons.download_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Descargar'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Loads the small preview first. The original file is requested only if that fails.
+class ComprobanteNetworkImage extends StatefulWidget {
+  const ComprobanteNetworkImage({
+    super.key,
+    required this.fallbackUrl,
+    this.previewUrl,
+    this.orderIdHint,
+  });
+
+  final String? previewUrl;
+  final String fallbackUrl;
+  final String? orderIdHint;
+
+  @override
+  State<ComprobanteNetworkImage> createState() =>
+      _ComprobanteNetworkImageState();
+}
+
+class _ComprobanteNetworkImageState extends State<ComprobanteNetworkImage> {
+  static const _loadTimeout = Duration(seconds: 14);
+
+  int _attempt = 0;
+  bool _useOriginal = false;
+  bool _timedOut = false;
+  bool _loaded = false;
+  Timer? _timeout;
+
+  @override
+  void initState() {
+    super.initState();
+    final preview = widget.previewUrl?.trim() ?? '';
+    _useOriginal = preview.isEmpty || preview == widget.fallbackUrl;
+    _armTimeout();
+  }
+
+  @override
+  void didUpdateWidget(covariant ComprobanteNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.previewUrl != widget.previewUrl ||
+        oldWidget.fallbackUrl != widget.fallbackUrl) {
+      final preview = widget.previewUrl?.trim() ?? '';
+      _useOriginal = preview.isEmpty || preview == widget.fallbackUrl;
+      _attempt = 0;
+      _timedOut = false;
+      _loaded = false;
+      _armTimeout();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timeout?.cancel();
+    super.dispose();
+  }
+
+  void _armTimeout() {
+    _timeout?.cancel();
+    _timeout = Timer(_loadTimeout, () {
+      if (!mounted || _loaded) return;
+      final preview = widget.previewUrl?.trim() ?? '';
+      if (!_useOriginal && preview.isNotEmpty && preview != widget.fallbackUrl) {
+        setState(() {
+          _useOriginal = true;
+          _timedOut = false;
+        });
+        _armTimeout();
+        return;
+      }
+      setState(() => _timedOut = true);
+    });
+  }
+
+  String _withRetry(String url) {
+    if (_attempt <= 0) return url;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final params = Map<String, String>.from(uri.queryParameters);
+    params['r'] = '$_attempt';
+    return uri.replace(queryParameters: params).toString();
+  }
+
+  void _retry() {
+    setState(() {
+      final preview = widget.previewUrl?.trim() ?? '';
+      _useOriginal = preview.isEmpty || preview == widget.fallbackUrl;
+      _attempt += 1;
+      _timedOut = false;
+      _loaded = false;
+    });
+    _armTimeout();
+  }
+
+  Widget _loading() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Cargando…',
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _failed() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'No se pudo mostrar la imagen.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: _retry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_timedOut) return _failed();
+
+    final preview = widget.previewUrl?.trim() ?? '';
+    final base =
+        _useOriginal || preview.isEmpty ? widget.fallbackUrl : preview;
+    final url = _withRetry(base);
+
+    return Image.network(
+      url,
+      key: ValueKey<String>('proof-$url'),
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.medium,
+      gaplessPlayback: true,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) {
+          if (!_loaded) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _loaded) return;
+              setState(() => _loaded = true);
+              _timeout?.cancel();
+            });
+          }
+          return child;
+        }
+        return _loading();
+      },
+      errorBuilder: (_, _, _) {
+        if (!_useOriginal &&
+            preview.isNotEmpty &&
+            preview != widget.fallbackUrl) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _useOriginal) return;
+            setState(() {
+              _useOriginal = true;
+              _timedOut = false;
+              _loaded = false;
+            });
+            _armTimeout();
+          });
+          return _loading();
+        }
+        return _failed();
+      },
     );
   }
 }

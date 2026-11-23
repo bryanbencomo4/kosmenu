@@ -47,7 +47,7 @@ $vercelConfig = @'
 {
   "rewrites": [
     {
-      "source": "/((?!assets/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|merchant-notifications(?:-sw)?\\.js|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
+      "source": "/((?!assets/|branding/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|boot-fast\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|merchant-notifications(?:-sw)?\\.js|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
       "destination": "/index.html"
     }
   ],
@@ -77,6 +77,15 @@ $vercelConfig = @'
     },
     {
       "source": "/flutter_service_worker.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/boot-fast.js",
       "headers": [
         {
           "key": "Cache-Control",

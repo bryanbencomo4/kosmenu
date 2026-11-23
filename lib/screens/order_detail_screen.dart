@@ -20,10 +20,12 @@ import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_rating_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,6 +39,8 @@ class OrderDetailScreen extends StatefulWidget {
     this.initialPedido,
     this.initialComercioNombre,
     this.initialBusinessLogoUrl,
+    this.onArchiveChanged,
+    this.onDeletePermanent,
   });
 
   final String orderId;
@@ -49,9 +53,24 @@ class OrderDetailScreen extends StatefulWidget {
   final String? initialComercioNombre;
   final String? initialBusinessLogoUrl;
 
+  /// Optional merchant action to archive/restore without leaving the detail.
+  final Future<void> Function(bool archived)? onArchiveChanged;
+
+  /// Optional permanent delete for already-archived orders.
+  final Future<void> Function()? onDeletePermanent;
+
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
+
+typedef _PaymentProof = ({
+  String url,
+  String? previewUrl,
+  String? downloadUrl,
+  String? publicUrl,
+  String? reference,
+  bool isPdf,
+});
 
 class _OrderDetailScreenState extends State<OrderDetailScreen>
     with SingleTickerProviderStateMixin {
@@ -96,7 +115,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _deferredVisualsReady = false;
   final ComprobanteSignedUrlSession _comprobanteSignedUrlSession =
       ComprobanteSignedUrlSession();
-  Future<({String url, String? reference, bool isPdf})>? _paymentProofFuture;
+  Future<_PaymentProof>? _paymentProofFuture;
 
   @override
   void initState() {
@@ -233,6 +252,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     setState(() => _isLoadingComprobante = true);
     try {
+      // Prefer the same public /p/{code} page sent on WhatsApp (all proofs).
+      final storedPublic = pedido.comprobantePublicUrl;
+      if (storedPublic != null) {
+        final opened = await launchUrl(
+          Uri.parse(storedPublic),
+          mode: LaunchMode.externalApplication,
+        );
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir el comprobante.')),
+          );
+        }
+        return;
+      }
+
       final session = Supabase.instance.client.auth.currentSession;
       final accessToken = session?.accessToken.trim() ?? '';
       if (accessToken.isEmpty) {
@@ -242,21 +276,39 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         );
       }
 
-      if (!_comprobanteSignedUrlSession.hasUsableUrl) {
-        final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
-          orderId: publicOrderId,
-          accessToken: accessToken,
+      final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
+        orderId: publicOrderId,
+        accessToken: accessToken,
+      );
+
+      final publicUrl = signed.publicUrl?.trim() ?? '';
+      if (publicUrl.isNotEmpty) {
+        final opened = await launchUrl(
+          Uri.parse(publicUrl),
+          mode: LaunchMode.externalApplication,
         );
-        _comprobanteSignedUrlSession.store(
-          url: signed.url,
-          expiresInSec: signed.expiresInSec,
-        );
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir el comprobante.')),
+          );
+        }
+        return;
       }
+
+      // Fallback for legacy orders without a short-link public page.
+      _comprobanteSignedUrlSession.store(
+        url: signed.url,
+        previewUrl: signed.previewUrl,
+        downloadUrl: signed.downloadUrl,
+        expiresInSec: signed.expiresInSec,
+      );
 
       final url = _comprobanteSignedUrlSession.url;
       if (!mounted || url == null || url.isEmpty) {
         return;
       }
+      final previewUrl = _comprobanteSignedUrlSession.previewUrl;
+      final downloadUrl = _comprobanteSignedUrlSession.downloadUrl ?? url;
 
       final ref = (pedido.comprobanteRef ?? '').toLowerCase();
       final isPdf = ref.endsWith('.pdf') || ref.contains('.pdf?');
@@ -269,35 +321,60 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
             ),
             content: SizedBox(
-              width: 360,
+              width: 280,
               child: isPdf
                   ? Text(
                       'Este comprobante es un PDF. Se abrira de forma segura en el visor del sistema.',
                       style: GoogleFonts.manrope(),
                     )
-                  : InteractiveViewer(
-                      child: Image.network(
-                        url,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => Text(
-                          'No se pudo mostrar la imagen.',
-                          style: GoogleFonts.manrope(),
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: SizedBox(
+                              width: 220,
+                              height: 260,
+                              child: InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 4,
+                                child: SizedBox.expand(
+                                  child: ComprobanteNetworkImage(
+                                    previewUrl: previewUrl,
+                                    fallbackUrl: url,
+                                    orderIdHint: publicOrderId,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Pellizca para ampliar',
+                          style: GoogleFonts.manrope(
+                            color: const Color(0xFF64748B),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
             ),
             actions: [
+              TextButton(
+                onPressed: () => unawaited(_shareComprobante(downloadUrl)),
+                child: const Text('Compartir'),
+              ),
+              TextButton(
+                onPressed: () => unawaited(_downloadComprobante(downloadUrl)),
+                child: const Text('Descargar'),
+              ),
               if (isPdf)
                 TextButton(
-                  onPressed: () async {
-                    final uri = Uri.tryParse(url);
-                    if (uri != null) {
-                      await launchUrl(
-                        uri,
-                        mode: LaunchMode.externalApplication,
-                      );
-                    }
-                  },
+                  onPressed: () => unawaited(_downloadComprobante(url)),
                   child: const Text('Abrir PDF'),
                 ),
               TextButton(
@@ -327,8 +404,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
-  Future<({String url, String? reference, bool isPdf})>
-  _loadPaymentProof() async {
+  Future<void> _shareComprobante(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      await SharePlus.instance.share(ShareParams(text: trimmed));
+    } catch (_) {}
+  }
+
+  Future<void> _downloadComprobante(String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !(uri.isScheme('https') || uri.isScheme('http'))) {
+      return;
+    }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo descargar el comprobante.')),
+      );
+    }
+  }
+
+  Future<_PaymentProof> _loadPaymentProof() async {
     final data = await _orderFuture;
     if (data == null || !data.pedido.hasComprobante) {
       throw const PublicOrderApiException(
@@ -352,6 +449,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final file = (data.pedido.comprobanteRef ?? '').toLowerCase();
     return (
       url: signed.url,
+      previewUrl: signed.previewUrl,
+      downloadUrl: signed.downloadUrl,
+      publicUrl: data.pedido.comprobantePublicUrl ?? signed.publicUrl,
       reference: reference != null && RegExp(r'^\d{4}$').hasMatch(reference)
           ? reference
           : null,
@@ -380,7 +480,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         ],
       ),
       body: SafeArea(
-        child: FutureBuilder<({String url, String? reference, bool isPdf})>(
+        child: FutureBuilder<_PaymentProof>(
           future: _paymentProofFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
@@ -402,32 +502,55 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 ),
               );
             }
-            return PaymentProofContent(
-              reference: proof.reference,
-              pedido: _cachedOrderData?.pedido,
-              image: proof.isPdf
-                  ? Center(
-                      child: FilledButton.icon(
+            final publicUrl = (proof.publicUrl ?? '').trim();
+            if (publicUrl.isNotEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Se abrirá la misma página de comprobantes que se envía por WhatsApp.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.manrope(),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
                         onPressed: () => unawaited(
                           launchUrl(
-                            Uri.parse(proof.url),
+                            Uri.parse(publicUrl),
                             mode: LaunchMode.externalApplication,
                           ),
                         ),
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: const Text('Ver comprobante'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            final shareUrl = proof.downloadUrl ?? proof.url;
+            return PaymentProofContent(
+              reference: proof.reference,
+              pedido: _cachedOrderData?.pedido,
+              showZoomHint: !proof.isPdf,
+              onShare: () => unawaited(_shareComprobante(shareUrl)),
+              onDownload: () => unawaited(_downloadComprobante(shareUrl)),
+              image: proof.isPdf
+                  ? Center(
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            unawaited(_downloadComprobante(proof.url)),
                         icon: const Icon(Icons.picture_as_pdf_outlined),
                         label: const Text('Abrir PDF'),
                       ),
                     )
-                  : Image.network(
-                      proof.url,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (context, child, progress) =>
-                          progress == null
-                          ? child
-                          : const Center(child: CircularProgressIndicator()),
-                      errorBuilder: (_, _, _) => const Center(
-                        child: Text('No se pudo mostrar la imagen.'),
-                      ),
+                  : ComprobanteNetworkImage(
+                      previewUrl: proof.previewUrl,
+                      fallbackUrl: proof.url,
+                      orderIdHint: widget.orderId.trim(),
                     ),
             );
           },
@@ -1168,12 +1291,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
       return;
     }
-    final text = Uri.encodeComponent(
-      message ??
-          'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
-    );
-    final uri = Uri.parse('https://wa.me/$digits?text=$text');
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final text =
+        message ??
+        'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.';
+    final launched = await openWhatsAppChat(digits, text: text);
 
     if (!launched && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1449,12 +1570,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             courierAlias: selection.alias,
           );
       final whatsappUrl =
-          directWhatsappUrl ??
-          'https://wa.me/$waDigits?text=${Uri.encodeComponent(invite.url)}';
-      final opened = await launchUrl(
-        Uri.parse(whatsappUrl),
-        mode: LaunchMode.externalApplication,
-      );
+          directWhatsappUrl ?? buildWhatsAppHref(waDigits, text: invite.url);
+      final opened = await openWhatsAppHref(whatsappUrl);
       if (!opened) {
         throw Exception('No se pudo abrir WhatsApp.');
       }
@@ -1974,6 +2091,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return pedido.deliveryForDisplay(currency ?? _orderCurrency(pedido));
   }
 
+  double _packagingCostOf(PedidoModel pedido, {String? currency}) {
+    return pedido.packagingForDisplay(currency ?? _orderCurrency(pedido));
+  }
+
   double _subtotalOf(PedidoModel pedido, double total, {String? currency}) {
     return pedido.subtotalForDisplay(currency ?? _orderCurrency(pedido), total);
   }
@@ -2487,6 +2608,64 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     }
                   },
                 ),
+                if (!widget.readOnlyView &&
+                    (widget.onArchiveChanged != null ||
+                        (pedido.isArchived &&
+                            widget.onDeletePermanent != null)))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      children: [
+                        if (widget.onArchiveChanged != null)
+                          TextButton.icon(
+                            onPressed: _isUpdatingStatus
+                                ? null
+                                : () async {
+                                    final archive = !pedido.isArchived;
+                                    await widget.onArchiveChanged!(archive);
+                                    if (!mounted) return;
+                                    setState(() {
+                                      _orderFuture = _fetchOrder();
+                                    });
+                                  },
+                            icon: Icon(
+                              pedido.isArchived
+                                  ? Icons.unarchive_outlined
+                                  : Icons.archive_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              pedido.isArchived
+                                  ? 'Recuperar pedido'
+                                  : 'Archivar pedido',
+                            ),
+                          ),
+                        if (pedido.isArchived &&
+                            widget.onDeletePermanent != null)
+                          TextButton.icon(
+                            onPressed: _isUpdatingStatus
+                                ? null
+                                : () async {
+                                    await widget.onDeletePermanent!();
+                                    if (!mounted) return;
+                                    if (Navigator.of(context).canPop()) {
+                                      Navigator.of(context).pop();
+                                    }
+                                  },
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFB91C1C),
+                            ),
+                            icon: const Icon(
+                              Icons.delete_forever_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Eliminar permanentemente'),
+                          ),
+                      ],
+                    ),
+                  ),
                 KitchenSummaryStrip(
                   isDelivery: isDeliveryOrder,
                   paymentTitle: _kitchenPaymentTitle(paymentMethod),
@@ -2697,6 +2876,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   pedido,
                   currency: currency,
                 );
+                final packagingCost = _packagingCostOf(
+                  pedido,
+                  currency: currency,
+                );
+                final packagingLabel = pedido.packagingLabelForDisplay();
                 final subtotal = _subtotalOf(pedido, total, currency: currency);
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
@@ -3915,16 +4099,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                         context,
                                                       );
                                                   final message =
-                                                      Uri.encodeComponent(
-                                                        'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.',
-                                                      );
-                                                  final waUri = Uri.parse(
-                                                    'https://wa.me/$deliveryDelegatePhoneDigits?text=$message',
-                                                  );
-                                                  final opened = await launchUrl(
-                                                    waUri,
-                                                    mode: LaunchMode
-                                                        .externalApplication,
+                                                      'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.';
+                                                  final opened =
+                                                      await openWhatsAppChat(
+                                                    deliveryDelegatePhoneDigits,
+                                                    text: message,
                                                   );
                                                   if (!opened) {
                                                     messenger.showSnackBar(
@@ -4665,6 +4844,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                   ],
                                 ),
+                                if (packagingCost > 0) ...[
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          packagingLabel.isEmpty
+                                              ? 'Empaque / delivery'
+                                              : packagingLabel,
+                                          style: GoogleFonts.manrope(
+                                            color: muted,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatAmount(packagingCost, currency),
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                                 if (isDeliveryOrder) ...[
                                   const SizedBox(height: 6),
                                   Row(

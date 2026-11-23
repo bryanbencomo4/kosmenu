@@ -4,6 +4,8 @@ import Link from 'next/link';
 import {
   ArrowRight,
   BarChart3,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -12,6 +14,7 @@ import {
   Instagram,
   LoaderCircle,
   MapPin,
+  Megaphone,
   Menu,
   Navigation,
   Search,
@@ -21,7 +24,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Caveat, Manrope } from 'next/font/google';
 import {
   startTransition,
   useCallback,
@@ -31,15 +33,19 @@ import {
   useState,
 } from 'react';
 
-import {
-  DIRECTORY_CATEGORY_CHIPS,
-  DIRECTORY_REGIONS,
-} from '../../app/api/_lib/public-directory-geo';
+import { DIRECTORY_CATEGORY_CHIPS } from '../../app/api/_lib/public-directory-geo';
+import { rankDirectorySearchDetails } from '../../app/api/_lib/public-directory-featured';
 import {
   appSignupHref,
   businessBenefitsHref,
   socialLinks,
 } from '../../app/_lib/public-site-config';
+import {
+  trackDirectoryPromoEvent,
+  withPromoMenuSrc,
+  type ClientPromoPlacement,
+} from '../../app/_lib/directory-promo-client';
+import { foldSearchText } from '../../app/_lib/search-text';
 import { ClientesDirectoryMap } from './ClientesDirectoryMap';
 
 function TikTokIcon({ className }: { className?: string }) {
@@ -62,24 +68,69 @@ const socialIconByLabel = {
   Facebook,
 } as const;
 
-const body = Manrope({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-});
-
-const script = Caveat({
-  subsets: ['latin'],
-  weight: ['600', '700'],
-});
-
 const FAVORITES_KEY = 'elmenuxfa_clientes_favorites_v1';
 const AUDIENCE_GATE_KEY = 'elmenuxfa_clientes_audience_gate_v1';
+const MERCHANT_BANNER_HIDDEN_KEY = 'elmenuxfa_merchant_banner_hidden_v1';
+const MERCHANT_BANNER_MSG_KEY = 'elmenuxfa_merchant_banner_msg_v1';
 const BENEFITS_HREF = businessBenefitsHref;
+
+const MERCHANT_BANNER_MESSAGES = [
+  '¿Deseas compartir tu menú con miles de personas? Súmate hoy por $10',
+  '¿Listo para que te pidan desde el celular? Publica tu menú por $10 al mes',
+  'Miles de personas buscan dónde comer. ¿Compartes tu menú hoy por $10?',
+  'Haz visible tu restaurante. Menú digital y pedidos por solo $10',
+  '¿Tu menú aún no está en línea? Súmate a elmenuxfa por $10',
+  'Llega a más clientes cerca de ti. Publica tu menú hoy por $10',
+] as const;
+
+/** Hero slogans — short, salesy, local-discovery hooks. */
+function HeroBusinessLogo({
+  logoUrl,
+  name,
+}: {
+  logoUrl: string | null | undefined;
+  name: string;
+}) {
+  const initial = (name.trim().charAt(0) || '?').toUpperCase();
+  return (
+    <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-white/95 text-sm font-black text-[#6D28D9] shadow-md ring-2 ring-white/80 sm:h-12 sm:w-12 sm:text-base">
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <span aria-hidden>{initial}</span>
+      )}
+    </span>
+  );
+}
+
+function nextMerchantBannerMessage(): string {
+  if (typeof window === 'undefined') return MERCHANT_BANNER_MESSAGES[0];
+  const last = Number.parseInt(window.localStorage.getItem(MERCHANT_BANNER_MSG_KEY) ?? '-1', 10);
+  const next =
+    Number.isFinite(last) && last >= 0
+      ? (last + 1) % MERCHANT_BANNER_MESSAGES.length
+      : Math.floor(Math.random() * MERCHANT_BANNER_MESSAGES.length);
+  window.localStorage.setItem(MERCHANT_BANNER_MSG_KEY, String(next));
+  return MERCHANT_BANNER_MESSAGES[next] ?? MERCHANT_BANNER_MESSAGES[0];
+}
 const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
 const DEFAULT_NEAR_RADIUS_KM = 25;
 const PAGE_SIZE = 12;
 const SEARCH_PAGE_SIZE = 24;
-const SEARCH_DEBOUNCE_MS = 220;
+const SEARCH_DEBOUNCE_MS = 140;
+
+type DirectoryShowcaseDish = {
+  name: string;
+  imageUrl: string;
+  price: number;
+  compareAtPrice?: number | null;
+};
 
 type DirectoryBusiness = {
   id: string;
@@ -89,6 +140,9 @@ type DirectoryBusiness = {
   coverUrl: string | null;
   categoria: string | null;
   direccion: string | null;
+  negocioVirtual?: boolean;
+  estadosOperacion?: string[];
+  zonaOperacion?: string | null;
   ratingAverage: number;
   ratingCount: number;
   promovido: boolean;
@@ -98,9 +152,344 @@ type DirectoryBusiness = {
   menuUrl: string;
   isOpen?: boolean | null;
   openLabel?: string | null;
+  productNames?: string[];
+  showcaseDishes?: DirectoryShowcaseDish[];
+  currencies?: string[];
+  paymentChannels?: string[];
+  acceptsVesBcv?: boolean;
   matchedDish?: string | null;
   matchScore?: number;
 };
+
+const CURRENCY_FILTER_OPTIONS = ['USD', 'VES', 'COP'] as const;
+
+function mergeUniqueNames(base: string[] | undefined, extra: string[] | undefined) {
+  const out = [...(base ?? [])];
+  for (const name of extra ?? []) {
+    if (!name || out.includes(name)) continue;
+    if (out.length >= 48) break;
+    out.push(name);
+  }
+  return out;
+}
+
+function applyInstantDirectorySearch(
+  index: DirectoryBusiness[],
+  normalizedQuery: string,
+): DirectoryBusiness[] {
+  if (!normalizedQuery || index.length === 0) return [];
+  const details = rankDirectorySearchDetails(
+    index.map((item) => ({
+      id: item.id,
+      slug: item.slug,
+      nombre: item.nombre,
+      categoria: item.categoria,
+      direccion: item.direccion,
+      productNames: item.productNames ?? [],
+    })),
+    normalizedQuery,
+  );
+  const byId = new Map(index.map((item) => [item.id, item]));
+  const ranked: DirectoryBusiness[] = [];
+  for (const detail of details) {
+    const base = byId.get(detail.entry.id);
+    if (!base) continue;
+    ranked.push({
+      ...base,
+      matchScore: detail.score,
+      matchedDish: detail.matchedDish,
+    });
+  }
+  return ranked.sort((left, right) => {
+    const openDiff = openPriority(left) - openPriority(right);
+    if (openDiff !== 0) return openDiff;
+    return (right.matchScore ?? 0) - (left.matchScore ?? 0);
+  });
+}
+
+type CardMediaSlide =
+  | { kind: 'logo'; imageUrl: string }
+  | {
+      kind: 'dish';
+      imageUrl: string;
+      name: string;
+      price: number;
+      compareAtPrice: number | null;
+    };
+
+function formatDirectoryPrice(price: number) {
+  if (!Number.isFinite(price) || price <= 0) return '';
+  if (price >= 1000) {
+    return `Bs ${new Intl.NumberFormat('es-VE', { maximumFractionDigits: 0 }).format(price)}`;
+  }
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(price);
+}
+
+function shuffleWithSeed<T>(items: T[], seed: string): T[] {
+  const copy = [...items];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    hash = (hash * 1664525 + 1013904223) >>> 0;
+    const j = hash % (i + 1);
+    const tmp = copy[i]!;
+    copy[i] = copy[j]!;
+    copy[j] = tmp;
+  }
+  return copy;
+}
+
+function buildCardMediaSlides(business: DirectoryBusiness): CardMediaSlide[] {
+  // Match server showcase rotation (3h buckets) so cards don't freeze on the same 3 dishes.
+  const rotationBucket = Math.floor(Date.now() / (3 * 60 * 60 * 1000));
+  const dishes = shuffleWithSeed(
+    business.showcaseDishes ?? [],
+    `${business.id}:${rotationBucket}`,
+  ).slice(0, 3);
+  const slides: CardMediaSlide[] = [];
+  if (business.logoUrl) {
+    slides.push({ kind: 'logo', imageUrl: business.logoUrl });
+  }
+  for (const dish of dishes) {
+    if (!dish.imageUrl) continue;
+    // Skip dish slides that are just the logo re-uploaded as a product.
+    if (business.logoUrl && dish.imageUrl === business.logoUrl) continue;
+    slides.push({
+      kind: 'dish',
+      imageUrl: dish.imageUrl,
+      name: dish.name,
+      price: dish.price,
+      compareAtPrice: dish.compareAtPrice ?? null,
+    });
+  }
+  if (slides.length === 0 && business.coverUrl) {
+    slides.push({ kind: 'logo', imageUrl: business.coverUrl });
+  }
+  return slides;
+}
+
+const CARD_MEDIA_HOLD_MS = 4200;
+const CARD_MEDIA_FADE_MS = 480;
+const HERO_MEDIA_HOLD_MS = 7000;
+const preloadedImages = new Map<string, Promise<boolean>>();
+const preloadedImageResults = new Map<string, boolean>();
+
+function staggerDelayMs(seed: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 600 + (hash >>> 0) % 3200;
+}
+
+function heroSlideImageUrl(business: DirectoryBusiness) {
+  return business.coverUrl || business.logoUrl || '/branding/full_logo.png';
+}
+
+function isImageReady(url: string) {
+  return preloadedImageResults.get(url) === true;
+}
+
+function preloadCardImage(url: string): Promise<boolean> {
+  const cached = preloadedImages.get(url);
+  if (cached) return cached;
+  if (typeof window === 'undefined') {
+    return Promise.resolve(false);
+  }
+  const promise = new Promise<boolean>((resolve) => {
+    const img = new window.Image();
+    img.decoding = 'async';
+    const finish = (ok: boolean) => {
+      preloadedImageResults.set(url, ok);
+      resolve(ok);
+    };
+    img.onload = () => {
+      if (typeof img.decode === 'function') {
+        img
+          .decode()
+          .then(() => finish(true))
+          .catch(() => finish(true));
+        return;
+      }
+      finish(true);
+    };
+    img.onerror = () => finish(false);
+    img.src = url;
+  });
+  preloadedImages.set(url, promise);
+  return promise;
+}
+
+function MediaShimmer({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
+  return (
+    <div
+      className={`absolute inset-0 animate-pulse ${
+        tone === 'dark'
+          ? 'bg-gradient-to-br from-slate-800 via-slate-700 to-slate-900'
+          : 'bg-gradient-to-br from-[#f3eefe] via-[#ebe4ff] to-[#e8eefc]'
+      }`}
+      aria-hidden
+    >
+      <div className="absolute inset-0 grid place-items-center">
+        <LoaderCircle
+          className={`h-7 w-7 animate-spin ${tone === 'dark' ? 'text-white/35' : 'text-[#6D28D9]/55'}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FadeInMediaImage({
+  src,
+  className,
+  priority = false,
+  tone = 'light',
+}: {
+  src: string;
+  className: string;
+  priority?: boolean;
+  tone?: 'light' | 'dark';
+}) {
+  const [loaded, setLoaded] = useState(() => isImageReady(src));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isImageReady(src)) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    void preloadCardImage(src).then((ok) => {
+      if (!cancelled && ok) setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return (
+    <>
+      {!loaded ? <MediaShimmer tone={tone} /> : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        decoding="async"
+        loading={priority ? 'eager' : 'lazy'}
+        fetchPriority={priority ? 'high' : 'auto'}
+        draggable={false}
+        onLoad={() => setLoaded(true)}
+        className={`${className} transition-opacity duration-300 ${
+          loaded ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+    </>
+  );
+}
+
+function CardMediaImage({
+  slide,
+  forceRow,
+  priority = false,
+}: {
+  slide: CardMediaSlide;
+  forceRow: boolean;
+  priority?: boolean;
+}) {
+  if (slide.kind === 'logo') {
+    // Blur fill behind. Foreground must be a true square: a 16:10 % box leaves
+    // square logo PNGs with sharp corners floating inside a wider frame.
+    const logoFrame = forceRow
+      ? 'aspect-square w-[78%] max-w-[3.35rem] rounded-[0.65rem]'
+      : 'aspect-square w-[52%] max-w-[8.75rem] rounded-2xl sm:w-[48%] sm:max-w-[9.25rem] sm:rounded-[1.15rem]';
+    return (
+      <div className="absolute inset-0 overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={slide.imageUrl}
+          alt=""
+          aria-hidden
+          decoding="async"
+          loading={priority ? 'eager' : 'lazy'}
+          draggable={false}
+          className="pointer-events-none absolute inset-0 h-full w-full scale-[1.35] object-cover blur-2xl"
+        />
+        <div className="absolute inset-0 bg-slate-900/10" aria-hidden />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div
+            className={`relative isolate overflow-hidden bg-white/90 shadow-sm ring-1 ring-black/5 ${logoFrame}`}
+          >
+            <FadeInMediaImage
+              src={slide.imageUrl}
+              priority={priority}
+              tone="light"
+              className="absolute inset-0 h-full w-full rounded-[inherit] object-contain"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <FadeInMediaImage
+      src={slide.imageUrl}
+      className="absolute inset-0 h-full w-full object-cover"
+      priority={priority}
+      tone="dark"
+    />
+  );
+}
+
+function CardDishOffer({
+  slide,
+  forceRow,
+}: {
+  slide: Extract<CardMediaSlide, { kind: 'dish' }>;
+  forceRow: boolean;
+}) {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-2 pb-1.5 pt-8 sm:px-3 sm:pb-2.5 sm:pt-12">
+        <p
+          className={`truncate font-bold text-white ${
+            forceRow ? 'text-[9px] leading-tight' : 'text-[12px] sm:text-[13px]'
+          }`}
+        >
+          {slide.name}
+        </p>
+        {!forceRow ? (
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="rounded-full bg-[#6D28D9] px-2 py-0.5 text-[11px] font-extrabold tabular-nums text-white shadow-sm">
+              {formatDirectoryPrice(slide.price)}
+            </span>
+            {slide.compareAtPrice ? (
+              <span className="text-[11px] font-semibold text-white/70 line-through tabular-nums">
+                {formatDirectoryPrice(slide.compareAtPrice)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/90">
+                Oferta
+              </span>
+            )}
+          </div>
+        ) : null}
+      </div>
+      {forceRow ? (
+        <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-[#6D28D9] px-1 py-0.5 text-[8px] font-extrabold tabular-nums text-white">
+          {formatDirectoryPrice(slide.price)}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 async function resolveZoneLabel(lat: number, lng: number): Promise<string | null> {
   try {
@@ -124,14 +513,42 @@ async function resolveZoneLabel(lat: number, lng: number): Promise<string | null
 
 type CategoryChip = { id: string; label: string; glyph: string };
 
+type DirectoryRegionStat = {
+  name: string;
+  count: number;
+};
+
 type DirectoryPayload = {
   results?: DirectoryBusiness[];
   promoted?: DirectoryBusiness[];
   topRated?: DirectoryBusiness[];
   total?: number;
-  regions?: string[];
+  regions?: DirectoryRegionStat[];
   categories?: CategoryChip[];
 };
+
+function normalizeRegionStats(raw: unknown): DirectoryRegionStat[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DirectoryRegionStat[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const name = item.trim();
+      if (name) out.push({ name, count: 0 });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as { name?: unknown }).name ?? '').trim();
+    const count = Number((item as { count?: unknown }).count ?? 0);
+    if (!name || !Number.isFinite(count) || count <= 0) continue;
+    out.push({ name, count });
+  }
+  // Highest restaurant count first for "Explora por región".
+  out.sort((left, right) => {
+    if (right.count !== left.count) return right.count - left.count;
+    return left.name.localeCompare(right.name, 'es');
+  });
+  return out;
+}
 
 type SortMode = 'smart' | 'near' | 'rated';
 
@@ -163,18 +580,38 @@ function writeFavorites(ids: Set<string>) {
 
 function readUrlState() {
   if (typeof window === 'undefined') {
-    return { q: '', region: '', category: '', sort: 'smart' as SortMode, fav: false };
+    return {
+      q: '',
+      region: '',
+      category: '',
+      sort: 'smart' as SortMode,
+      fav: false,
+      currency: '',
+      payment: '',
+      openNow: false,
+      vesBcv: false,
+    };
   }
   const params = new URLSearchParams(window.location.search);
   const sortRaw = (params.get('sort') ?? 'smart').toLowerCase();
   const sort: SortMode =
     sortRaw === 'near' || sortRaw === 'rated' || sortRaw === 'smart' ? sortRaw : 'smart';
+  const currencyRaw = (params.get('currency') ?? '').trim().toUpperCase();
+  const currency = CURRENCY_FILTER_OPTIONS.includes(
+    currencyRaw as (typeof CURRENCY_FILTER_OPTIONS)[number],
+  )
+    ? currencyRaw
+    : '';
   return {
     q: (params.get('q') ?? '').slice(0, 80),
     region: (params.get('region') ?? '').slice(0, 60),
     category: (params.get('category') ?? '').slice(0, 40),
     sort,
     fav: params.get('fav') === '1',
+    currency,
+    payment: (params.get('payment') ?? '').slice(0, 40),
+    openNow: params.get('openNow') === '1',
+    vesBcv: params.get('vesBcv') === '1',
   };
 }
 
@@ -184,6 +621,10 @@ function syncUrlState(state: {
   category: string;
   sort: SortMode;
   fav: boolean;
+  currency: string;
+  payment: string;
+  openNow: boolean;
+  vesBcv: boolean;
 }) {
   if (typeof window === 'undefined') return;
   const params = new URLSearchParams();
@@ -192,6 +633,10 @@ function syncUrlState(state: {
   if (state.category.trim()) params.set('category', state.category.trim());
   if (state.sort !== 'smart') params.set('sort', state.sort);
   if (state.fav) params.set('fav', '1');
+  if (state.currency.trim()) params.set('currency', state.currency.trim().toUpperCase());
+  if (state.payment.trim()) params.set('payment', state.payment.trim());
+  if (state.openNow) params.set('openNow', '1');
+  if (state.vesBcv) params.set('vesBcv', '1');
   const next = params.toString();
   const path = `${window.location.pathname}${next ? `?${next}` : ''}`;
   window.history.replaceState(null, '', path);
@@ -204,8 +649,8 @@ function openPriority(business: DirectoryBusiness) {
 }
 
 function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
-  // Closed / unavailable restaurants must not appear in discovery.
-  const copy = list.filter((item) => item.isOpen !== false);
+  // Open first, then unknown hours, then closed — still show closed with badge.
+  const copy = [...list];
   if (mode === 'near') {
     return copy.sort((a, b) => {
       const openDiff = openPriority(a) - openPriority(b);
@@ -228,6 +673,8 @@ function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
   return copy.sort((a, b) => {
     const openDiff = openPriority(a) - openPriority(b);
     if (openDiff !== 0) return openDiff;
+    const scoreDiff = (b.matchScore ?? 0) - (a.matchScore ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
     return 0;
   });
 }
@@ -240,6 +687,7 @@ function RestaurantCard({
   onToggleFavorite,
   onSelect,
   onShowOnMap,
+  promoPlacement = null,
 }: {
   business: DirectoryBusiness;
   compact?: boolean;
@@ -248,17 +696,151 @@ function RestaurantCard({
   onToggleFavorite: (id: string) => void;
   onSelect?: (id: string) => void;
   onShowOnMap?: (id: string) => void;
+  promoPlacement?: ClientPromoPlacement | null;
 }) {
-  const cover = business.coverUrl;
-  const logo = business.logoUrl;
-  // Prefer cover photo; fall back to logo. Avoid tiny nested logo boxes.
-  const image = cover || logo;
-  const isLogoOnly = Boolean(image) && (!cover || cover === logo);
-  // Compact = dense row in results. Showcase (promo / top rated) = vertical card.
+  const slides = useMemo(
+    () => buildCardMediaSlides(business),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild only when showcase media changes
+    [business.id, business.logoUrl, business.coverUrl, business.showcaseDishes],
+  );
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [incomingIndex, setIncomingIndex] = useState<number | null>(null);
+  const [fadeIn, setFadeIn] = useState(false);
+  const [inView, setInView] = useState(false);
+  const mediaRootRef = useRef<HTMLAnchorElement | null>(null);
+  const slideIndexRef = useRef(0);
+  const transitioningRef = useRef(false);
   const forceRow = compact;
-  const mediaBg = isLogoOnly
-    ? 'bg-[#f8f7fc]'
-    : 'bg-[linear-gradient(145deg,#f5f3ff,#eef2ff)]';
+  const activeSlide = slides[slideIndex] ?? slides[0] ?? null;
+  const incomingSlide =
+    incomingIndex != null ? slides[incomingIndex] ?? null : null;
+  const visibleSlide = fadeIn && incomingSlide ? incomingSlide : activeSlide;
+
+  useEffect(() => {
+    slideIndexRef.current = slideIndex;
+  }, [slideIndex]);
+
+  useEffect(() => {
+    setSlideIndex(0);
+    setIncomingIndex(null);
+    setFadeIn(false);
+    transitioningRef.current = false;
+    slideIndexRef.current = 0;
+  }, [business.id]);
+
+  useEffect(() => {
+    const node = mediaRootRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
+      { rootMargin: '120px 0px', threshold: 0.2 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [business.id]);
+
+  useEffect(() => {
+    if (!inView || !promoPlacement) return;
+    trackDirectoryPromoEvent({
+      comercioId: business.id,
+      type: 'impression',
+      placement: promoPlacement,
+    });
+  }, [business.id, inView, promoPlacement]);
+
+  const menuHref = promoPlacement
+    ? withPromoMenuSrc(business.menuUrl)
+    : business.menuUrl;
+
+  const trackPromoClick = useCallback(() => {
+    if (!promoPlacement) return;
+    trackDirectoryPromoEvent({
+      comercioId: business.id,
+      type: 'click',
+      placement: promoPlacement,
+    });
+  }, [business.id, promoPlacement]);
+
+  useEffect(() => {
+    if (!inView || slides.length <= 1) return;
+    const next = slides[(slideIndex + 1) % slides.length];
+    if (next?.imageUrl) void preloadCardImage(next.imageUrl);
+  }, [inView, slideIndex, slides]);
+
+  useEffect(() => {
+    if (!inView || slides.length <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let cancelled = false;
+    let holdTimer = 0;
+    let fadeTimer = 0;
+
+    const tick = async () => {
+      if (cancelled || transitioningRef.current || document.hidden) {
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+      const current = slideIndexRef.current;
+      const next = (current + 1) % slides.length;
+      const nextSlide = slides[next];
+      if (!nextSlide) {
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+
+      transitioningRef.current = true;
+      const loaded = await preloadCardImage(nextSlide.imageUrl);
+      if (cancelled) {
+        transitioningRef.current = false;
+        return;
+      }
+      if (!loaded) {
+        transitioningRef.current = false;
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+
+      setIncomingIndex(next);
+      setFadeIn(false);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (cancelled) return;
+          setFadeIn(true);
+        });
+      });
+
+      fadeTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setSlideIndex(next);
+        slideIndexRef.current = next;
+        setIncomingIndex(null);
+        setFadeIn(false);
+        transitioningRef.current = false;
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+      }, CARD_MEDIA_FADE_MS);
+    };
+
+    holdTimer = window.setTimeout(tick, staggerDelayMs(business.id) + CARD_MEDIA_HOLD_MS);
+    const onVisibility = () => {
+      if (!document.hidden && !transitioningRef.current) {
+        const next = slides[(slideIndexRef.current + 1) % slides.length];
+        if (next?.imageUrl) void preloadCardImage(next.imageUrl);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(holdTimer);
+      window.clearTimeout(fadeTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      transitioningRef.current = false;
+    };
+  }, [business.id, inView, slides]);
+
   const shellClass = `group relative overflow-hidden rounded-2xl bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(109,40,217,0.12)] ${
     selected
       ? 'border-2 border-[#6D28D9] shadow-[0_14px_32px_rgba(109,40,217,0.16)]'
@@ -271,15 +853,37 @@ function RestaurantCard({
     <>
       <div className="flex items-start justify-between gap-1.5">
         <Link
-          href={business.menuUrl}
-          onClick={() => onSelect?.(business.id)}
-          className={`font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
-            forceRow
-              ? 'line-clamp-1 text-[14px]'
-              : 'line-clamp-2 text-[14px] sm:text-[15px]'
+          href={menuHref}
+          onClick={() => {
+            trackPromoClick();
+            onSelect?.(business.id);
+          }}
+          className={`flex min-w-0 flex-1 items-start gap-2 font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
+            forceRow ? 'text-[14px]' : 'text-[14px] sm:text-[15px]'
           }`}
         >
-          {business.nombre}
+          <span
+            className={`relative mt-0.5 grid shrink-0 place-items-center overflow-hidden rounded-full bg-violet-50 text-[#6D28D9] ring-1 ring-violet-100 ${
+              forceRow ? 'h-7 w-7 text-[11px]' : 'h-8 w-8 text-xs'
+            }`}
+          >
+            {business.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={business.logoUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <span aria-hidden>
+                {(business.nombre.trim().charAt(0) || '?').toUpperCase()}
+              </span>
+            )}
+          </span>
+          <span className={forceRow ? 'line-clamp-1' : 'line-clamp-2'}>
+            {business.nombre}
+          </span>
         </Link>
         <button
           type="button"
@@ -292,21 +896,17 @@ function RestaurantCard({
           <Heart className={`h-3.5 w-3.5 ${favorite ? 'fill-current' : ''}`} />
         </button>
       </div>
+      {business.isOpen === false ? (
+        <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          Cerrado
+        </span>
+      ) : null}
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-[12px]">
-        {business.isOpen != null ? (
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-              business.isOpen
-                ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-rose-50 text-rose-700'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                business.isOpen ? 'bg-emerald-500' : 'bg-rose-500'
-              }`}
-            />
-            {business.isOpen ? 'Abierto' : 'Cerrado'}
+        {business.isOpen === true ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Abierto
           </span>
         ) : null}
         {business.ratingCount > 0 ? (
@@ -333,7 +933,15 @@ function RestaurantCard({
         <p className="mt-0.5 truncate text-[11px] font-semibold text-violet-700 sm:mt-1 sm:text-[12px]">
           Sirve: {business.matchedDish}
         </p>
-      ) : business.direccion ? (
+      ) : business.negocioVirtual && business.zonaOperacion ? (
+        <p
+          className={`mt-0.5 truncate text-[11px] text-slate-400 sm:mt-1 sm:text-[12px] ${
+            forceRow ? 'hidden sm:block' : ''
+          }`}
+        >
+          Opera en {business.zonaOperacion}
+        </p>
+      ) : business.direccion && !business.negocioVirtual ? (
         <p
           className={`mt-0.5 truncate text-[11px] text-slate-400 sm:mt-1 sm:text-[12px] ${
             forceRow ? 'hidden sm:block' : ''
@@ -353,7 +961,8 @@ function RestaurantCard({
           </button>
         ) : null}
         <Link
-          href={business.menuUrl}
+          href={menuHref}
+          onClick={trackPromoClick}
           className="inline-flex items-center gap-1 text-[12px] font-bold text-[#6D28D9] sm:ml-auto"
         >
           Ver menú <ArrowRight className="h-3.5 w-3.5" />
@@ -362,42 +971,83 @@ function RestaurantCard({
     </>
   );
 
+  const mediaFrameClass = forceRow
+    ? 'relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100'
+    : 'relative block aspect-[16/10] w-full overflow-hidden';
+  const mediaBg =
+    visibleSlide?.kind === 'dish' ? 'bg-slate-900' : 'bg-slate-200';
+  const indicatorIndex =
+    fadeIn && incomingIndex != null ? incomingIndex : slideIndex;
+
+  const media = (
+    <Link
+      ref={mediaRootRef}
+      href={menuHref}
+      className={`${mediaFrameClass} ${mediaBg}`}
+      onClick={() => {
+        trackPromoClick();
+        onSelect?.(business.id);
+      }}
+    >
+      {activeSlide ? (
+        <div className="absolute inset-0">
+          <CardMediaImage slide={activeSlide} forceRow={forceRow} priority />
+        </div>
+      ) : (
+        <div className="relative h-full w-full">
+          <MediaShimmer tone="light" />
+        </div>
+      )}
+      {incomingSlide ? (
+        <div
+          className={`absolute inset-0 transition-opacity ease-out ${
+            fadeIn ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{ transitionDuration: `${CARD_MEDIA_FADE_MS}ms` }}
+          aria-hidden={!fadeIn}
+        >
+          <div
+            className={`absolute inset-0 ${
+              incomingSlide.kind === 'dish' ? 'bg-slate-900' : 'bg-slate-200'
+            }`}
+          >
+            <CardMediaImage slide={incomingSlide} forceRow={forceRow} priority />
+          </div>
+        </div>
+      ) : null}
+      {visibleSlide?.kind === 'dish' ? (
+        <CardDishOffer slide={visibleSlide} forceRow={forceRow} />
+      ) : null}
+      {business.promovido ? (
+        <span
+          className={`absolute left-1.5 top-1.5 z-[1] rounded-full bg-[#6D28D9] font-bold uppercase tracking-wide text-white ${
+            forceRow
+              ? 'px-1.5 py-0.5 text-[8px]'
+              : 'left-2 top-2 px-2.5 py-1 text-[10px]'
+          }`}
+        >
+          Promo
+        </span>
+      ) : null}
+      {!forceRow && slides.length > 1 ? (
+        <span className="absolute bottom-2 right-2 z-[1] flex gap-1">
+          {slides.map((slide, index) => (
+            <span
+              key={`${slide.kind}-${index}`}
+              className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
+                index === indicatorIndex ? 'bg-white' : 'bg-white/45'
+              }`}
+            />
+          ))}
+        </span>
+      ) : null}
+    </Link>
+  );
+
   if (forceRow) {
     return (
       <article className={`${shellClass} flex gap-2.5 p-2.5`}>
-        <Link
-          href={business.menuUrl}
-          className={`relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100 ${mediaBg}`}
-          onClick={() => onSelect?.(business.id)}
-        >
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={image}
-              alt=""
-              className={
-                isLogoOnly
-                  ? 'h-full w-full scale-110 object-cover'
-                  : 'h-full w-full object-cover'
-              }
-              loading="lazy"
-            />
-          ) : (
-            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-              <Store className="h-6 w-6" />
-            </div>
-          )}
-          {business.promovido ? (
-            <span className="absolute left-1 top-1 rounded-full bg-[#6D28D9] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
-              Promo
-            </span>
-          ) : null}
-          {business.isOpen === false ? (
-            <span className="absolute bottom-1 left-1 rounded-full bg-rose-600/95 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
-              Cerrado
-            </span>
-          ) : null}
-        </Link>
+        {media}
         <div className="flex min-w-0 flex-1 flex-col justify-center">{meta}</div>
       </article>
     );
@@ -406,39 +1056,7 @@ function RestaurantCard({
   return (
     <article className={`${shellClass} flex h-full flex-col`}>
       <div className="relative shrink-0">
-        <Link
-          href={business.menuUrl}
-          className={`relative block aspect-[16/10] w-full overflow-hidden ${mediaBg}`}
-          onClick={() => onSelect?.(business.id)}
-        >
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={image}
-              alt=""
-              className={
-                isLogoOnly
-                  ? 'h-full w-full object-contain p-5 sm:p-6'
-                  : 'h-full w-full object-cover'
-              }
-              loading="lazy"
-            />
-          ) : (
-            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-              <Store className="h-8 w-8" />
-            </div>
-          )}
-          {business.promovido ? (
-            <span className="absolute left-2 top-2 rounded-full bg-[#6D28D9] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-              Promo
-            </span>
-          ) : null}
-          {business.isOpen === false ? (
-            <span className="absolute bottom-2 left-2 rounded-full bg-rose-600/95 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-              Cerrado
-            </span>
-          ) : null}
-        </Link>
+        {media}
         <button
           type="button"
           aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
@@ -483,37 +1101,72 @@ export function ClientesDiscoveryPage() {
   const [category, setCategory] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('smart');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [currencyFilter, setCurrencyFilter] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('');
+  const [openNowOnly, setOpenNowOnly] = useState(false);
+  const [vesBcvOnly, setVesBcvOnly] = useState(false);
   const [urlReady, setUrlReady] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ready' | 'denied'>('idle');
+  const [geoHint, setGeoHint] = useState<string | null>(null);
+  const [geoHelpVisible, setGeoHelpVisible] = useState(false);
   const [zoneLabel, setZoneLabel] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [whereMenuOpen, setWhereMenuOpen] = useState(false);
   const [audienceGateOpen, setAudienceGateOpen] = useState(false);
-  const [audienceDontShowAgain, setAudienceDontShowAgain] = useState(false);
+  const [audienceDontShowAgain, setAudienceDontShowAgain] = useState(true);
   const [draftQuery, setDraftQuery] = useState('');
   const [draftRegion, setDraftRegion] = useState('');
   const [draftCategory, setDraftCategory] = useState('');
   const [draftSort, setDraftSort] = useState<SortMode>('smart');
   const [draftRadiusKm, setDraftRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
+  const [draftCurrency, setDraftCurrency] = useState('');
+  const [draftPayment, setDraftPayment] = useState('');
+  const [draftOpenNow, setDraftOpenNow] = useState(false);
+  const [draftVesBcv, setDraftVesBcv] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<DirectoryPayload>({});
+  const [browseIndex, setBrowseIndex] = useState<DirectoryBusiness[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
+  const [heroIncomingIndex, setHeroIncomingIndex] = useState<number | null>(null);
+  const [heroFadeIn, setHeroFadeIn] = useState(false);
+  const [heroNextReady, setHeroNextReady] = useState(false);
+  const [heroPrevReady, setHeroPrevReady] = useState(false);
+  const [heroNavBusy, setHeroNavBusy] = useState(false);
+  const [heroInView, setHeroInView] = useState(false);
+  const [heroCycleToken, setHeroCycleToken] = useState(0);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const resultsRef = useRef<HTMLElement | null>(null);
   const promoCarouselRef = useRef<HTMLDivElement | null>(null);
-  const hasLoadedOnce = useRef(false);
+  const regionCarouselRef = useRef<HTMLDivElement | null>(null);
+  const whereMenuRef = useRef<HTMLDivElement | null>(null);
+  const heroRootRef = useRef<HTMLDivElement | null>(null);
+  const heroIndexRef = useRef(0);
+  const heroBusyRef = useRef(false);
+  const hasLoadedOnceRef = useRef(false);
   const geoAskedRef = useRef(false);
+  const geoInFlightRef = useRef(false);
+  const regionRef = useRef('');
+  const geoFailsafeRef = useRef(0);
 
   const scrollPromoCarousel = useCallback((direction: -1 | 1) => {
     const el = promoCarouselRef.current;
     if (!el) return;
     const step = Math.min(320, Math.max(240, Math.round(el.clientWidth * 0.72)));
+    el.scrollBy({ left: direction * step, behavior: 'smooth' });
+  }, []);
+
+  const scrollRegionCarousel = useCallback((direction: -1 | 1) => {
+    const el = regionCarouselRef.current;
+    if (!el) return;
+    const step = Math.min(280, Math.max(180, Math.round(el.clientWidth * 0.7)));
     el.scrollBy({ left: direction * step, behavior: 'smooth' });
   }, []);
 
@@ -526,52 +1179,184 @@ export function ClientesDiscoveryPage() {
   const pendingHeaderFocusRef = useRef(false);
   const [searchMode, setSearchMode] = useState(false);
   const [showSearchMap, setShowSearchMap] = useState(false);
+  const [merchantBannerHidden, setMerchantBannerHidden] = useState(true);
+  const [merchantBannerMessage, setMerchantBannerMessage] = useState<string>(
+    MERCHANT_BANNER_MESSAGES[0],
+  );
+
+  useEffect(() => {
+    try {
+      const hidden = window.localStorage.getItem(MERCHANT_BANNER_HIDDEN_KEY) === '1';
+      setMerchantBannerHidden(hidden);
+      if (!hidden) {
+        setMerchantBannerMessage(nextMerchantBannerMessage());
+      }
+    } catch {
+      setMerchantBannerHidden(false);
+      setMerchantBannerMessage(MERCHANT_BANNER_MESSAGES[0]);
+    }
+  }, []);
+
+  const hideMerchantBanner = useCallback(() => {
+    setMerchantBannerHidden(true);
+    try {
+      window.localStorage.setItem(MERCHANT_BANNER_HIDDEN_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const showMerchantBanner = useCallback(() => {
+    setMerchantBannerMessage(nextMerchantBannerMessage());
+    setMerchantBannerHidden(false);
+    try {
+      window.localStorage.removeItem(MERCHANT_BANNER_HIDDEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const requestLocation = useCallback((opts?: { switchToNear?: boolean; forcePrompt?: boolean }) => {
     if (!navigator.geolocation) {
       setGeoStatus('denied');
+      setGeoHelpVisible(true);
+      setGeoHint('Tu navegador no permite geolocalización.');
       return;
     }
-    setGeoStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const next = { lat: position.coords.latitude, lng: position.coords.longitude };
-        setCoords(next);
-        setGeoStatus('ready');
-        // Default to a local radius so far-away restaurants don't flood the feed.
-        setRadiusKm((prev) => prev ?? DEFAULT_NEAR_RADIUS_KM);
-        // Only flip sort when explicitly requested — never override an active text search.
-        if (opts?.switchToNear) setSortMode('near');
-        void resolveZoneLabel(next.lat, next.lng).then((label) => {
-          if (label) setZoneLabel(label);
+    // Ignore double-taps while a request is already in flight.
+    if (geoInFlightRef.current) return;
+
+    const finishDenied = (hint: string) => {
+      geoInFlightRef.current = false;
+      if (geoFailsafeRef.current) {
+        window.clearTimeout(geoFailsafeRef.current);
+        geoFailsafeRef.current = 0;
+      }
+      setGeoStatus('denied');
+      setGeoHelpVisible(true);
+      setZoneLabel(null);
+      setGeoHint(hint);
+    };
+
+    const finishReady = (next: { lat: number; lng: number }) => {
+      geoInFlightRef.current = false;
+      if (geoFailsafeRef.current) {
+        window.clearTimeout(geoFailsafeRef.current);
+        geoFailsafeRef.current = 0;
+      }
+      setCoords(next);
+      setGeoStatus('ready');
+      setGeoHelpVisible(false);
+      setGeoHint(null);
+      // Default to a local radius so far-away restaurants don't flood the feed.
+      // Skip when browsing a whole region — that means "show all there".
+      setRadiusKm((prev) => {
+        if (prev != null) return prev;
+        if (regionRef.current.trim()) return null;
+        return DEFAULT_NEAR_RADIUS_KM;
+      });
+      // Only flip sort when explicitly requested — never override an active text search.
+      if (opts?.switchToNear && !regionRef.current.trim()) setSortMode('near');
+      void resolveZoneLabel(next.lat, next.lng).then((label) => {
+        if (label) setZoneLabel(label);
+      });
+    };
+
+    const startGetPosition = () => {
+      geoInFlightRef.current = true;
+      setGeoStatus('loading');
+      setGeoHint(null);
+      // Some browsers never resolve when the prompt is dismissed oddly — don't hang forever.
+      if (geoFailsafeRef.current) window.clearTimeout(geoFailsafeRef.current);
+      geoFailsafeRef.current = window.setTimeout(() => {
+        if (!geoInFlightRef.current) return;
+        finishDenied(
+          'La ubicación tardó demasiado. Revisa el permiso en la barra del navegador e inténtalo de nuevo.',
+        );
+      }, 16000);
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          finishReady({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (error) => {
+          if (error.code === error.PERMISSION_DENIED) {
+            finishDenied(
+              'El navegador bloqueó la ubicación. Toca el candado/ícono de sitio en la barra de direcciones, permite la ubicación y pulsa de nuevo.',
+            );
+            return;
+          }
+          if (error.code === error.TIMEOUT) {
+            finishDenied('La ubicación tardó demasiado. Inténtalo de nuevo.');
+            return;
+          }
+          finishDenied('No pudimos obtener tu ubicación. Inténtalo de nuevo.');
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: opts?.forcePrompt ? 0 : 120000,
+        },
+      );
+    };
+
+    // If permission is already denied, getCurrentPosition fails instantly with no UI —
+    // surface that immediately so the button never feels "stuck".
+    const permissions = navigator.permissions;
+    if (opts?.forcePrompt && permissions?.query) {
+      geoInFlightRef.current = true;
+      setGeoStatus('loading');
+      setGeoHint(null);
+      void permissions
+        .query({ name: 'geolocation' as PermissionName })
+        .then((result) => {
+          if (result.state === 'denied') {
+            finishDenied(
+              'El navegador bloqueó la ubicación. Toca el candado/ícono de sitio en la barra de direcciones, permite la ubicación y pulsa de nuevo.',
+            );
+            return;
+          }
+          // startGetPosition re-arms the in-flight flag + failsafe.
+          geoInFlightRef.current = false;
+          startGetPosition();
+        })
+        .catch(() => {
+          // Safari / older browsers: Permissions API may reject — fall through.
+          geoInFlightRef.current = false;
+          startGetPosition();
         });
-      },
-      () => {
-        setGeoStatus('denied');
-        setZoneLabel(null);
-      },
-      {
-        enableHighAccuracy: false,
-        timeout: 12000,
-        maximumAge: opts?.forcePrompt ? 0 : 120000,
-      },
-    );
+      return;
+    }
+
+    startGetPosition();
   }, []);
 
   useEffect(() => {
     const fromUrl = readUrlState();
     setQuery(fromUrl.q);
+    regionRef.current = fromUrl.region;
     setRegion(fromUrl.region);
     setCategory(fromUrl.category);
     setSortMode(fromUrl.sort);
     setFavoritesOnly(fromUrl.fav);
+    setCurrencyFilter(fromUrl.currency);
+    setPaymentFilter(fromUrl.payment);
+    setOpenNowOnly(fromUrl.openNow);
+    setVesBcvOnly(fromUrl.vesBcv);
     setFavorites(readFavorites());
+    if (fromUrl.region.trim()) {
+      setRadiusKm(null);
+    }
     setUrlReady(true);
     if (!geoAskedRef.current) {
       geoAskedRef.current = true;
       // Ask for location on first visit; use near only when not already searching.
       requestLocation({
-        switchToNear: fromUrl.sort !== 'rated' && !fromUrl.q.trim(),
+        switchToNear:
+          fromUrl.sort !== 'rated' && !fromUrl.q.trim() && !fromUrl.region.trim(),
         forcePrompt: true,
       });
     }
@@ -610,13 +1395,59 @@ export function ClientesDiscoveryPage() {
 
   useEffect(() => {
     setVisibleCount(pageSize);
-  }, [category, coords, debouncedQuery, favoritesOnly, pageSize, radiusKm, region, sortMode]);
+  }, [
+    category,
+    coords,
+    currencyFilter,
+    favoritesOnly,
+    openNowOnly,
+    pageSize,
+    paymentFilter,
+    query,
+    radiusKm,
+    region,
+    sortMode,
+    vesBcvOnly,
+  ]);
 
   const scrollToResults = useCallback(() => {
     window.requestAnimationFrame(() => {
       resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
+
+  const selectRegion = useCallback(
+    (nextRegion: string) => {
+      regionRef.current = nextRegion;
+      setRegion(nextRegion);
+      setWhereMenuOpen(false);
+      if (nextRegion) {
+        // Region browse = all menus in that state, not "near me" radius.
+        setRadiusKm(null);
+        setSortMode('smart');
+      }
+      scrollToResults();
+    },
+    [scrollToResults],
+  );
+
+  useEffect(() => {
+    if (!whereMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && whereMenuRef.current?.contains(target)) return;
+      setWhereMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setWhereMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [whereMenuOpen]);
 
   const enterSearchMode = useCallback(
     (opts?: { query?: string; focus?: boolean }) => {
@@ -689,8 +1520,23 @@ export function ClientesDiscoveryPage() {
       category,
       sort: sortMode,
       fav: favoritesOnly,
+      currency: currencyFilter,
+      payment: paymentFilter,
+      openNow: openNowOnly,
+      vesBcv: vesBcvOnly,
     });
-  }, [category, debouncedQuery, favoritesOnly, region, sortMode, urlReady]);
+  }, [
+    category,
+    currencyFilter,
+    debouncedQuery,
+    favoritesOnly,
+    openNowOnly,
+    paymentFilter,
+    region,
+    sortMode,
+    urlReady,
+    vesBcvOnly,
+  ]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -700,7 +1546,7 @@ export function ClientesDiscoveryPage() {
     fetchAbortRef.current = controller;
 
     const run = async () => {
-      if (hasLoadedOnce.current) setRefreshing(true);
+      if (hasLoadedOnceRef.current) setRefreshing(true);
       else setLoading(true);
       setError(null);
       try {
@@ -726,13 +1572,34 @@ export function ClientesDiscoveryPage() {
           error?: string;
         };
         if (!response.ok) throw new Error(json.error ?? 'No se pudo cargar el directorio.');
+        const nextPayload = json.data ?? {};
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
         startTransition(() => {
-          setPayload(json.data ?? {});
-          hasLoadedOnce.current = true;
+          setPayload(nextPayload);
+          const nextResults = nextPayload.results ?? [];
+          if (!trimmed) {
+            setBrowseIndex(nextResults);
+          } else if (nextResults.length > 0) {
+            setBrowseIndex((prev) => {
+              const map = new Map(prev.map((item) => [item.id, item]));
+              for (const item of nextResults) {
+                const existing = map.get(item.id);
+                map.set(item.id, {
+                  ...existing,
+                  ...item,
+                  productNames: mergeUniqueNames(existing?.productNames, item.productNames),
+                });
+              }
+              return [...map.values()];
+            });
+          }
         });
       } catch (fetchError) {
         if (controller.signal.aborted) return;
         setError(fetchError instanceof Error ? fetchError.message : 'Error de carga');
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -757,13 +1624,35 @@ export function ClientesDiscoveryPage() {
     [coords, radiusKm],
   );
 
-  const results = payload.results ?? [];
+  const liveQueryFolded = foldSearchText(query);
+  const settledQueryFolded = foldSearchText(debouncedQuery);
+  const instantSearchResults = useMemo(() => {
+    if (liveQueryFolded.length < 2) return null;
+    return applyInstantDirectorySearch(browseIndex, liveQueryFolded);
+  }, [browseIndex, liveQueryFolded]);
+
+  const results = useMemo(() => {
+    const serverResults = payload.results ?? [];
+    if (liveQueryFolded.length < 2) return serverResults;
+    const serverSettled =
+      liveQueryFolded === settledQueryFolded && !refreshing && hasLoadedOnce;
+    if (serverSettled) {
+      // Server extras can include restaurants outside the warm browse index.
+      return serverResults.length > 0 ? serverResults : (instantSearchResults ?? serverResults);
+    }
+    // Typing ahead / waiting on network: show local ranked hits immediately.
+    return instantSearchResults ?? serverResults;
+  }, [
+    hasLoadedOnce,
+    instantSearchResults,
+    liveQueryFolded,
+    payload.results,
+    refreshing,
+    settledQueryFolded,
+  ]);
   const promoted = withinRadius(payload.promoted ?? results.filter((item) => item.promovido));
   const topRated = withinRadius(payload.topRated ?? []);
-  const regions =
-    payload.regions && payload.regions.length > 0
-      ? payload.regions
-      : [...DIRECTORY_REGIONS];
+  const regions = normalizeRegionStats(payload.regions);
   const categories =
     payload.categories && payload.categories.length > 0
       ? payload.categories
@@ -784,12 +1673,149 @@ export function ClientesDiscoveryPage() {
   }, [promoted, results, topRated, withinRadius]);
 
   useEffect(() => {
-    if (heroSlides.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setHeroIndex((index) => (index + 1) % heroSlides.length);
-    }, 4500);
-    return () => window.clearInterval(timer);
-  }, [heroSlides.length]);
+    heroIndexRef.current = heroIndex;
+  }, [heroIndex]);
+
+  useEffect(() => {
+    if (heroIndex < heroSlides.length) return;
+    setHeroIndex(0);
+    heroIndexRef.current = 0;
+    setHeroIncomingIndex(null);
+    setHeroFadeIn(false);
+    heroBusyRef.current = false;
+  }, [heroIndex, heroSlides.length]);
+
+  useEffect(() => {
+    const node = heroRootRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setHeroInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setHeroInView(Boolean(entry?.isIntersecting)),
+      { rootMargin: '160px 0px', threshold: 0.25 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (heroSlides.length <= 1) {
+      setHeroNextReady(false);
+      setHeroPrevReady(false);
+      return;
+    }
+    let cancelled = false;
+    const nextSlide = heroSlides[(heroIndex + 1) % heroSlides.length];
+    const prevSlide = heroSlides[(heroIndex - 1 + heroSlides.length) % heroSlides.length];
+    const nextUrl = nextSlide ? heroSlideImageUrl(nextSlide) : '';
+    const prevUrl = prevSlide ? heroSlideImageUrl(prevSlide) : '';
+    setHeroNextReady(Boolean(nextUrl && isImageReady(nextUrl)));
+    setHeroPrevReady(Boolean(prevUrl && isImageReady(prevUrl)));
+    if (nextUrl) {
+      void preloadCardImage(nextUrl).then((ok) => {
+        if (!cancelled) setHeroNextReady(ok);
+      });
+    }
+    if (prevUrl) {
+      void preloadCardImage(prevUrl).then((ok) => {
+        if (!cancelled) setHeroPrevReady(ok);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [heroIndex, heroSlides]);
+
+  const goToHeroSlide = useCallback(
+    async (nextIndex: number, opts?: { manual?: boolean }) => {
+      if (heroSlides.length <= 1) return;
+      const next = ((nextIndex % heroSlides.length) + heroSlides.length) % heroSlides.length;
+      if (heroBusyRef.current) return;
+      if (next === heroIndexRef.current) {
+        if (opts?.manual) setHeroCycleToken((token) => token + 1);
+        return;
+      }
+      const slide = heroSlides[next];
+      if (!slide) return;
+
+      if (opts?.manual) setHeroCycleToken((token) => token + 1);
+      heroBusyRef.current = true;
+      setHeroNavBusy(true);
+      const loaded = await preloadCardImage(heroSlideImageUrl(slide));
+      if (!loaded) {
+        heroBusyRef.current = false;
+        setHeroNavBusy(false);
+        return;
+      }
+
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reducedMotion) {
+        setHeroIndex(next);
+        heroIndexRef.current = next;
+        setHeroIncomingIndex(null);
+        setHeroFadeIn(false);
+        heroBusyRef.current = false;
+        setHeroNavBusy(false);
+        return;
+      }
+
+      setHeroIncomingIndex(next);
+      setHeroFadeIn(false);
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            setHeroFadeIn(true);
+            window.setTimeout(resolve, CARD_MEDIA_FADE_MS);
+          });
+        });
+      });
+      setHeroIndex(next);
+      heroIndexRef.current = next;
+      setHeroIncomingIndex(null);
+      setHeroFadeIn(false);
+      heroBusyRef.current = false;
+      setHeroNavBusy(false);
+    },
+    [heroSlides],
+  );
+
+  useEffect(() => {
+    if (!heroInView || heroSlides.length <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let cancelled = false;
+    let holdTimer = 0;
+
+    const schedule = (delay: number) => {
+      holdTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        if (document.hidden || heroBusyRef.current) {
+          schedule(HERO_MEDIA_HOLD_MS);
+          return;
+        }
+        const next = (heroIndexRef.current + 1) % heroSlides.length;
+        void goToHeroSlide(next).finally(() => {
+          if (!cancelled) schedule(HERO_MEDIA_HOLD_MS);
+        });
+      }, delay);
+    };
+
+    schedule(HERO_MEDIA_HOLD_MS);
+    const onVisibility = () => {
+      if (!document.hidden) {
+        const next = heroSlides[(heroIndexRef.current + 1) % heroSlides.length];
+        if (next) void preloadCardImage(heroSlideImageUrl(next));
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(holdTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [goToHeroSlide, heroCycleToken, heroInView, heroSlides]);
 
   const filteredResults = useMemo(() => {
     let list = results;
@@ -801,9 +1827,55 @@ export function ClientesDiscoveryPage() {
     if (favoritesOnly) {
       list = list.filter((item) => favorites.has(item.id));
     }
+    if (currencyFilter) {
+      list = list.filter((item) =>
+        (item.currencies ?? []).some(
+          (code) => code.toUpperCase() === currencyFilter.toUpperCase(),
+        ),
+      );
+    }
+    if (paymentFilter) {
+      const want = paymentFilter.trim().toLowerCase();
+      list = list.filter((item) =>
+        (item.paymentChannels ?? []).some(
+          (channel) => channel.trim().toLowerCase() === want,
+        ),
+      );
+    }
+    if (openNowOnly) {
+      list = list.filter((item) => item.isOpen === true);
+    }
+    if (vesBcvOnly) {
+      list = list.filter((item) => item.acceptsVesBcv === true);
+    }
     // While searching, keep server relevance order (smart) unless user forces near/rated.
     return sortBusinesses(list, sortMode);
-  }, [coords, favorites, favoritesOnly, radiusKm, results, sortMode]);
+  }, [
+    coords,
+    currencyFilter,
+    favorites,
+    favoritesOnly,
+    openNowOnly,
+    paymentFilter,
+    radiusKm,
+    results,
+    sortMode,
+    vesBcvOnly,
+  ]);
+
+  const availablePaymentChannels = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of results) {
+      for (const channel of item.paymentChannels ?? []) {
+        const label = channel.trim();
+        if (!label) continue;
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'es'))
+      .map(([name, count]) => ({ name, count }));
+  }, [results]);
 
   filteredResultsLengthRef.current = filteredResults.length;
 
@@ -848,9 +1920,14 @@ export function ClientesDiscoveryPage() {
 
   const clearFilters = useCallback(() => {
     setQuery('');
+    regionRef.current = '';
     setRegion('');
     setCategory('');
     setFavoritesOnly(false);
+    setCurrencyFilter('');
+    setPaymentFilter('');
+    setOpenNowOnly(false);
+    setVesBcvOnly(false);
     setRadiusKm(coords ? DEFAULT_NEAR_RADIUS_KM : null);
     setSortMode(coords ? 'near' : 'smart');
   }, [coords]);
@@ -861,18 +1938,49 @@ export function ClientesDiscoveryPage() {
     setDraftCategory(category);
     setDraftSort(sortMode);
     setDraftRadiusKm(radiusKm);
+    setDraftCurrency(currencyFilter);
+    setDraftPayment(paymentFilter);
+    setDraftOpenNow(openNowOnly);
+    setDraftVesBcv(vesBcvOnly);
     setSearchModalOpen(true);
-  }, [category, query, radiusKm, region, sortMode]);
+  }, [
+    category,
+    currencyFilter,
+    openNowOnly,
+    paymentFilter,
+    query,
+    radiusKm,
+    region,
+    sortMode,
+    vesBcvOnly,
+  ]);
 
   const applySearchModal = useCallback(() => {
     setQuery(draftQuery);
+    regionRef.current = draftRegion;
     setRegion(draftRegion);
     setCategory(draftCategory);
     setSortMode(draftSort);
-    setRadiusKm(draftRadiusKm);
+    // Choosing a region implies all results there; ignore near-radius clamp.
+    setRadiusKm(draftRegion.trim() ? null : draftRadiusKm);
+    setCurrencyFilter(draftCurrency);
+    setPaymentFilter(draftPayment);
+    setOpenNowOnly(draftOpenNow);
+    setVesBcvOnly(draftVesBcv);
     setSearchModalOpen(false);
     enterSearchMode({ focus: true });
-  }, [draftCategory, draftQuery, draftRadiusKm, draftRegion, draftSort, enterSearchMode]);
+  }, [
+    draftCategory,
+    draftCurrency,
+    draftOpenNow,
+    draftPayment,
+    draftQuery,
+    draftRadiusKm,
+    draftRegion,
+    draftSort,
+    draftVesBcv,
+    enterSearchMode,
+  ]);
 
   const visibleResults = useMemo(
     () => filteredResults.slice(0, visibleCount),
@@ -882,50 +1990,80 @@ export function ClientesDiscoveryPage() {
 
   const hasCustomRadius =
     radiusKm != null && !(coords && radiusKm === DEFAULT_NEAR_RADIUS_KM);
+  const hasPaymentFilters = Boolean(
+    currencyFilter || paymentFilter || openNowOnly || vesBcvOnly,
+  );
   const hasActiveFilters = Boolean(
-    query.trim() || region.trim() || category.trim() || favoritesOnly || hasCustomRadius,
+    query.trim() ||
+      region.trim() ||
+      category.trim() ||
+      favoritesOnly ||
+      hasCustomRadius ||
+      hasPaymentFilters,
   );
 
   const statusLine = useMemo(() => {
-    if (loading && !hasLoadedOnce.current) return 'Buscando restaurantes...';
+    if (loading && !hasLoadedOnce) return 'Buscando restaurantes…';
     const count = filteredResults.length;
     const parts = [`${count} lugar${count === 1 ? '' : 'es'}`];
     if (debouncedQuery.trim()) {
-      parts.push('relevancia · menú · cercanía · rating');
+      parts.push('según tu búsqueda y cercanía');
     } else if (sortMode === 'near' && coords) {
-      parts.push('ordenados por cercanía');
+      parts.push('los más cercanos primero');
     } else if (sortMode === 'rated') {
-      parts.push('mejor calificados primero');
+      parts.push('con mejor calificación');
     } else {
-      parts.push('prioridad promocionados + relevancia');
+      parts.push('para descubrir hoy');
     }
     if (region) parts.push(`en ${region}`);
     if (category) {
       const chip = categories.find((item) => item.id === category);
       if (chip) parts.push(chip.label.toLowerCase());
     }
-    if (radiusKm != null) parts.push(`≤ ${radiusKm} km`);
+    if (currencyFilter) parts.push(`paga en ${currencyFilter}`);
+    if (paymentFilter) parts.push(paymentFilter);
+    if (openNowOnly) parts.push('abiertos ahora');
+    if (vesBcvOnly) parts.push('tasa BCV');
+    if (radiusKm != null) parts.push(`a menos de ${radiusKm} km`);
     if (favoritesOnly) parts.push('solo favoritos');
-    if (refreshing) parts.push('actualizando');
     return parts.join(' · ');
   }, [
     categories,
     category,
     coords,
+    currencyFilter,
     debouncedQuery,
     favoritesOnly,
     filteredResults.length,
     loading,
+    openNowOnly,
+    paymentFilter,
     radiusKm,
-    refreshing,
     region,
     sortMode,
+    vesBcvOnly,
   ]);
 
   const activeCategoryLabel =
     categories.find((item) => item.id === category)?.label ?? category;
 
   const hero = heroSlides[heroIndex] ?? heroSlides[0] ?? null;
+  const heroIncoming =
+    heroIncomingIndex != null ? heroSlides[heroIncomingIndex] ?? null : null;
+  const heroVisible =
+    heroFadeIn && heroIncoming ? heroIncoming : hero;
+  const heroIndicatorIndex =
+    heroFadeIn && heroIncomingIndex != null ? heroIncomingIndex : heroIndex;
+
+  useEffect(() => {
+    const active = heroVisible ?? hero;
+    if (!heroInView || !active?.promovido) return;
+    trackDirectoryPromoEvent({
+      comercioId: active.id,
+      type: 'impression',
+      placement: 'promoted_hero',
+    });
+  }, [hero, heroInView, heroVisible]);
 
   const updateSearchQuery = useCallback((nextRaw: string) => {
     const next = nextRaw.slice(0, 80);
@@ -935,28 +2073,61 @@ export function ClientesDiscoveryPage() {
 
   const locationLabel =
     region || zoneLabel || (geoStatus === 'ready' ? 'Cerca de ti' : 'Tu zona');
+  const directorySettled = hasLoadedOnce && !loading && !refreshing;
   const areaEmpty =
     Boolean(coords) &&
+    geoStatus === 'ready' &&
     radiusKm != null &&
     filteredResults.length === 0 &&
-    !loading &&
-    hasLoadedOnce.current &&
+    directorySettled &&
     !query.trim() &&
+    !region.trim() &&
     !category.trim() &&
-    !favoritesOnly;
+    !favoritesOnly &&
+    !hasPaymentFilters;
   const searchStatusText =
     query.trim().length === 0
       ? null
-      : refreshing || query.trim() !== debouncedQuery.trim()
-        ? 'Buscando…'
-        : filteredResults.length === 0 && hasLoadedOnce.current
-          ? 'Sin resultados'
-          : `${filteredResults.length} resultado${filteredResults.length === 1 ? '' : 's'}`;
+      : filteredResults.length > 0
+        ? `${filteredResults.length} resultado${filteredResults.length === 1 ? '' : 's'}`
+        : refreshing || query.trim() !== debouncedQuery.trim() || !hasLoadedOnce
+          ? 'Buscando…'
+          : 'Sin resultados';
 
   return (
-    <div className={`${body.className} min-h-screen bg-[#FAFAFC] text-slate-900`}>
+    <div className={`min-h-screen bg-[#FAFAFC] text-slate-900`}>
+      <div className="sticky top-0 z-40">
+        {!searchMode && !merchantBannerHidden ? (
+          <div className="border-b border-violet-200/70 bg-[linear-gradient(90deg,#F7F3FF_0%,#EDE9FE_48%,#FBF9FF_100%)]">
+            <div className="mx-auto flex max-w-6xl items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
+              <p
+                className={`italic font-extrabold min-w-0 flex-1 text-[1.2rem] leading-snug tracking-wide text-[#4C1D95] sm:text-[1.65rem] sm:leading-tight`}
+              >
+                {merchantBannerMessage}
+              </p>
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <Link
+                  href={BENEFITS_HREF}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[#6D28D9] px-3 py-1.5 text-[12px] font-bold text-white shadow-sm shadow-violet-500/20 transition hover:bg-[#5b21b6] sm:px-4 sm:py-2 sm:text-[13px]"
+                >
+                  Comenzar
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <button
+                  type="button"
+                  onClick={hideMerchantBanner}
+                  aria-label="Ocultar anuncio"
+                  title="Ocultar"
+                  className="grid h-8 w-8 place-items-center rounded-full text-violet-700/70 transition hover:bg-violet-200/60 hover:text-violet-900 sm:h-9 sm:w-9"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       <header
-        className={`sticky top-0 z-40 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90 ${
+        className={`border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90 ${
           searchMode
             ? 'border-slate-200 shadow-[0_8px_30px_rgba(15,23,42,0.06)]'
             : 'border-slate-200/70'
@@ -1068,25 +2239,45 @@ export function ClientesDiscoveryPage() {
               <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
                 <button
                   type="button"
-                  onClick={() => requestLocation({ switchToNear: true })}
-                  className={`hidden max-w-[14rem] items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex ${
+                  disabled={geoStatus === 'loading'}
+                  onClick={() =>
+                    requestLocation({
+                      switchToNear: true,
+                      forcePrompt: geoStatus !== 'ready',
+                    })
+                  }
+                  className={`hidden max-w-[14rem] items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex disabled:cursor-wait disabled:opacity-80 ${
                     geoStatus === 'ready'
                       ? 'bg-violet-100 text-[#6D28D9]'
                       : 'bg-slate-100 text-slate-700'
                   }`}
-                  title={zoneLabel || undefined}
+                  title={zoneLabel || geoHint || undefined}
                 >
-                  <MapPin className="h-3.5 w-3.5 shrink-0 text-[#6D28D9]" />
+                  {geoStatus === 'loading' ? (
+                    <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[#6D28D9]" />
+                  ) : (
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-[#6D28D9]" />
+                  )}
                   <span className="truncate">
                     {geoStatus === 'ready'
                       ? zoneLabel || 'Cerca de ti'
                       : geoStatus === 'loading'
-                        ? 'Ubicando...'
+                        ? 'Ubicando…'
                         : geoStatus === 'denied'
                           ? 'Sin ubicación'
                           : 'Ubicarme'}
                   </span>
                 </button>
+                {merchantBannerHidden ? (
+                  <button
+                    type="button"
+                    onClick={showMerchantBanner}
+                    className="hidden items-center rounded-full bg-violet-100 px-3 py-2 text-[11px] font-bold text-[#6D28D9] sm:inline-flex"
+                    title="Mostrar oferta para restaurantes"
+                  >
+                    Oferta restaurantes
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setFavoritesOnly((value) => !value)}
@@ -1182,24 +2373,48 @@ export function ClientesDiscoveryPage() {
               <a href="#para-negocios" onClick={() => setMobileNavOpen(false)}>
                 Registra tu restaurante
               </a>
+              {merchantBannerHidden ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    showMerchantBanner();
+                  }}
+                  className="text-left font-bold text-[#6D28D9]"
+                >
+                  Mostrar oferta para restaurantes
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
       </header>
+      </div>
 
       <main>
-        {geoStatus === 'denied' ? (
+        {geoHelpVisible && geoStatus !== 'ready' ? (
           <div className="border-b border-amber-200 bg-amber-50 px-3 py-2.5 sm:px-4">
             <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 text-sm">
-              <p className="text-amber-900">
-                Activa tu ubicación para ordenar por cercanía y ver qué hay cerca de ti.
+              <p className="min-w-0 flex-1 text-amber-900">
+                {geoStatus === 'loading'
+                  ? 'Obteniendo tu ubicación… si el navegador pide permiso, acéptalo.'
+                  : geoHint ||
+                    'Activa tu ubicación para ordenar por cercanía y ver qué hay cerca de ti.'}
               </p>
               <button
                 type="button"
+                disabled={geoStatus === 'loading'}
                 onClick={() => requestLocation({ switchToNear: true, forcePrompt: true })}
-                className="rounded-full bg-amber-900 px-3 py-1.5 text-xs font-bold text-white"
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-amber-900 px-3 py-1.5 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-80"
               >
-                Permitir ubicación
+                {geoStatus === 'loading' ? (
+                  <>
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    Obteniendo…
+                  </>
+                ) : (
+                  'Permitir ubicación'
+                )}
               </button>
             </div>
           </div>
@@ -1207,10 +2422,10 @@ export function ClientesDiscoveryPage() {
 
         {!searchMode ? (
         <>
-        <section className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(109,40,217,0.16),transparent_34%),linear-gradient(180deg,#fff,#fafafc)]" />
+        <section className={`relative ${whereMenuOpen ? 'z-30' : 'z-10'}`}>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden bg-[radial-gradient(circle_at_80%_20%,rgba(109,40,217,0.16),transparent_34%),linear-gradient(180deg,#fff,#fafafc)]" />
           <div className="relative mx-auto grid max-w-6xl gap-5 px-3 pb-6 pt-5 sm:gap-8 sm:px-4 sm:pb-10 sm:pt-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:pt-14">
-            <div>
+            <div className="relative z-20 min-w-0">
               <h1 className="max-w-xl font-[var(--font-display)] text-[1.75rem] font-black leading-[1.08] tracking-[-0.04em] text-[#0F172A] sm:text-4xl md:text-[3.35rem] md:leading-[1.02]">
                 Tu próxima{' '}
                 <span className="text-[#6D28D9]">comida</span>
@@ -1218,10 +2433,10 @@ export function ClientesDiscoveryPage() {
                 está aquí
               </h1>
               <p className="mt-2 hidden max-w-lg text-slate-600 sm:mt-3 sm:block sm:text-base md:text-lg">
-                Busca por antojo, región o cercanía. Los promocionados los elige el restaurante; los
-                destacados salen de las notas reales de sus clientes.
+                Explora restaurantes reales, menús reales y recomendaciones de personas que aman
+                comer.
               </p>
-              <div ref={heroSearchRef} className="mt-4 sm:mt-6">
+              <div ref={heroSearchRef} className="relative z-30 mt-4 sm:mt-6">
                 {/* Mobile: Airbnb-style single search pill */}
                 <button
                   type="button"
@@ -1246,13 +2461,13 @@ export function ClientesDiscoveryPage() {
                 </button>
 
                 {/* Desktop/tablet: expanded search card */}
-                <button
-                  type="button"
-                  onClick={() => enterSearchMode({ focus: true })}
-                  className="group hidden w-full rounded-[28px] bg-white p-2 text-left shadow-[0_20px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 transition hover:-translate-y-0.5 hover:shadow-[0_22px_70px_rgba(109,40,217,0.18)] hover:ring-[#6D28D9]/30 sm:block"
-                >
+                <div className="group relative hidden w-full rounded-[28px] bg-white p-2 text-left shadow-[0_20px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 transition hover:shadow-[0_22px_70px_rgba(109,40,217,0.18)] hover:ring-[#6D28D9]/30 sm:block">
                   <div className="flex flex-col sm:flex-row sm:items-stretch">
-                    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-[22px] px-4 py-3 sm:rounded-none sm:rounded-l-[22px]">
+                    <button
+                      type="button"
+                      onClick={() => enterSearchMode({ focus: true })}
+                      className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-[22px] px-4 py-3 text-left transition hover:bg-slate-50 sm:rounded-none sm:rounded-l-[22px]"
+                    >
                       <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
                         Qué buscas
                       </span>
@@ -1260,28 +2475,119 @@ export function ClientesDiscoveryPage() {
                         <Search className="h-4 w-4 shrink-0 text-[#6D28D9]" />
                         <span className="truncate">Burger, pizza, café, restaurante…</span>
                       </span>
-                    </span>
+                    </button>
                     <span className="mx-3 hidden w-px bg-slate-200 sm:block" />
-                    <span className="flex min-w-0 flex-[0.85] flex-col justify-center gap-0.5 rounded-[22px] border-t border-slate-100 px-4 py-3 sm:border-t-0 sm:rounded-none">
-                      <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
-                        Dónde
-                      </span>
-                      <span className="flex items-center gap-2 truncate text-[15px] font-semibold text-slate-900">
-                        <MapPin className="h-4 w-4 shrink-0 text-[#6D28D9]" />
-                        <span className="truncate">{locationLabel}</span>
-                      </span>
-                    </span>
-                    <span className="flex items-center p-1 sm:pl-2">
-                      <span className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#6D28D9] px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 sm:w-auto sm:px-7">
+                    <div ref={whereMenuRef} className="relative min-w-0 flex-[0.85]">
+                      <button
+                        type="button"
+                        aria-haspopup="listbox"
+                        aria-expanded={whereMenuOpen}
+                        onClick={() => setWhereMenuOpen((open) => !open)}
+                        className={`flex w-full flex-col justify-center gap-0.5 rounded-[22px] border-t border-slate-100 px-4 py-3 text-left transition sm:border-t-0 sm:rounded-none ${
+                          whereMenuOpen ? 'bg-violet-50' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
+                          Dónde
+                        </span>
+                        <span className="flex items-center gap-2 truncate text-[15px] font-semibold text-slate-900">
+                          <MapPin className="h-4 w-4 shrink-0 text-[#6D28D9]" />
+                          <span className="min-w-0 flex-1 truncate">{locationLabel}</span>
+                          <ChevronDown
+                            className={`h-4 w-4 shrink-0 text-slate-400 transition ${
+                              whereMenuOpen ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </span>
+                      </button>
+                      {whereMenuOpen ? (
+                        <div
+                          role="listbox"
+                          aria-label="Seleccionar región"
+                          className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-50 max-h-72 overflow-y-auto rounded-2xl bg-white p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)] ring-1 ring-slate-200 sm:left-auto sm:right-0 sm:w-[min(100%,18rem)]"
+                        >
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={!region}
+                            onClick={() => selectRegion('')}
+                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                              !region
+                                ? 'bg-violet-50 text-[#6D28D9]'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1">Todas las regiones</span>
+                            {!region ? <Check className="h-4 w-4 shrink-0" /> : null}
+                          </button>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            onClick={() => {
+                              regionRef.current = '';
+                              setRegion('');
+                              setWhereMenuOpen(false);
+                              requestLocation({ switchToNear: true, forcePrompt: true });
+                              scrollToResults();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Navigation className="h-4 w-4 shrink-0 text-[#6D28D9]" />
+                            <span className="min-w-0 flex-1">
+                              {geoStatus === 'loading' ? 'Obteniendo ubicación…' : 'Cerca de mí'}
+                            </span>
+                          </button>
+                          {regions.length > 0 ? (
+                            <div className="my-1 border-t border-slate-100" />
+                          ) : null}
+                          {regions.map((item) => {
+                            const active = region === item.name;
+                            return (
+                              <button
+                                key={item.name}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                onClick={() => selectRegion(item.name)}
+                                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                                  active
+                                    ? 'bg-violet-50 text-[#6D28D9]'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                                <span
+                                  className={`rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
+                                    active
+                                      ? 'bg-[#6D28D9]/15 text-[#6D28D9]'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {item.count}
+                                </span>
+                                {active ? <Check className="h-4 w-4 shrink-0" /> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center p-1 sm:pl-2">
+                      <button
+                        type="button"
+                        onClick={() => enterSearchMode({ focus: true })}
+                        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#6D28D9] px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 sm:w-auto sm:px-7"
+                      >
                         <Search className="h-4 w-4" />
                         Buscar
-                      </span>
-                    </span>
+                      </button>
+                    </div>
                   </div>
-                </button>
+                </div>
 
-                <div className="mt-3 flex items-center justify-between gap-2 px-0.5 sm:mt-3 sm:px-1">
-                  <div className="flex min-w-0 gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="mt-3 flex items-center justify-between gap-2 px-0.5 py-1 sm:mt-3 sm:px-1">
+                  <div className="flex min-w-0 gap-2 overflow-x-auto py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {(
                       [
                         ['burger', 'Burger'],
@@ -1295,7 +2601,7 @@ export function ClientesDiscoveryPage() {
                         key={value}
                         type="button"
                         onClick={() => enterSearchMode({ query: value, focus: true })}
-                        className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 ring-1 ring-slate-200 transition hover:ring-violet-200 sm:px-3.5 sm:py-2 sm:text-xs"
+                        className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 transition hover:border-violet-200 sm:px-3.5 sm:py-2 sm:text-xs"
                       >
                         {label}
                       </button>
@@ -1308,7 +2614,7 @@ export function ClientesDiscoveryPage() {
                       openSearchModal();
                     }}
                     aria-label="Filtros"
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-600 ring-1 ring-slate-200 sm:hidden"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 sm:hidden"
                   >
                     <SlidersHorizontal className="h-4 w-4" />
                   </button>
@@ -1318,7 +2624,7 @@ export function ClientesDiscoveryPage() {
                       enterSearchMode({ focus: false });
                       openSearchModal();
                     }}
-                    className="hidden shrink-0 items-center gap-1.5 rounded-full bg-white px-3.5 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 sm:inline-flex"
+                    className="hidden shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-600 sm:inline-flex"
                   >
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     Filtros
@@ -1327,81 +2633,186 @@ export function ClientesDiscoveryPage() {
                 {geoStatus !== 'ready' ? (
                   <button
                     type="button"
+                    disabled={geoStatus === 'loading'}
                     onClick={() => {
                       requestLocation({ switchToNear: true, forcePrompt: true });
                     }}
-                    className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-bold text-[#6D28D9] sm:mt-3"
+                    className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-bold text-[#6D28D9] disabled:cursor-wait disabled:opacity-70 sm:mt-3"
                   >
-                    <Navigation className="h-3.5 w-3.5" />
+                    {geoStatus === 'loading' ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Navigation className="h-3.5 w-3.5" />
+                    )}
                     {geoStatus === 'loading' ? 'Obteniendo ubicación…' : 'Usar mi ubicación'}
                   </button>
                 ) : null}
               </div>
             </div>
-            <div className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]">
-              {hero ? (
-                <Link href={hero.menuUrl} className="absolute inset-0 block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    key={hero.id}
-                    src={hero.coverUrl || hero.logoUrl || '/branding/full_logo.png'}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-700"
+            <div
+              ref={heroRootRef}
+              className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]"
+            >
+              {areaEmpty ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-violet-200 ring-1 ring-white/15">
+                    <MapPin className="h-6 w-6" />
+                  </div>
+                  <p className="mt-3 font-[var(--font-display)] text-lg font-black tracking-tight text-white sm:text-xl">
+                    No hay restaurantes cerca de ti
+                  </p>
+                  <p className="mt-2 max-w-sm text-sm leading-relaxed text-white/75">
+                    En{' '}
+                    <span className="font-semibold text-white">
+                      {zoneLabel || 'tu zona'}
+                    </span>
+                    {radiusKm != null ? ` (≤ ${radiusKm} km)` : ''} aún no hay menús publicados.
+                  </p>
+                  <Link
+                    href={BENEFITS_HREF}
+                    className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#6D28D9] px-4 text-sm font-bold text-white shadow-[0_12px_28px_rgba(109,40,217,0.35)]"
+                  >
+                    Registrar un restaurante aquí
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                    {radiusKm != null && radiusKm < 50 ? (
+                      <button
+                        type="button"
+                        onClick={() => setRadiusKm(50)}
+                        className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white ring-1 ring-white/20 hover:bg-white/15"
+                      >
+                        Ampliar a 50 km
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setRadiusKm(null)}
+                      className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white ring-1 ring-white/20 hover:bg-white/15"
+                    >
+                      Ver todos
+                    </button>
+                  </div>
+                </div>
+              ) : hero ? (
+                <Link
+                  href={
+                    (heroVisible ?? hero).promovido
+                      ? withPromoMenuSrc((heroVisible ?? hero).menuUrl)
+                      : (heroVisible ?? hero).menuUrl
+                  }
+                  className="absolute inset-0 block"
+                  onClick={() => {
+                    const current = heroVisible ?? hero;
+                    if (!current.promovido) return;
+                    trackDirectoryPromoEvent({
+                      comercioId: current.id,
+                      type: 'click',
+                      placement: 'promoted_hero',
+                    });
+                  }}
+                >
+                  <FadeInMediaImage
+                    src={heroSlideImageUrl(hero)}
+                    priority
+                    tone="dark"
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
+                  {heroIncoming ? (
+                    <div
+                      className={`absolute inset-0 transition-opacity ease-out ${
+                        heroFadeIn ? 'opacity-100' : 'opacity-0'
+                      }`}
+                      style={{ transitionDuration: `${CARD_MEDIA_FADE_MS}ms` }}
+                      aria-hidden={!heroFadeIn}
+                    >
+                      <FadeInMediaImage
+                        src={heroSlideImageUrl(heroIncoming)}
+                        priority
+                        tone="dark"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : null}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-3.5 text-white sm:p-6">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-violet-200 sm:text-xs">
-                      {hero.promovido ? 'Sitio promocionado' : 'Recomendado'}
+                      {(heroVisible ?? hero).promovido
+                        ? 'Sitio promocionado'
+                        : 'Recomendado'}
                     </p>
-                    <p className="mt-0.5 line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:mt-1 sm:text-2xl">
-                      {hero.nombre}
-                    </p>
-                    <p className="mt-0.5 truncate text-[11px] text-white/80 sm:mt-1 sm:text-sm">
-                      {hero.ratingCount > 0
-                        ? `★ ${hero.ratingAverage.toFixed(1)} · ${hero.ratingCount} opiniones`
-                        : hero.categoria || 'Menú digital'}
-                      {hero.distanceKm != null ? ` · ${hero.distanceKm} km` : ''}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2.5 sm:mt-1.5 sm:gap-3">
+                      <HeroBusinessLogo
+                        logoUrl={(heroVisible ?? hero).logoUrl}
+                        name={(heroVisible ?? hero).nombre}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:text-2xl">
+                          {(heroVisible ?? hero).nombre}
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-white/80 sm:text-sm">
+                          {(heroVisible ?? hero).ratingCount > 0
+                            ? `★ ${(heroVisible ?? hero).ratingAverage.toFixed(1)} · ${(heroVisible ?? hero).ratingCount} opiniones`
+                            : (heroVisible ?? hero).categoria || 'Menú digital'}
+                          {(heroVisible ?? hero).distanceKm != null
+                            ? ` · ${(heroVisible ?? hero).distanceKm} km`
+                            : ''}
+                        </p>
+                      </div>
+                    </div>
                     <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#6D28D9] sm:mt-3">
                       Ver menú <ArrowRight className="h-3.5 w-3.5" />
                     </span>
                   </div>
                 </Link>
+              ) : directorySettled ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
+                  <p className="max-w-xs text-sm text-white/70">
+                    Explora regiones o amplía tu zona para descubrir menús cerca.
+                  </p>
+                </div>
               ) : (
-                <div className="grid h-full place-items-center text-violet-200">
-                  <Store className="h-12 w-12" />
+                <div className="relative h-full">
+                  <MediaShimmer tone="dark" />
                 </div>
               )}
-              <p
-                className={`${script.className} pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
-              >
-                Apoyemos el talento local ♥
-              </p>
-              {heroSlides.length > 1 ? (
+              {!areaEmpty && heroSlides.length > 1 ? (
                 <>
                   <button
                     type="button"
-                    aria-label="Anterior"
+                    aria-label={heroPrevReady && !heroNavBusy ? 'Anterior' : 'Cargando imagen anterior'}
+                    disabled={!heroPrevReady || heroNavBusy}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setHeroIndex((index) => (index - 1 + heroSlides.length) % heroSlides.length);
+                      if (!heroPrevReady || heroNavBusy) return;
+                      void goToHeroSlide(heroIndexRef.current - 1, { manual: true });
                     }}
-                    className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:left-3 sm:h-10 sm:w-10"
+                    className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg transition enabled:hover:bg-white disabled:cursor-wait sm:left-3 sm:h-10 sm:w-10"
                   >
-                    <ChevronLeft className="h-5 w-5" />
+                    {!heroPrevReady || heroNavBusy ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin text-[#6D28D9]" />
+                    ) : (
+                      <ChevronLeft className="h-5 w-5" />
+                    )}
                   </button>
                   <button
                     type="button"
-                    aria-label="Siguiente"
+                    aria-label={heroNextReady && !heroNavBusy ? 'Siguiente' : 'Cargando siguiente imagen'}
+                    disabled={!heroNextReady || heroNavBusy}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setHeroIndex((index) => (index + 1) % heroSlides.length);
+                      if (!heroNextReady || heroNavBusy) return;
+                      void goToHeroSlide(heroIndexRef.current + 1, { manual: true });
                     }}
-                    className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:right-3 sm:h-10 sm:w-10"
+                    className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg transition enabled:hover:bg-white disabled:cursor-wait sm:right-3 sm:h-10 sm:w-10"
                   >
-                    <ChevronRight className="h-5 w-5" />
+                    {!heroNextReady || heroNavBusy ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin text-[#6D28D9]" />
+                    ) : (
+                      <ChevronRight className="h-5 w-5" />
+                    )}
                   </button>
                   <div className="absolute bottom-3 right-3 z-10 flex gap-1.5 sm:bottom-4 sm:right-6">
                     {heroSlides.map((slide, index) => (
@@ -1412,10 +2823,10 @@ export function ClientesDiscoveryPage() {
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          setHeroIndex(index);
+                          void goToHeroSlide(index, { manual: true });
                         }}
-                        className={`h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2 ${
-                          index === heroIndex ? 'bg-white' : 'bg-white/40'
+                        className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 sm:h-2 sm:w-2 ${
+                          index === heroIndicatorIndex ? 'bg-white' : 'bg-white/40'
                         }`}
                       />
                     ))}
@@ -1478,7 +2889,7 @@ export function ClientesDiscoveryPage() {
               {region ? (
                 <button
                   type="button"
-                  onClick={() => setRegion('')}
+                  onClick={() => selectRegion('')}
                   className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
                 >
                   {region} <X className="h-3 w-3" />
@@ -1491,6 +2902,42 @@ export function ClientesDiscoveryPage() {
                   className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
                 >
                   {activeCategoryLabel} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {currencyFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrencyFilter('')}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  {currencyFilter} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {paymentFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setPaymentFilter('')}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  {paymentFilter} <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {openNowOnly ? (
+                <button
+                  type="button"
+                  onClick={() => setOpenNowOnly(false)}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  Abierto ahora <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {vesBcvOnly ? (
+                <button
+                  type="button"
+                  onClick={() => setVesBcvOnly(false)}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-[#6D28D9]"
+                >
+                  Tasa BCV <X className="h-3 w-3" />
                 </button>
               ) : null}
               {sortMode !== 'smart' ? (
@@ -1534,11 +2981,19 @@ export function ClientesDiscoveryPage() {
         {!hasActiveFilters && (loading || promoted.length > 0) ? (
           <section id="promocionados" className="mx-auto max-w-6xl px-3 pb-8 sm:px-4 sm:pb-10">
             <div className="mb-3 flex items-end justify-between gap-3 sm:mb-4">
-              <div className="min-w-0">
-                <h2 className="text-xl font-extrabold tracking-tight sm:text-2xl">Sitios promocionados</h2>
-                <p className="hidden text-sm text-slate-500 sm:block">
-                  Prioridad manual desde el panel del restaurante.
-                </p>
+              <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
+                <Megaphone
+                  className="mt-0.5 h-6 w-6 shrink-0 text-[#6D28D9] sm:mt-1 sm:h-7 sm:w-7"
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <h2 className="text-xl font-extrabold tracking-tight sm:text-2xl">
+                    Sitios promocionados
+                  </h2>
+                  <p className="mt-0.5 text-sm text-slate-500">
+                    Conoce los restaurantes destacados de la semana
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {promoted.length > 1 ? (
@@ -1584,6 +3039,7 @@ export function ClientesDiscoveryPage() {
                       selected={selectedId === business.id}
                       onToggleFavorite={toggleFavorite}
                       onSelect={setSelectedId}
+                      promoPlacement="promoted_carousel"
                     />
                   </div>
                 ))}
@@ -1622,7 +3078,7 @@ export function ClientesDiscoveryPage() {
                 </p>
               ) : null}
             </div>
-            <div className="flex w-full items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] sm:w-auto [&::-webkit-scrollbar]:hidden">
+            <div className="flex w-full items-center gap-2 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:w-auto [&::-webkit-scrollbar]:hidden">
               {(
                 [
                   ['smart', 'Para ti'],
@@ -1640,10 +3096,10 @@ export function ClientesDiscoveryPage() {
                     }
                     setSortMode(mode);
                   }}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold ${
                     sortMode === mode
-                      ? 'bg-[#6D28D9] text-white'
-                      : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                      ? 'border-[#6D28D9] bg-[#6D28D9] text-white'
+                      : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
                   {label}
@@ -1654,10 +3110,10 @@ export function ClientesDiscoveryPage() {
                   type="button"
                   id="search-map-toggle"
                   onClick={() => setShowSearchMap((value) => !value)}
-                  className={`ml-auto shrink-0 rounded-full px-3 py-1.5 text-xs font-bold sm:hidden ${
+                  className={`ml-auto shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold sm:hidden ${
                     showSearchMap
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
                   {showSearchMap ? 'Ocultar mapa' : 'Ver mapa'}
@@ -1673,11 +3129,11 @@ export function ClientesDiscoveryPage() {
           >
             <div
               className={`order-1 transition-opacity duration-200 ${
-                refreshing ? 'opacity-70' : 'opacity-100'
+                refreshing && filteredResults.length === 0 ? 'opacity-70' : 'opacity-100'
               } ${searchMode ? '' : 'lg:order-2'}`}
             >
               {error ? <p className="mb-3 text-sm text-rose-600">{error}</p> : null}
-              {loading && !hasLoadedOnce.current ? (
+              {(loading && !hasLoadedOnce) || (refreshing && filteredResults.length === 0) ? (
                 <ResultSkeleton />
               ) : filteredResults.length === 0 ? (
                 <div className="rounded-[22px] bg-white p-6 text-center ring-1 ring-slate-100 sm:p-8">
@@ -1730,7 +3186,9 @@ export function ClientesDiscoveryPage() {
                       <p className="mt-2 text-sm text-slate-500">
                         {searchMode && !query.trim()
                           ? 'Busca un platillo o restaurante para ver todos los resultados relacionados.'
-                          : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
+                          : hasPaymentFilters
+                            ? 'Prueba quitar filtros de moneda, pago, horario o tasa BCV.'
+                            : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
                       </p>
                       {!searchMode ? (
                         <button
@@ -1857,6 +3315,7 @@ export function ClientesDiscoveryPage() {
 
         {!searchMode ? (
         <>
+        {regions.length > 0 ? (
         <section id="regiones" className="mx-auto max-w-6xl scroll-mt-20 px-3 pb-10 sm:px-4 sm:pb-14">
           <div className="overflow-hidden rounded-[24px] bg-white shadow-sm ring-1 ring-slate-100 sm:rounded-[28px]">
             <div className="relative overflow-hidden bg-[linear-gradient(160deg,#4c1d95,#6d28d9_55%,#a78bfa)] px-5 py-5 sm:px-8 sm:py-7">
@@ -1883,27 +3342,56 @@ export function ClientesDiscoveryPage() {
               </div>
             </div>
             <div className="p-4 sm:p-6">
-              <div className="flex flex-wrap gap-2">
-                {regions.map((item) => {
-                  const active = region === item;
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => {
-                        setRegion(active ? '' : item);
-                        scrollToResults();
-                      }}
-                      className={`rounded-full px-3.5 py-2 text-[13px] font-bold ring-1 transition sm:px-4 sm:text-sm ${
-                        active
-                          ? 'bg-[#6D28D9] text-white ring-[#6D28D9]'
-                          : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-violet-50'
-                      }`}
-                    >
-                      {item}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center gap-2 py-1">
+                {regions.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label="Regiones anteriores"
+                    onClick={() => scrollRegionCarousel(-1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <div
+                  ref={regionCarouselRef}
+                  className="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  {regions.map((item) => {
+                    const active = region === item.name;
+                    return (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => selectRegion(active ? '' : item.name)}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-[13px] font-bold transition sm:px-4 sm:text-sm ${
+                          active
+                            ? 'border-[#6D28D9] bg-[#6D28D9] text-white'
+                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-violet-50'
+                        }`}
+                      >
+                        <span>{item.name}</span>
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
+                            active ? 'bg-white/20 text-white' : 'bg-violet-100 text-[#6D28D9]'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {regions.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label="Regiones siguientes"
+                    onClick={() => scrollRegionCarousel(1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
               {region ? (
                 <p className="mt-3 text-xs text-slate-500 sm:text-sm">
@@ -1911,7 +3399,7 @@ export function ClientesDiscoveryPage() {
                   {' · '}
                   <button
                     type="button"
-                    onClick={() => setRegion('')}
+                    onClick={() => selectRegion('')}
                     className="font-bold text-slate-700 underline-offset-2 hover:underline"
                   >
                     Quitar filtro
@@ -1925,6 +3413,7 @@ export function ClientesDiscoveryPage() {
             </div>
           </div>
         </section>
+        ) : null}
 
         <section id="para-negocios" className="mx-auto max-w-6xl px-3 py-6 sm:px-4 sm:py-12">
           <div className="relative overflow-hidden rounded-[28px] bg-[linear-gradient(160deg,#f7f4ff_0%,#faf8ff_42%,#ffffff_100%)] p-5 shadow-[0_18px_50px_rgba(109,40,217,0.08)] ring-1 ring-violet-100/80 sm:rounded-[32px] sm:p-8 lg:p-10">
@@ -2180,7 +3669,9 @@ export function ClientesDiscoveryPage() {
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <div>
                 <p className="text-base font-extrabold text-slate-900">Buscar y filtrar</p>
-                <p className="text-xs text-slate-500">Ajusta antojo, zona y orden</p>
+                <p className="text-xs text-slate-500">
+                  Zona, pago, moneda, horario y orden
+                </p>
               </div>
               <button
                 type="button"
@@ -2224,16 +3715,17 @@ export function ClientesDiscoveryPage() {
                   </button>
                   {regions.map((item) => (
                     <button
-                      key={item}
+                      key={item.name}
                       type="button"
-                      onClick={() => setDraftRegion(item)}
+                      onClick={() => setDraftRegion(item.name)}
                       className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                        draftRegion === item
+                        draftRegion === item.name
                           ? 'bg-[#6D28D9] text-white'
                           : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
                       }`}
                     >
-                      {item}
+                      {item.name}
+                      <span className="ml-1.5 tabular-nums opacity-80">{item.count}</span>
                     </button>
                   ))}
                 </div>
@@ -2346,6 +3838,101 @@ export function ClientesDiscoveryPage() {
                   </button>
                 ) : null}
               </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Moneda</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftCurrency('')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      !draftCurrency
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Todas
+                  </button>
+                  {CURRENCY_FILTER_OPTIONS.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setDraftCurrency(code)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                        draftCurrency === code
+                          ? 'bg-[#6D28D9] text-white'
+                          : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Método de pago
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftPayment('')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      !draftPayment
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  {availablePaymentChannels.map((item) => (
+                    <button
+                      key={item.name}
+                      type="button"
+                      onClick={() => setDraftPayment(item.name)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                        draftPayment === item.name
+                          ? 'bg-[#6D28D9] text-white'
+                          : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {item.name}
+                      <span className="ml-1.5 tabular-nums opacity-80">{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Disponibilidad
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraftOpenNow((value) => !value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      draftOpenNow
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Abierto ahora
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraftVesBcv((value) => !value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                      draftVesBcv
+                        ? 'bg-[#6D28D9] text-white'
+                        : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
+                    }`}
+                  >
+                    Tasa BCV (VES)
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 border-t border-slate-100 px-4 py-3">
               <button
@@ -2356,6 +3943,10 @@ export function ClientesDiscoveryPage() {
                   setDraftCategory('');
                   setDraftSort(coords ? 'near' : 'smart');
                   setDraftRadiusKm(null);
+                  setDraftCurrency('');
+                  setDraftPayment('');
+                  setDraftOpenNow(false);
+                  setDraftVesBcv(false);
                 }}
                 className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700"
               >

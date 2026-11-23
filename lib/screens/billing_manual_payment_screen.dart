@@ -2,10 +2,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/payment_method_mark.dart';
 
 class BillingManualPaymentScreen extends StatefulWidget {
@@ -14,11 +14,13 @@ class BillingManualPaymentScreen extends StatefulWidget {
     required this.method,
     required this.plan,
     this.hasPendingSubmission = false,
+    this.bcvRate,
   });
 
   final PaymentMethodCatalog method;
   final BillingPlan? plan;
   final bool hasPendingSubmission;
+  final double? bcvRate;
 
   @override
   State<BillingManualPaymentScreen> createState() =>
@@ -28,6 +30,7 @@ class BillingManualPaymentScreen extends StatefulWidget {
 class _BillingManualPaymentScreenState
     extends State<BillingManualPaymentScreen> {
   final _billing = const BillingService();
+  final _webCamera = const WebCameraHandoffService();
   final _reference = TextEditingController();
   final _payerName = TextEditingController();
   final _advisorCode = TextEditingController();
@@ -53,6 +56,9 @@ class _BillingManualPaymentScreenState
     return unit * _months;
   }
 
+  double? get _dueVes =>
+      vesAmountFromUsd(usd: _dueUsd, bcvRate: widget.bcvRate);
+
   Future<void> _copy(String value) async {
     await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) return;
@@ -61,42 +67,16 @@ class _BillingManualPaymentScreenState
     );
   }
 
-  Future<void> _pickReceipt({required bool fromCamera}) async {
+  Future<void> _uploadReceiptBytes({
+    required Uint8List bytes,
+    required String name,
+    required String mime,
+  }) async {
     setState(() {
       _error = null;
       _uploading = true;
     });
     try {
-      late final Uint8List bytes;
-      late final String name;
-      late final String mime;
-
-      if (fromCamera) {
-        final shot = await ImagePicker().pickImage(
-          source: ImageSource.camera,
-          imageQuality: 85,
-        );
-        if (shot == null) return;
-        bytes = await shot.readAsBytes();
-        name = shot.name;
-        mime = 'image/jpeg';
-      } else {
-        final picked = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const <String>['jpg', 'jpeg', 'png', 'webp', 'pdf'],
-          withData: true,
-        );
-        final file = picked?.files.single;
-        if (file == null) return;
-        final data = file.bytes;
-        if (data == null) {
-          throw StateError('No se pudo leer el archivo. Intenta con otro.');
-        }
-        bytes = data;
-        name = file.name;
-        mime = _mimeForName(file.name);
-      }
-
       final path = await _billing.uploadSubscriptionReceipt(
         bytes: bytes,
         fileName: name,
@@ -115,14 +95,77 @@ class _BillingManualPaymentScreenState
     }
   }
 
+  Future<void> _pickReceiptFromCamera() async {
+    if (_uploading || _submitting) return;
+    setState(() => _error = null);
+    if (!mounted) return;
+
+    final shot = await _webCamera.pickCameraImage(
+      context,
+      feature: 'billing_receipt',
+      waitingTitle: 'Toma la foto del comprobante desde tu celular',
+      waitingSubtitle:
+          'Escanea el código con tu teléfono y la cargaremos aquí en cuanto la subas.',
+      imageQuality: 85,
+      maxWidth: 1600,
+    );
+    if (shot == null || !mounted) return;
+
+    final bytes = await shot.readAsBytes();
+    if (!mounted) return;
+    await _uploadReceiptBytes(
+      bytes: bytes,
+      name: shot.name.isEmpty ? 'comprobante.jpg' : shot.name,
+      mime: shot.mimeType?.trim().isNotEmpty == true
+          ? shot.mimeType!
+          : _mimeForName(shot.name),
+    );
+  }
+
+  Future<void> _pickReceiptFromFile() async {
+    if (_uploading || _submitting) return;
+    setState(() => _error = null);
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'pdf',
+        ],
+        withData: true,
+      );
+      final file = picked?.files.single;
+      if (file == null) return;
+      final data = file.bytes;
+      if (data == null) {
+        throw StateError('No se pudo leer el archivo. Intenta con otro.');
+      }
+      if (!mounted) return;
+      await _uploadReceiptBytes(
+        bytes: data,
+        name: file.name,
+        mime: _mimeForName(file.name),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error'.replaceFirst('Bad state: ', ''));
+    }
+  }
+
   Future<void> _submit() async {
     if (_submitting || widget.hasPendingSubmission) return;
+    final parsedDeclared =
+        double.tryParse(_declaredAmount.text.replaceAll(',', '.'));
     final draft = ManualPaymentDraft(
       months: _months,
       reference: _reference.text,
       payerName: _payerName.text,
       advisorCode: _advisorCode.text,
-      declaredAmount: double.tryParse(_declaredAmount.text.replaceAll(',', '.')),
+      declaredAmount: parsedDeclared ??
+          (widget.method.isPagoMovil ? _dueVes : null),
       declaredCurrency: widget.method.localCurrency,
       receiptPath: _receiptPath,
     );
@@ -251,19 +294,45 @@ class _BillingManualPaymentScreenState
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Total a reportar: \$${_dueUsd.toStringAsFixed(_dueUsd.truncateToDouble() == _dueUsd ? 0 : 2)} USD'
-                  '${method.localCurrency == null || method.localCurrency == 'USD' ? '' : ' (o su equivalente en ${method.localCurrency})'}',
+                  'Total: \$${_dueUsd.toStringAsFixed(_dueUsd.truncateToDouble() == _dueUsd ? 0 : 2)} USD',
                   style: GoogleFonts.manrope(
                     color: AppColors.textSoft,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                if (method.isPagoMovil && _dueVes != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Transfiere exactamente ${formatBolivares(_dueVes!)} (tasa BCV)',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textStrong,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    'Te enviaremos un correo al recibir el comprobante y otro cuando lo aprobemos o rechacemos.',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textSoft,
+                      height: 1.4,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 if (method.requiresReference)
                   TextField(
                     controller: _reference,
-                    decoration: const InputDecoration(
-                      labelText: 'Numero de referencia',
+                    keyboardType: method.isPagoMovil
+                        ? TextInputType.number
+                        : TextInputType.text,
+                    decoration: InputDecoration(
+                      labelText: method.isPagoMovil
+                          ? 'Número de referencia del Pago Móvil'
+                          : 'Numero de referencia',
+                      hintText: method.isPagoMovil
+                          ? 'Como aparece en tu banco'
+                          : null,
                       filled: true,
                       fillColor: Colors.white,
                     ),
@@ -325,9 +394,8 @@ class _BillingManualPaymentScreenState
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _uploading
-                              ? null
-                              : () => _pickReceipt(fromCamera: false),
+                          onPressed:
+                              _uploading ? null : _pickReceiptFromFile,
                           icon: const Icon(Icons.attach_file_rounded),
                           label: const Text('Galeria o PDF'),
                         ),
@@ -335,9 +403,8 @@ class _BillingManualPaymentScreenState
                       const SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _uploading
-                              ? null
-                              : () => _pickReceipt(fromCamera: true),
+                          onPressed:
+                              _uploading ? null : _pickReceiptFromCamera,
                           icon: const Icon(Icons.photo_camera_outlined),
                           label: const Text('Camara'),
                         ),

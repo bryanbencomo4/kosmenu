@@ -197,4 +197,126 @@ describe('delivery config', () => {
       }),
     ).not.toThrow();
   });
+
+  it('quotes area_zones by point-in-polygon and blocks outside by default', () => {
+    const square: Array<[number, number]> = [
+      [0, 0],
+      [0, 1],
+      [1, 1],
+      [1, 0],
+    ];
+    const config = {
+      enabled: true,
+      pricing_type: 'area_zones',
+      area_zones: [{ id: 'a1', name: 'Centro', price: 3.5, polygon: square }],
+      area_zones_fallback: { enabled: false, price: 9 },
+    };
+
+    const inside = quoteDeliveryFee({
+      config,
+      isDelivery: true,
+      subtotal: 10,
+      destination: { lat: 0.5, lng: 0.5 },
+    });
+    expect(inside.blocked).toBe(false);
+    expect(inside.fee).toBe(3.5);
+    expect(inside.method).toBe('area_zones');
+
+    const outside = quoteDeliveryFee({
+      config,
+      isDelivery: true,
+      subtotal: 10,
+      destination: { lat: 2, lng: 2 },
+    });
+    expect(outside.blocked).toBe(true);
+    expect(outside.blockReason).toMatch(/fuera de la zona/i);
+  });
+
+  it('does not block area_zones before a destination pin is chosen', () => {
+    const quote = quoteDeliveryFee({
+      config: {
+        enabled: true,
+        pricing_type: 'area_zones',
+        area_zones: [
+          {
+            id: 'a1',
+            name: 'Centro',
+            price: 3,
+            polygon: [
+              [0, 0],
+              [0, 1],
+              [1, 1],
+              [1, 0],
+            ],
+          },
+        ],
+      },
+      isDelivery: true,
+      subtotal: 10,
+      destination: null,
+    });
+    expect(quote.blocked).toBe(false);
+    expect(quote.method).toBe('area_zones');
+  });
+
+  it('allows area_zones outside pin with fee pending when outside orders are enabled', () => {
+    const config = {
+      enabled: true,
+      pricing_type: 'area_zones',
+      area_zones: [
+        {
+          id: 'a1',
+          name: 'Centro',
+          price: 3,
+          polygon: [
+            [0, 0],
+            [0, 1],
+            [1, 1],
+            [1, 0],
+          ],
+        },
+      ],
+      area_zones_fallback: { enabled: true, price: 7 },
+    };
+    const quote = quoteDeliveryFee({
+      config,
+      isDelivery: true,
+      subtotal: 10,
+      destination: { lat: 5, lng: 5 },
+    });
+    expect(quote.blocked).toBe(false);
+    expect(quote.outOfZone).toBe(true);
+    expect(quote.fee).toBe(0);
+  });
+
+  it('keeps area_zones data inert when pricing_type is intervals', () => {
+    const parsed = parseDeliveryConfig({
+      enabled: true,
+      pricing_type: 'zones',
+      zones: [{ name: 'Cerca', min_distance: 0, max_distance: 5, price: 2 }],
+      area_zones: [
+        {
+          id: 'ignored',
+          name: 'Mapa',
+          price: 99,
+          polygon: [
+            [0, 0],
+            [0, 1],
+            [1, 1],
+          ],
+        },
+      ],
+    });
+    expect(parsed.pricingType).toBe('zones');
+    expect(parsed.areaZones).toHaveLength(1);
+    const quote = quoteDeliveryFee({
+      config: parsed,
+      isDelivery: true,
+      subtotal: 10,
+      origin: { lat: 0, lng: 0 },
+      destination: { lat: 0.01, lng: 0 },
+    });
+    expect(quote.method).toBe('zones');
+    expect(quote.fee).toBe(2);
+  });
 });

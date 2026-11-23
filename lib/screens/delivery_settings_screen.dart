@@ -1,11 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/delivery_config.dart';
+import 'package:kosmenu_app/screens/delivery_area_zone_editor.dart';
+import 'package:kosmenu_app/utils/delivery_area_zones_csv.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DeliverySettingsScreen extends StatefulWidget {
@@ -40,7 +46,10 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
   late final TextEditingController _prepMinutes;
   late final TextEditingController _deliveryMinutes;
   late final TextEditingController _customMessage;
+  late final TextEditingController _areaFallbackPrice;
   final List<_ZoneControllers> _zones = [];
+  List<DeliveryAreaZone> _areaZones = [];
+  LatLng? _businessCenter;
 
   @override
   void initState() {
@@ -54,6 +63,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _prepMinutes = TextEditingController();
     _deliveryMinutes = TextEditingController();
     _customMessage = TextEditingController();
+    _areaFallbackPrice = TextEditingController();
     _bindMainListeners();
     _load();
   }
@@ -69,6 +79,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _prepMinutes.dispose();
     _deliveryMinutes.dispose();
     _customMessage.dispose();
+    _areaFallbackPrice.dispose();
     _saveDebounce?.cancel();
     for (final zone in _zones) {
       zone.dispose();
@@ -100,6 +111,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _listen(_prepMinutes);
     _listen(_deliveryMinutes);
     _listen(_customMessage);
+    _listen(_areaFallbackPrice);
   }
 
   void _bindZoneListeners() {
@@ -123,6 +135,8 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _prepMinutes.text = '${config.preparationMinutes}';
     _deliveryMinutes.text = '${config.deliveryMinutes}';
     _customMessage.text = config.customMessage;
+    _areaFallbackPrice.text = _num(config.areaZonesFallback.price);
+    _areaZones = List<DeliveryAreaZone>.from(config.areaZones);
     for (final zone in _zones) {
       zone.dispose();
     }
@@ -153,14 +167,14 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
         row = await Supabase.instance.client
             .from('comercios')
             .select(
-              'moneda, exchange_rate_value, exchange_rate_quote_currency, branding_ia',
+              'moneda, latitud, longitud, exchange_rate_value, exchange_rate_quote_currency, branding_ia',
             )
             .eq('id', SupabaseConfig.currentComercioId.trim())
             .maybeSingle();
       } catch (_) {
         row = await Supabase.instance.client
             .from('comercios')
-            .select('moneda, branding_ia')
+            .select('moneda, latitud, longitud, branding_ia')
             .eq('id', SupabaseConfig.currentComercioId.trim())
             .maybeSingle();
       }
@@ -190,9 +204,22 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
       }
       if (!mounted) return;
       final loaded = DeliveryConfig.fromConfigNegocio(configNegocio);
+      final latRaw = row?['latitud'];
+      final lngRaw = row?['longitud'];
+      final lat = latRaw is num
+          ? latRaw.toDouble()
+          : double.tryParse('${latRaw ?? ''}'.replaceAll(',', '.'));
+      final lng = lngRaw is num
+          ? lngRaw.toDouble()
+          : double.tryParse('${lngRaw ?? ''}'.replaceAll(',', '.'));
+      final businessCenter =
+          lat != null && lng != null && lat.abs() <= 90 && lng.abs() <= 180
+              ? LatLng(lat, lng)
+              : null;
       setState(() {
         _branding = branding;
         _configNegocio = configNegocio;
+        _businessCenter = businessCenter;
         _baseCurrency = baseCurrency.isEmpty ? 'COP' : baseCurrency;
         _quoteCurrency = quoteCurrency;
         _exchangeRateValue = exchangeRateValue;
@@ -301,6 +328,10 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     if (draft.pricingType == DeliveryConfig.pricingDistance) {
       return draft.distance.basePrice;
     }
+    if (draft.pricingType == DeliveryConfig.pricingAreaZones) {
+      if (draft.areaZones.isNotEmpty) return draft.areaZones.first.price;
+      return 0;
+    }
     if (draft.zones.isNotEmpty) return draft.zones.first.price;
     return 0;
   }
@@ -315,12 +346,101 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
         extraPricePerKm: double.tryParse(_extraKm.text.replaceAll(',', '.')) ?? 0,
       ),
       zones: _zones.map((zone) => zone.toZone()).toList(),
+      areaZones: List<DeliveryAreaZone>.from(_areaZones),
+      areaZonesFallback: DeliveryAreaZonesFallback(
+        enabled: _config.areaZonesFallback.enabled,
+        price: double.tryParse(_areaFallbackPrice.text.replaceAll(',', '.')) ?? 0,
+      ),
       freeDeliveryMinimum:
           double.tryParse(_freeMinimum.text.replaceAll(',', '.')) ?? 0,
       minOrder: double.tryParse(_minOrder.text.replaceAll(',', '.')) ?? 0,
       preparationMinutes: int.tryParse(_prepMinutes.text) ?? 20,
       deliveryMinutes: int.tryParse(_deliveryMinutes.text) ?? 30,
       customMessage: _customMessage.text.trim(),
+    );
+  }
+
+  String _newAreaId() => 'area-${DateTime.now().microsecondsSinceEpoch}';
+
+  Future<void> _openAreaZoneEditor({DeliveryAreaZone? existing, int? index}) async {
+    final result = await DeliveryAreaZoneEditor.open(
+      context,
+      initial: existing,
+      center: _businessCenter,
+      otherZones: [
+        for (var i = 0; i < _areaZones.length; i++)
+          if (index == null || i != index) _areaZones[i],
+      ],
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (index != null && index >= 0 && index < _areaZones.length) {
+        _areaZones[index] = result;
+      } else {
+        _areaZones = [..._areaZones, result];
+      }
+    });
+    unawaited(_save(_draft(), silent: true));
+  }
+
+  Future<void> _importAreaZonesCsv() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['csv', 'txt'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
+    String raw = '';
+    if (file.bytes != null) {
+      raw = utf8.decode(file.bytes!, allowMalformed: true);
+    } else if (file.path != null) {
+      raw = await XFile(file.path!).readAsString();
+    }
+    if (raw.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El archivo CSV está vacío.')),
+      );
+      return;
+    }
+    final parsed = parseDeliveryAreaZonesCsv(
+      raw,
+      idFactory: _newAreaId,
+    );
+    if (!mounted) return;
+    if (parsed.zones.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            parsed.skipped > 0
+                ? 'No se importaron zonas (${parsed.skipped} filas inválidas).'
+                : 'No se encontraron zonas en el CSV.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _areaZones = [..._areaZones, ...parsed.zones];
+    });
+    unawaited(_save(_draft(), silent: true));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Importadas ${parsed.imported} zona${parsed.imported == 1 ? '' : 's'}'
+          '${parsed.skipped > 0 ? ' · ${parsed.skipped} filas omitidas' : ''}.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareAreaZonesCsvTemplate() async {
+    await SharePlus.instance.share(
+      ShareParams(
+        text: deliveryAreaZonesCsvTemplate(),
+        subject: 'Plantilla zonas delivery CSV',
+      ),
     );
   }
 
@@ -527,7 +647,8 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                       children: [
                         _radio('Precio fijo', DeliveryConfig.pricingFixed),
                         _radio('Por distancia', DeliveryConfig.pricingDistance),
-                        _radio('Por zonas', DeliveryConfig.pricingZones),
+                        _radio('Por intervalos', DeliveryConfig.pricingZones),
+                        _radio('Por zonas', DeliveryConfig.pricingAreaZones),
                       ],
                     ),
                   ),
@@ -634,7 +755,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                         final last = _zones.isEmpty ? 0.0 : double.tryParse(_zones.last.maxKm.text) ?? 0;
                         final created = _ZoneControllers.fromZone(
                           DeliveryZone(
-                            name: 'Zona ${_zones.length + 1}',
+                            name: 'Intervalo ${_zones.length + 1}',
                             minDistance: last,
                             maxDistance: last + 5,
                             price: 0,
@@ -647,7 +768,125 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                         _listen(created.price);
                       }),
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('Agregar zona'),
+                      label: const Text('Agregar intervalo'),
+                    ),
+                  ],
+                  if (_config.pricingType == DeliveryConfig.pricingAreaZones) ...[
+                    Text(
+                      'Zonas en el mapa',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Cada zona tiene un precio fijo. El cliente debe marcar un punto dentro de alguna zona.',
+                      style: GoogleFonts.poppins(fontSize: 12, color: _muted, height: 1.35),
+                    ),
+                    const SizedBox(height: 10),
+                    ..._areaZones.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final zone = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _card(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      zone.name,
+                                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${_formatMoney(zone.price, _tariffCurrency)} · ${zone.polygon.length} puntos',
+                                      style: GoogleFonts.poppins(fontSize: 12, color: _muted),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => unawaited(
+                                  _openAreaZoneEditor(existing: zone, index: index),
+                                ),
+                                icon: const Icon(Icons.edit_outlined),
+                                tooltip: 'Editar',
+                              ),
+                              IconButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _areaZones = [
+                                      for (var i = 0; i < _areaZones.length; i++)
+                                        if (i != index) _areaZones[i],
+                                    ];
+                                  });
+                                  unawaited(_save(_draft(), silent: true));
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                tooltip: 'Eliminar',
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => unawaited(_openAreaZoneEditor()),
+                          icon: const Icon(Icons.map_outlined),
+                          label: const Text('Agregar zona'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => unawaited(_importAreaZonesCsv()),
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: const Text('Importar CSV'),
+                        ),
+                        TextButton(
+                          onPressed: () => unawaited(_shareAreaZonesCsvTemplate()),
+                          child: Text(
+                            'Plantilla CSV',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                              color: _purple,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _card(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              'Permitir pedidos fuera de la zona',
+                              style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+                            ),
+                            subtitle: Text(
+                              'Si está activo, el cliente puede pedir desde fuera. El costo de envío se acuerda después y no se suma al total.',
+                              style: GoogleFonts.poppins(fontSize: 12, color: _muted, height: 1.35),
+                            ),
+                            value: _config.areaZonesFallback.enabled,
+                            activeThumbColor: _purple,
+                            onChanged: (value) {
+                              final next = _draft().copyWith(
+                                areaZonesFallback: DeliveryAreaZonesFallback(
+                                  enabled: value,
+                                  price: 0,
+                                ),
+                              );
+                              setState(() => _config = next);
+                              unawaited(_save(next, silent: true));
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   const SizedBox(height: 16),

@@ -15,8 +15,10 @@ import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/services/checkout_attempt_state.dart';
 import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicMenuView extends StatefulWidget {
@@ -113,7 +115,17 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 
   Future<_PublicMenuData> _fetchMenuData() async {
-    final payload = await PublicMenuApiService().fetchMenu(widget.comercioId);
+    String? accessToken;
+    if (_isAssistedMode) {
+      try {
+        accessToken =
+            Supabase.instance.client.auth.currentSession?.accessToken;
+      } catch (_) {}
+    }
+    final payload = await PublicMenuApiService().fetchMenu(
+      widget.comercioId,
+      accessToken: accessToken,
+    );
     final data = _parseMenuPayload(
       payload,
       fallbackComercioId: widget.comercioId,
@@ -456,14 +468,19 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required double? deliveryLongitude,
     required String orderNotes,
     String? paymentProofStorageRef,
+    String? clientEmail,
+    String? mesa,
   }) {
     final exchangeRate = tasaAplicada > 0 ? tasaAplicada : 1.0;
-    final isDelivery = deliveryMode == _deliveryModeDelivery;
+    final isDelivery =
+        !_isAssistedMode && deliveryMode == _deliveryModeDelivery;
     final request = PublicOrderCreateRequest(
       comercioId: comercioId,
       comercioNombre: comercioNombre,
       clientName: clientName,
       clientWhatsapp: clientWhatsapp,
+      clientEmail: clientEmail,
+      mesa: mesa,
       currency: 'USD',
       exchangeRate: exchangeRate,
       costoDelivery: 0,
@@ -485,14 +502,24 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         lat: isDelivery ? deliveryLatitude : null,
         lng: isDelivery ? deliveryLongitude : null,
       ),
-      paymentMethod: PublicOrderPaymentMethodDto(nombre: selectedPaymentMethod),
+      paymentMethod: selectedPaymentMethod.trim().isEmpty
+          ? null
+          : PublicOrderPaymentMethodDto(nombre: selectedPaymentMethod),
       paymentProofUrl: paymentProofStorageRef,
       orderNotes: orderNotes,
     );
 
+    String? accessToken;
+    if (_isAssistedMode) {
+      try {
+        accessToken =
+            Supabase.instance.client.auth.currentSession?.accessToken;
+      } catch (_) {}
+    }
     return PublicOrderApiService().createOrder(
       request: request,
       idempotencyKey: idempotencyKey,
+      accessToken: accessToken,
     );
   }
 
@@ -897,6 +924,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     var selectedPaymentMethod = _paymentMethods.first;
     final checkoutAttempt = CheckoutAttemptState();
     var selectedDeliveryMode = _deliveryModePickup;
+    var payNow = true;
     var deliveryLatitude = data.businessLatitude;
     var deliveryLongitude = data.businessLongitude;
     var uploadProgress = 0.0;
@@ -906,6 +934,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
     final clientNameController = TextEditingController();
     final clientWhatsappController = TextEditingController();
+    final clientContactController = TextEditingController();
+    final tableController = TextEditingController();
     final deliveryAddressController = TextEditingController();
     final deliveryReferenceController = TextEditingController();
     final deliveryInstructionsController = TextEditingController();
@@ -924,10 +954,12 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         builder: (sheetContext) {
           return StatefulBuilder(
             builder: (context, setModalState) {
+              final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
               return SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                  child: Column(
+                  padding: EdgeInsets.fromLTRB(18, 18, 18, 24 + bottomInset),
+                  child: SingleChildScrollView(
+                    child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -945,7 +977,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        'Tu pedido',
+                        _isAssistedMode ? 'Pedido en mesa' : 'Tu pedido',
                         style: GoogleFonts.manrope(
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
@@ -963,7 +995,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Tus datos',
+                        _isAssistedMode ? 'DATOS DEL CLIENTE' : 'Tus datos',
                         style: GoogleFonts.manrope(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -980,7 +1012,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           fontWeight: FontWeight.w600,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Nombre completo',
+                          hintText: _isAssistedMode
+                              ? 'Nombre del cliente'
+                              : 'Nombre completo',
                           filled: true,
                           fillColor: palette.surface,
                           border: OutlineInputBorder(
@@ -988,24 +1022,65 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      TextFormField(
-                        controller: clientWhatsappController,
-                        enabled: !checkoutAttempt.isSubmitting,
-                        keyboardType: TextInputType.phone,
-                        style: GoogleFonts.manrope(
-                          color: palette.onSurface,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'WhatsApp (solo numeros)',
-                          filled: true,
-                          fillColor: palette.surface,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      if (_isAssistedMode) ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: tableController,
+                          enabled: !checkoutAttempt.isSubmitting,
+                          keyboardType: TextInputType.text,
+                          textCapitalization: TextCapitalization.characters,
+                          style: GoogleFonts.manrope(
+                            color: palette.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Número de mesa',
+                            filled: true,
+                            fillColor: palette.surface,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: clientContactController,
+                          enabled: !checkoutAttempt.isSubmitting,
+                          keyboardType: TextInputType.emailAddress,
+                          style: GoogleFonts.manrope(
+                            color: palette.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: InputDecoration(
+                            hintText:
+                                'WhatsApp o correo (opcional, para el resumen)',
+                            filled: true,
+                            fillColor: palette.surface,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: clientWhatsappController,
+                          enabled: !checkoutAttempt.isSubmitting,
+                          keyboardType: TextInputType.phone,
+                          style: GoogleFonts.manrope(
+                            color: palette.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'WhatsApp (solo numeros)',
+                            filled: true,
+                            fillColor: palette.surface,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Text(
                         'Resumen (${cartItems.length})',
@@ -1052,6 +1127,38 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         ),
                       ),
                       const SizedBox(height: 12),
+                      if (_isAssistedMode) ...[
+                        Text(
+                          'Servicio',
+                          style: GoogleFonts.manrope(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: palette.onSurfaceMuted,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: palette.primary.withValues(alpha: 0.28),
+                            ),
+                          ),
+                          child: Text(
+                            'Comer aquí · solo atención en el local',
+                            style: GoogleFonts.manrope(
+                              fontWeight: FontWeight.w800,
+                              color: palette.onSurface,
+                            ),
+                          ),
+                        ),
+                      ] else ...[
                       Text(
                         'Entrega',
                         style: GoogleFonts.manrope(
@@ -1129,7 +1236,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                             ),
                           ),
                         ),
-                      if (selectedDeliveryMode == _deliveryModeDelivery)
+                      ],
+                      if (!_isAssistedMode &&
+                          selectedDeliveryMode == _deliveryModeDelivery)
                         Padding(
                           padding: const EdgeInsets.only(top: 10),
                           child: Column(
@@ -1239,6 +1348,108 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           ),
                         ),
                       const SizedBox(height: 12),
+                      if (_isAssistedMode) ...[
+                        Text(
+                          'Pago',
+                          style: GoogleFonts.manrope(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: palette.onSurfaceMuted,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('Pagar ahora'),
+                              selected: payNow,
+                              onSelected: checkoutAttempt.isSubmitting
+                                  ? null
+                                  : (_) => setModalState(() => payNow = true),
+                              selectedColor: palette.primary,
+                              backgroundColor: palette.surface,
+                              side: BorderSide.none,
+                              labelStyle: GoogleFonts.manrope(
+                                color: payNow
+                                    ? palette.onPrimary
+                                    : palette.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Pagar después'),
+                              selected: !payNow,
+                              onSelected: checkoutAttempt.isSubmitting
+                                  ? null
+                                  : (_) => setModalState(() => payNow = false),
+                              selectedColor: palette.primary,
+                              backgroundColor: palette.surface,
+                              side: BorderSide.none,
+                              labelStyle: GoogleFonts.manrope(
+                                color: !payNow
+                                    ? palette.onPrimary
+                                    : palette.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (payNow) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Método de pago',
+                            style: GoogleFonts.manrope(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: palette.onSurfaceMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            initialValue: selectedPaymentMethod,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: palette.surfaceAlt,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                            dropdownColor: palette.surface,
+                            style: GoogleFonts.manrope(
+                              color: palette.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            items: _paymentMethods
+                                .map(
+                                  (method) => DropdownMenuItem<String>(
+                                    value: method,
+                                    child: Text(method),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: checkoutAttempt.isSubmitting
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    setModalState(
+                                      () => selectedPaymentMethod = value,
+                                    );
+                                  },
+                          ),
+                        ],
+                      ] else ...[
                       Text(
                         'Metodo de pago',
                         style: GoogleFonts.manrope(
@@ -1289,6 +1500,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                 );
                               },
                       ),
+                      ],
                       const SizedBox(height: 12),
                       _SummaryRow(
                         label: 'Total USD',
@@ -1306,6 +1518,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                             valueColor: palette.onSurface,
                           ),
                         ),
+                      if (!_isAssistedMode || payNow) ...[
                       const SizedBox(height: 12),
                       Text(
                         'Comprobante (opcional)',
@@ -1384,6 +1597,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         const SizedBox(height: 8),
                         LinearProgressIndicator(value: uploadProgress),
                       ],
+                      ],
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: orderNotesController,
@@ -1394,8 +1608,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           fontWeight: FontWeight.w600,
                         ),
                         decoration: InputDecoration(
-                          hintText:
-                              'Notas del pedido (sin cebolla, tocar timbre, etc.)',
+                          hintText: _isAssistedMode
+                              ? 'Notas del pedido (opcional)'
+                              : 'Notas del pedido (sin cebolla, tocar timbre, etc.)',
                           filled: true,
                           fillColor: palette.surface,
                           border: OutlineInputBorder(
@@ -1416,8 +1631,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                   setModalState(() {});
 
                                   final whatsappNumber = data.whatsappNumber;
-                                  if (whatsappNumber == null ||
-                                      whatsappNumber.isEmpty) {
+                                  if (!_isAssistedMode &&
+                                      (whatsappNumber == null ||
+                                          whatsappNumber.isEmpty)) {
                                     checkoutAttempt.endSubmit();
                                     if (!mounted || !sheetContext.mounted) {
                                       return;
@@ -1437,25 +1653,53 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       ScaffoldMessenger.of(context);
                                   final clientName = clientNameController.text
                                       .trim();
-                                  final clientWhatsapp =
-                                      clientWhatsappController.text.replaceAll(
-                                        RegExp(r'\D'),
-                                        '',
-                                      );
+                                  final tableNumber =
+                                      tableController.text.trim();
+                                  final contactRaw =
+                                      clientContactController.text.trim();
+                                  final contactIsEmail = contactRaw.contains('@');
+                                  final clientEmail = contactIsEmail
+                                      ? contactRaw.toLowerCase()
+                                      : '';
+                                  final assistedWhatsapp = contactIsEmail
+                                      ? ''
+                                      : contactRaw.replaceAll(
+                                          RegExp(r'\D'),
+                                          '',
+                                        );
+                                  final clientWhatsapp = _isAssistedMode
+                                      ? assistedWhatsapp
+                                      : clientWhatsappController.text
+                                          .replaceAll(RegExp(r'\D'), '');
 
                                   if (clientName.length < 3) {
                                     checkoutAttempt.endSubmit();
                                     setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
-                                      const SnackBar(
+                                      SnackBar(
                                         content: Text(
-                                          'Ingresa tu nombre (minimo 3 caracteres).',
+                                          _isAssistedMode
+                                              ? 'Ingresa el nombre del cliente (mínimo 3 caracteres).'
+                                              : 'Ingresa tu nombre (minimo 3 caracteres).',
                                         ),
                                       ),
                                     );
                                     return;
                                   }
-                                  if (clientWhatsapp.length < 10) {
+                                  if (_isAssistedMode && tableNumber.isEmpty) {
+                                    checkoutAttempt.endSubmit();
+                                    setModalState(() {});
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Ingresa el número de mesa.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  if (!_isAssistedMode &&
+                                      clientWhatsapp.length < 10) {
                                     checkoutAttempt.endSubmit();
                                     setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
@@ -1467,10 +1711,25 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     );
                                     return;
                                   }
+                                  if (_isAssistedMode &&
+                                      contactRaw.isNotEmpty &&
+                                      !contactIsEmail &&
+                                      assistedWhatsapp.length < 10) {
+                                    checkoutAttempt.endSubmit();
+                                    setModalState(() {});
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'WhatsApp u correo opcional: usa un número válido o un correo.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                                  final isDeliveryOrder =
+                                  final isDeliveryOrder = !_isAssistedMode &&
                                       selectedDeliveryMode ==
-                                      _deliveryModeDelivery;
+                                          _deliveryModeDelivery;
                                   final normalizedAddress =
                                       deliveryAddressController.text.trim();
                                   final normalizedReference =
@@ -1478,8 +1737,22 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                   final normalizedInstructions =
                                       deliveryInstructionsController.text
                                           .trim();
+                                  final paymentLabel = _isAssistedMode
+                                      ? (payNow
+                                          ? selectedPaymentMethod
+                                          : 'Pagar despues')
+                                      : selectedPaymentMethod;
+                                  final noteParts = <String>[
+                                    if (_isAssistedMode) 'Tipo: Comer aqui',
+                                    if (_isAssistedMode &&
+                                        tableNumber.isNotEmpty)
+                                      'Mesa: $tableNumber',
+                                    if (_isAssistedMode && !payNow)
+                                      'Pago: despues',
+                                    orderNotesController.text.trim(),
+                                  ].where((part) => part.isNotEmpty).toList();
                                   final normalizedOrderNotes =
-                                      orderNotesController.text.trim();
+                                      noteParts.join('\n');
 
                                   if (isDeliveryOrder &&
                                       normalizedAddress.length < 6) {
@@ -1521,12 +1794,24 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     if (pendingBytes != null &&
                                         pendingName.isNotEmpty &&
                                         pendingMime != null) {
+                                      String? uploadToken;
+                                      if (_isAssistedMode) {
+                                        try {
+                                          uploadToken = Supabase
+                                              .instance
+                                              .client
+                                              .auth
+                                              .currentSession
+                                              ?.accessToken;
+                                        } catch (_) {}
+                                      }
                                       final uploaded = await api
                                           .uploadComprobante(
                                             comercioId: data.comercioId,
                                             fileName: pendingName,
                                             mimeType: pendingMime,
                                             bytes: pendingBytes,
+                                            accessToken: uploadToken,
                                             onProgress: (value) {
                                               if (!mounted) return;
                                               setModalState(
@@ -1542,13 +1827,20 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       comercioNombre: data.comercioNombre,
                                       clientName: clientName,
                                       clientWhatsapp: clientWhatsapp,
+                                      clientEmail: clientEmail.isEmpty
+                                          ? null
+                                          : clientEmail,
+                                      mesa: _isAssistedMode
+                                          ? tableNumber
+                                          : null,
                                       idempotencyKey:
                                           checkoutAttempt.idempotencyKey,
                                       items: cartItems,
                                       tasaAplicada: data.tasaCambioPesos,
-                                      selectedPaymentMethod:
-                                          selectedPaymentMethod,
-                                      deliveryMode: selectedDeliveryMode,
+                                      selectedPaymentMethod: paymentLabel,
+                                      deliveryMode: _isAssistedMode
+                                          ? _deliveryModePickup
+                                          : selectedDeliveryMode,
                                       deliveryAddress: isDeliveryOrder
                                           ? normalizedAddress
                                           : '',
@@ -1568,6 +1860,49 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       paymentProofStorageRef: storageRef,
                                     );
 
+                                    if (_isAssistedMode) {
+                                      if (!mounted) return;
+                                      setState(() => _cart.clear());
+                                      if (sheetContext.mounted) {
+                                        Navigator.pop(sheetContext);
+                                      }
+                                      final clientSummary =
+                                          created.merchantWhatsappText ??
+                                          _buildWhatsAppMessage(
+                                            comercioNombre: data.comercioNombre,
+                                            orderId: created.orderId,
+                                            trackingUrl: created.trackingUrl,
+                                            manualManagement:
+                                                created.managementMode ==
+                                                'whatsapp_manual',
+                                            items: cartItems,
+                                            totalUsd: totalUsd,
+                                            totalCop: totalCop,
+                                            tasaCambioPesos:
+                                                data.tasaCambioPesos,
+                                            paymentMethod: paymentLabel,
+                                            deliveryMode: _deliveryModePickup,
+                                            deliveryAddress: '',
+                                            deliveryReference: '',
+                                            deliveryInstructions: '',
+                                            orderNotes: normalizedOrderNotes,
+                                          );
+                                      if (clientWhatsapp.length >= 10) {
+                                        await openWhatsAppChat(
+                                          clientWhatsapp,
+                                          text: clientSummary,
+                                        );
+                                      }
+                                      localScaffoldMessenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            clientEmail.isNotEmpty
+                                                ? 'Pedido ${created.orderId} registrado · mesa $tableNumber. Resumen por correo si está disponible.'
+                                                : 'Pedido ${created.orderId} registrado · mesa $tableNumber.',
+                                          ),
+                                        ),
+                                      );
+                                    } else {
                                     final message =
                                         created.merchantWhatsappText ??
                                         _buildWhatsAppMessage(
@@ -1581,7 +1916,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           totalUsd: totalUsd,
                                           totalCop: totalCop,
                                           tasaCambioPesos: data.tasaCambioPesos,
-                                          paymentMethod: selectedPaymentMethod,
+                                          paymentMethod: paymentLabel,
                                           deliveryMode: selectedDeliveryMode,
                                           deliveryAddress: isDeliveryOrder
                                               ? normalizedAddress
@@ -1594,11 +1929,10 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                               : '',
                                           orderNotes: normalizedOrderNotes,
                                         );
-                                    final uri = Uri.parse(
-                                      'https://wa.me/$whatsappNumber?text=${Uri.encodeComponent(message)}',
+                                    final launched = await openWhatsAppChat(
+                                      whatsappNumber,
+                                      text: message,
                                     );
-
-                                    final launched = await launchUrl(uri);
                                     if (!mounted) return;
 
                                     if (launched) {
@@ -1614,6 +1948,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           ),
                                         ),
                                       );
+                                    }
                                     }
                                   } on PublicOrderApiException catch (error) {
                                     if (!mounted) return;
@@ -1663,7 +1998,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                               Text(
                                 checkoutAttempt.isSubmitting
                                     ? 'Registrando pedido...'
-                                    : 'Confirmar por WhatsApp',
+                                    : _isAssistedMode
+                                        ? 'Confirmar pedido'
+                                        : 'Confirmar por WhatsApp',
                                 style: GoogleFonts.manrope(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
@@ -1675,6 +2012,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                     ],
                   ),
+                  ),
                 ),
               );
             },
@@ -1684,6 +2022,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     } finally {
       clientNameController.dispose();
       clientWhatsappController.dispose();
+      clientContactController.dispose();
+      tableController.dispose();
       deliveryAddressController.dispose();
       deliveryReferenceController.dispose();
       deliveryInstructionsController.dispose();
@@ -1802,14 +2142,19 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           pinned: true,
                           floating: false,
                           elevation: 0,
-                          expandedHeight: widget.isPreview ? 210 : 172,
+                          // Assisted: land on categories (compact header).
+                          expandedHeight: widget.isPreview
+                              ? 210
+                              : (_isAssistedMode ? 88 : 172),
                           backgroundColor: palette.surface.withValues(
                             alpha: 0.96,
                           ),
                           foregroundColor: palette.onSurface,
                           leading: Navigator.of(context).canPop()
                               ? IconButton(
-                                  tooltip: 'Cerrar vista previa',
+                                  tooltip: _isAssistedMode
+                                      ? 'Cerrar'
+                                      : 'Cerrar vista previa',
                                   onPressed: () =>
                                       Navigator.of(context).maybePop(),
                                   icon: const Icon(Icons.close_rounded),
@@ -1826,11 +2171,11 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           flexibleSpace: FlexibleSpaceBar(
                             collapseMode: CollapseMode.parallax,
                             background: Container(
-                              padding: const EdgeInsets.fromLTRB(
+                              padding: EdgeInsets.fromLTRB(
                                 16,
-                                70,
+                                _isAssistedMode ? 56 : 70,
                                 16,
-                                18,
+                                _isAssistedMode ? 10 : 18,
                               ),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
@@ -1899,7 +2244,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                         ),
                                         child: Text(
                                           _entrySource == 'dashboard'
-                                              ? 'Modo mesero · desde dashboard'
+                                              ? 'Modo mesero · comer aquí'
                                               : 'Modo mesero · selección rápida',
                                           style: GoogleFonts.manrope(
                                             color: palette.onSurface,
@@ -1907,34 +2252,32 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                             fontWeight: FontWeight.w800,
                                           ),
                                         ),
+                                      )
+                                    else ...[
+                                      Text(
+                                        data.comercioNombre,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.manrope(
+                                          color: palette.onSurface,
+                                          fontSize: 31,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
-                                    if (_isAssistedMode)
-                                      const SizedBox(height: 10),
-                                    Text(
-                                      data.comercioNombre,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.manrope(
-                                        color: palette.onSurface,
-                                        fontSize: 31,
-                                        fontWeight: FontWeight.w800,
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        widget.isPreview
+                                            ? 'Así se verá tu menú con los datos actuales del onboarding.'
+                                            : 'Explora el menú y arma tu pedido a tu ritmo.',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.manrope(
+                                          color: palette.onSurfaceMuted,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      widget.isPreview
-                                          ? 'Así se verá tu menú con los datos actuales del onboarding.'
-                                          : _isAssistedMode
-                                          ? 'Toca cualquier producto para sumarlo al pedido al instante.'
-                                          : 'Explora el menú y arma tu pedido a tu ritmo.',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.manrope(
-                                        color: palette.onSurfaceMuted,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                    ],
                                   ],
                                 ),
                               ),

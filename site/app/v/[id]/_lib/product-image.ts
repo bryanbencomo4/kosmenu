@@ -1,5 +1,11 @@
 /** Product/commerce image resolution shared across the public menu. */
 
+import {
+  optimizeStorageImageUrl,
+  resolveMenuImageSources,
+  resolveMenuImageUrl,
+} from '../../../_lib/optimize-storage-image';
+
 export type ImageableProduct = {
   imagen_url?: string | null;
 };
@@ -7,38 +13,31 @@ export type ImageableProduct = {
 /** Display widths (CSS px × ~2 for retina) used across the public menu. */
 export const MENU_IMAGE_WIDTH = {
   logo: 240,
+  /** Search / checkout thumbs (~64–80 CSS px). */
   thumb: 160,
-  tile: 320,
-  category: 400,
-  sheet: 720,
+  /** Product cards (~124–144 CSS px wide, 3:4 tall). */
+  tile: 360,
+  /** Category 9:16 covers (~half viewport on mobile). */
+  category: 520,
+  /** Options sheet hero. */
+  sheet: 640,
+  /** Lightbox / full-bleed heroes. */
   hero: 1200,
+  lightbox: 1200,
 } as const;
 
-/** Request a small WebP variant from Supabase Storage for menu rendering. */
+export { optimizeStorageImageUrl, resolveMenuImageSources, resolveMenuImageUrl };
+
+/**
+ * Preferred menu URL: cold WebP variant when possible, else hot transform.
+ * Use `resolveMenuImageSources` + KioskImage for full cold→hot→original cascade.
+ */
 export function optimizeMenuImageUrl(
   imageUrl: string | null | undefined,
   width: number = MENU_IMAGE_WIDTH.tile,
   quality = 72,
 ) {
-  const raw = (imageUrl ?? '').trim();
-  if (!raw) return null;
-
-  try {
-    const url = new URL(raw);
-    const publicObjectPath = '/storage/v1/object/public/';
-    if (!url.pathname.includes(publicObjectPath)) return raw;
-
-    url.pathname = url.pathname.replace(
-      publicObjectPath,
-      '/storage/v1/render/image/public/',
-    );
-    url.searchParams.set('width', String(Math.max(1, Math.round(width))));
-    url.searchParams.set('quality', String(Math.min(90, Math.max(40, quality))));
-    url.searchParams.set('format', 'webp');
-    return url.toString();
-  } catch {
-    return raw;
-  }
+  return resolveMenuImageUrl(imageUrl, width, quality);
 }
 
 /** Real product photo only — null when empty or identical to the commerce logo. */
@@ -75,4 +74,23 @@ export function resolveHeroCover(
     if (url) return url;
   }
   return optimizeMenuImageUrl(logoUrl, 640);
+}
+
+/**
+ * Category cover: custom image, else first real product photo.
+ * Never falls back to the commerce logo (that made every tile look identical).
+ */
+export function resolveCategoryCover(
+  categoryImageUrl: string | null | undefined,
+  products: Array<{ imagen_url?: string | null }>,
+  logoUrl?: string | null,
+  width: number = MENU_IMAGE_WIDTH.category,
+): string | null {
+  const custom = productImageUrl(categoryImageUrl, logoUrl, width);
+  if (custom) return custom;
+  for (const product of products) {
+    const url = productImageUrl(product.imagen_url, logoUrl, width);
+    if (url) return url;
+  }
+  return null;
 }

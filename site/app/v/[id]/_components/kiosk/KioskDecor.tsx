@@ -3,11 +3,29 @@
 type KioskDecorProps = {
   density?: 'full' | 'lite';
   tone?: 'brand' | 'muted';
+  /** Home frame: solid corner arcs and the pizza mark from the kiosk mock. */
+  variant?: 'line' | 'home';
 };
 
-export function KioskDecor({ density = 'full', tone = 'brand' }: KioskDecorProps) {
+export function KioskDecor({ density = 'full', tone = 'brand', variant = 'line' }: KioskDecorProps) {
   const stroke = tone === 'muted' ? 'var(--menu-border)' : 'var(--menu-primary)';
   const showSecondary = density === 'full';
+
+  if (variant === 'home') {
+    // Home hero: soft brand glow only — no line-art figures over the product photo.
+    return (
+      <div className="pointer-events-none absolute inset-0 select-none overflow-hidden" aria-hidden>
+        <div
+          className="absolute -left-10 top-8 h-40 w-40 rounded-full opacity-40 blur-3xl"
+          style={{ background: 'color-mix(in srgb, var(--menu-primary) 36%, transparent)' }}
+        />
+        <div
+          className="absolute -right-8 top-2 h-36 w-36 rounded-full opacity-30 blur-3xl"
+          style={{ background: 'color-mix(in srgb, var(--menu-primary) 28%, transparent)' }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute inset-0 select-none overflow-hidden" aria-hidden>
@@ -91,6 +109,10 @@ export function KioskMotionStyles() {
       .kiosk-footer-enter {
         animation: kiosk-footer-in 560ms cubic-bezier(0.22, 1, 0.36, 1) 160ms both;
       }
+      .kiosk-brush-enter {
+        animation: kiosk-brush-in 520ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+        transform-origin: center;
+      }
       .kiosk-card .kiosk-chevron {
         transition: transform 200ms ease;
       }
@@ -105,8 +127,106 @@ export function KioskMotionStyles() {
         from { opacity: 0; transform: translateY(18px); }
         to { opacity: 1; transform: translateY(0); }
       }
+      @keyframes kiosk-brush-in {
+        from { opacity: 0; transform: scaleX(0.78) scaleY(0.92); }
+        to { opacity: 1; transform: scaleX(1) scaleY(1); }
+      }
       @media (prefers-reduced-motion: reduce) {
-        .kiosk-enter, .kiosk-card, .kiosk-footer-enter { animation: none; }
+        .kiosk-enter, .kiosk-card, .kiosk-footer-enter, .kiosk-brush-enter { animation: none; }
+      }
+      /* First paint after skeleton: color reveal only — no entrance motion */
+      [data-kiosk-boot-reveal] .kiosk-enter,
+      [data-kiosk-boot-reveal] .kiosk-card,
+      [data-kiosk-boot-reveal] .kiosk-footer-enter,
+      [data-kiosk-boot-reveal] .kiosk-brush-enter {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+      }
+
+      /*
+       * Short phones: keep the hero readable, trim only extra gaps, and pin
+       * Ver menú above the footer so empty space does not sit under the CTAs.
+       */
+      @media (max-height: 780px) and (max-width: 480px) {
+        .kiosk-home-shell .kiosk-home-hero {
+          min-height: min(32vh, 260px) !important;
+          padding-top: 0.75rem !important;
+          padding-bottom: 3.75rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-headline {
+          margin-top: 0.85rem !important;
+          margin-bottom: 0.15rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-brush {
+          min-height: 4.85rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-logo-media {
+          height: min(34cqw, 128px) !important;
+          width: min(34cqw, 128px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-panel {
+          padding-top: 4.5rem !important;
+          padding-bottom: 0.75rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-stack {
+          justify-content: flex-start !important;
+        }
+        .kiosk-home-shell .kiosk-home-title {
+          margin-top: 0.45rem !important;
+          font-size: clamp(28px, 7.4cqw, 40px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-rating {
+          margin-top: 0.4rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-badge {
+          margin-top: 0.55rem !important;
+        }
+        /* Absorb leftover height between badge and CTAs — not under the buttons. */
+        .kiosk-home-shell .kiosk-home-cta-wrap {
+          margin-top: auto !important;
+          padding-top: 0.85rem !important;
+          padding-bottom: 0.15rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-cta {
+          height: 3.45rem !important;
+          font-size: 17px !important;
+        }
+        .kiosk-home-shell .kiosk-home-actions-wrap {
+          margin-top: 0.65rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-action-pill {
+          height: 2.85rem !important;
+        }
+        .kiosk-home-shell .kiosk-footer-enter svg {
+          height: 2.5rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-footer-body {
+          padding-bottom: max(0.55rem, env(safe-area-inset-bottom)) !important;
+        }
+        .kiosk-home-shell .kiosk-home-footer-body a {
+          margin-top: 0.4rem !important;
+        }
+      }
+
+      @media (max-height: 680px) and (max-width: 480px) {
+        .kiosk-home-shell .kiosk-home-hero {
+          min-height: min(30vh, 230px) !important;
+          padding-bottom: 3.35rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-logo-media {
+          height: min(32cqw, 116px) !important;
+          width: min(32cqw, 116px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-panel {
+          padding-top: 4.1rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-title {
+          font-size: clamp(26px, 7cqw, 36px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-cta-wrap {
+          padding-top: 0.65rem !important;
+        }
       }
     `}</style>
   );

@@ -23,13 +23,15 @@
 }
 
 :root {
+  /* Body shares the same next/font Poppins family as display (no second download). */
+  --font-body: var(--font-display);
   --brand-primary: var(--color-accent);
   --brand-on-primary: #ffffff;
   --brand-background: var(--color-canvas);
   --brand-surface: var(--color-surface);
   --brand-surface-muted: var(--color-surface-muted);
-  --brand-title-font: var(--font-display, 'Montserrat', sans-serif);
-  --brand-body-font: var(--font-body, 'Roboto', sans-serif);
+  --brand-title-font: var(--font-display), 'Poppins', system-ui, sans-serif;
+  --brand-body-font: var(--font-body), 'Poppins', system-ui, sans-serif;
 }
 
 html,
@@ -41,8 +43,39 @@ body {
   background: var(--brand-background);
   color: var(--color-text-strong);
   font-family: var(--brand-body-font);
+  font-weight: 400;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Inherit Poppins family on form controls (browsers often reset these to system UI).
+   Use font-family only — `font: inherit` also forces weight 400 and overrides Tailwind. */
+button,
+input,
+select,
+textarea,
+optgroup {
+  font-family: inherit;
+}
+
+/* Windows/native UA often keeps the arrow on <button>; force the hand on clickable controls. */
+button:not(:disabled),
+[type='button']:not(:disabled),
+[type='submit']:not(:disabled),
+[type='reset']:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+a[href],
+summary,
+label[for] {
+  cursor: pointer;
+}
+
+button:disabled,
+[type='button']:disabled,
+[type='submit']:disabled,
+[type='reset']:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
 }
 
 * {
@@ -705,6 +738,27 @@ input,
 textarea,
 select {
   transition: all 300ms ease;
+}
+
+/* Chat composer: never show the yellow/gold UA focus ring around the input pill. */
+[data-chat-composer-input-shell],
+[data-chat-composer-input-shell]:focus-within {
+  outline: none !important;
+  border: none !important;
+}
+#chatbot-composer-input,
+#chatbot-composer-input:focus,
+#chatbot-composer-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+#chatbot-composer-input:-webkit-autofill,
+#chatbot-composer-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--chat-text, inherit);
+  transition: background-color 99999s ease-out;
+  box-shadow: 0 0 0 1000px var(--chat-input, transparent) inset !important;
 }
 
 .checkout-phone-field .PhoneInput {

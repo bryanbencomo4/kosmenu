@@ -86,15 +86,14 @@ export function AdminSubscriptionsPanel({ admin }: { admin: CurrentAdmin }) {
   const [tab, setTab] = useState<TabId>(canReview ? 'cola' : canCatalog ? 'metodos' : 'asesores');
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.24),transparent_34%),linear-gradient(180deg,#101226_0%,#171a3d_100%)] px-6 py-7 text-white shadow-[0_30px_80px_-48px_rgba(15,23,42,0.9)] sm:px-8">
+    <div className="space-y-4 sm:space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.24),transparent_34%),linear-gradient(180deg,#101226_0%,#171a3d_100%)] px-4 py-4 text-white shadow-[0_30px_80px_-48px_rgba(15,23,42,0.9)] sm:rounded-[2rem] sm:px-8 sm:py-7">
         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-violet-200/70">Suscripciones</p>
-        <h1 className="mt-2 font-[var(--font-display)] text-3xl font-black tracking-[-0.04em] sm:text-4xl">
+        <h1 className="mt-1 font-[var(--font-display)] text-2xl font-black tracking-[-0.04em] sm:mt-2 sm:text-3xl lg:text-4xl">
           Pagos del plan
         </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-violet-100/80">
-          Revisa comprobantes, carga las cuentas de cada metodo, emite tarjetas de regalo y autoriza asesores de
-          venta. Lo que configures aqui es lo que ve el comerciante en app.elmenuxfa.com.
+        <p className="mt-2 hidden max-w-2xl text-sm leading-7 text-violet-100/80 sm:block">
+          Comprobantes, metodos, tarjetas de regalo y asesores.
         </p>
       </section>
 

@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 
+import { readAndroidReleaseMeta } from '../../app/admin/_lib/admin-app-android';
 import {
   MERCHANT_PRESENCE_COOKIE,
   parseMerchantPresenceCookie,
@@ -8,6 +9,7 @@ import {
   appLoginHref,
   appSignupHref,
   appSiteUrl,
+  kitCheckoutHref,
   marketingWhatsappHref,
   publicSiteUrl,
 } from '../../app/_lib/public-site-config';
@@ -33,6 +35,7 @@ export async function BusinessLandingPage() {
     cookieStore.get(MERCHANT_PRESENCE_COOKIE)?.value,
   );
   const presenceSrc = `${appSiteUrl.replace(/\/$/, '')}/merchant-presence.html?api=${encodeURIComponent(publicSiteUrl)}`;
+  const androidRelease = await readAndroidReleaseMeta().catch(() => null);
 
   return (
     <main className="home-performance-tuned min-h-screen bg-[#0B0F1A] text-white">
@@ -54,11 +57,19 @@ export async function BusinessLandingPage() {
             <ProblemSection />
             <Features signupHref={signupHref} />
             <Steps />
-            <PricingSection signupHref={signupHref} supportHref={supportHref} />
+            <PricingSection
+              signupHref={signupHref}
+              supportHref={supportHref}
+              kitHref={kitCheckoutHref}
+            />
             <DemoSection signupHref={signupHref} />
             <TargetSection />
             <CTASection signupHref={signupHref} supportHref={supportHref} />
-            <Footer />
+            <Footer
+              androidDownloadHref="/api/app/android-download"
+              androidVersionName={androidRelease?.versionName ?? null}
+              androidVersionCode={androidRelease?.versionCode ?? null}
+            />
           </div>
         </MerchantPresenceProvider>
       </div>

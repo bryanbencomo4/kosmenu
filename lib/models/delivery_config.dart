@@ -1,3 +1,5 @@
+import 'package:kosmenu_app/utils/polygon_geometry.dart';
+
 class DeliveryDistanceConfig {
   final double basePrice;
   final double includedKm;
@@ -51,10 +53,75 @@ class DeliveryZone {
       };
 }
 
+class DeliveryAreaZone {
+  final String id;
+  final String name;
+  final double price;
+  /// Closed ring of [lat, lng] pairs (≥3).
+  final List<List<double>> polygon;
+
+  const DeliveryAreaZone({
+    this.id = '',
+    this.name = 'Zona',
+    this.price = 0,
+    this.polygon = const [],
+  });
+
+  DeliveryAreaZone copyWith({
+    String? id,
+    String? name,
+    double? price,
+    List<List<double>>? polygon,
+  }) {
+    return DeliveryAreaZone(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      price: price ?? this.price,
+      polygon: polygon ?? this.polygon,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'price': price,
+        'polygon': polygon.map((point) => [point[0], point[1]]).toList(),
+      };
+}
+
+/// When [enabled], customers outside polygons may still order; delivery fee is
+/// confirmed with the merchant later (not charged at checkout).
+class DeliveryAreaZonesFallback {
+  final bool enabled;
+  /// Kept for backward-compatible JSON; ignored by checkout quoting.
+  final double price;
+
+  const DeliveryAreaZonesFallback({
+    this.enabled = false,
+    this.price = 0,
+  });
+
+  DeliveryAreaZonesFallback copyWith({
+    bool? enabled,
+    double? price,
+  }) {
+    return DeliveryAreaZonesFallback(
+      enabled: enabled ?? this.enabled,
+      price: price ?? this.price,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        'price': 0,
+      };
+}
+
 class DeliveryConfig {
   static const pricingFixed = 'fixed';
   static const pricingDistance = 'distance';
   static const pricingZones = 'zones';
+  static const pricingAreaZones = 'area_zones';
   static const pricingFree = 'free';
 
   final bool enabled;
@@ -63,6 +130,8 @@ class DeliveryConfig {
   final double fixedPrice;
   final DeliveryDistanceConfig distance;
   final List<DeliveryZone> zones;
+  final List<DeliveryAreaZone> areaZones;
+  final DeliveryAreaZonesFallback areaZonesFallback;
   final bool freeDeliveryEnabled;
   final double freeDeliveryMinimum;
   final double minOrder;
@@ -77,6 +146,8 @@ class DeliveryConfig {
     this.fixedPrice = 0,
     this.distance = const DeliveryDistanceConfig(),
     this.zones = const [],
+    this.areaZones = const [],
+    this.areaZonesFallback = const DeliveryAreaZonesFallback(),
     this.freeDeliveryEnabled = false,
     this.freeDeliveryMinimum = 0,
     this.minOrder = 0,
@@ -111,6 +182,7 @@ class DeliveryConfig {
     final value = '${raw ?? ''}'.trim().toLowerCase();
     if (value == pricingDistance ||
         value == pricingZones ||
+        value == pricingAreaZones ||
         value == pricingFree ||
         value == pricingFixed) {
       return value;
@@ -123,6 +195,44 @@ class DeliveryConfig {
     if (value.isEmpty || value == 'SIN MONEDA') return '';
     if (!RegExp(r'^[A-Z]{3,8}$').hasMatch(value)) return '';
     return value;
+  }
+
+  static List<double>? _parsePolygonPoint(dynamic raw) {
+    if (raw is! List || raw.length < 2) return null;
+    final lat = _readNumber(raw[0], double.nan);
+    final lng = _readNumber(raw[1], double.nan);
+    if (lat.isNaN || lng.isNaN) return null;
+    if (lat.abs() > 90 || lng.abs() > 180) return null;
+    return [lat, lng];
+  }
+
+  static List<DeliveryAreaZone> _parseAreaZones(dynamic raw) {
+    if (raw is! List) return const [];
+    final zones = <DeliveryAreaZone>[];
+    for (var i = 0; i < raw.length; i++) {
+      final item = raw[i];
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+      final polygonRaw = row['polygon'];
+      if (polygonRaw is! List) continue;
+      final polygon = <List<double>>[];
+      for (final point in polygonRaw) {
+        final parsed = _parsePolygonPoint(point);
+        if (parsed != null) polygon.add(parsed);
+      }
+      if (polygon.length < 3) continue;
+      final id = (row['id'] ?? '').toString().trim();
+      final nameRaw = (row['name'] ?? 'Zona').toString().trim();
+      zones.add(
+        DeliveryAreaZone(
+          id: id.isEmpty ? 'area-${i + 1}' : id,
+          name: nameRaw.isEmpty ? 'Zona' : nameRaw,
+          price: _nonNegative(row['price'], 0),
+          polygon: polygon,
+        ),
+      );
+    }
+    return zones;
   }
 
   factory DeliveryConfig.fromConfigNegocio(dynamic raw) {
@@ -141,6 +251,9 @@ class DeliveryConfig {
     final times = _asMap(nested['estimated_times']).isNotEmpty
         ? _asMap(nested['estimated_times'])
         : _asMap(nested['estimatedTimes']);
+    final areaFallback = _asMap(nested['area_zones_fallback']).isNotEmpty
+        ? _asMap(nested['area_zones_fallback'])
+        : _asMap(nested['areaZonesFallback']);
     final zonesRaw = nested['zones'];
     final zones = zonesRaw is List
         ? zonesRaw
@@ -173,6 +286,11 @@ class DeliveryConfig {
         ),
       ),
       zones: zones,
+      areaZones: _parseAreaZones(nested['area_zones'] ?? nested['areaZones']),
+      areaZonesFallback: DeliveryAreaZonesFallback(
+        enabled: _readBool(areaFallback['enabled'], false),
+        price: _nonNegative(areaFallback['price'], 0),
+      ),
       freeDeliveryEnabled: _readBool(free['enabled'], false),
       freeDeliveryMinimum: _nonNegative(free['minimum_order'] ?? free['minimumOrder'], 0),
       minOrder: _nonNegative(nested['min_order'] ?? nested['minOrder'], 0),
@@ -204,15 +322,38 @@ class DeliveryConfig {
     }
     if (pricingType == pricingZones) {
       if (zones.isEmpty) {
-        errors.add('Agrega al menos una zona con precio.');
+        errors.add('Agrega al menos un intervalo con precio.');
       }
       for (var i = 0; i < zones.length; i++) {
         final zone = zones[i];
         if (zone.maxDistance <= zone.minDistance) {
-          errors.add('La zona ${i + 1} tiene un rango inválido.');
+          errors.add('El intervalo ${i + 1} tiene un rango inválido.');
+        }
+        if (zone.price < 0) {
+          errors.add('El intervalo ${i + 1} no puede tener precio negativo.');
+        }
+      }
+    }
+    if (pricingType == pricingAreaZones) {
+      if (areaZones.isEmpty) {
+        errors.add('Agrega al menos una zona en el mapa.');
+      }
+      for (var i = 0; i < areaZones.length; i++) {
+        final zone = areaZones[i];
+        if (zone.polygon.length < 3) {
+          errors.add('La zona ${i + 1} necesita al menos 3 puntos.');
         }
         if (zone.price < 0) {
           errors.add('La zona ${i + 1} no puede tener precio negativo.');
+        }
+        for (var j = i + 1; j < areaZones.length; j++) {
+          final other = areaZones[j];
+          if (other.polygon.length < 3) continue;
+          if (polygonsOverlap(zone.polygon, other.polygon)) {
+            errors.add(
+              'La zona “${zone.name}” se solapa con “${other.name}”.',
+            );
+          }
         }
       }
     }
@@ -227,6 +368,8 @@ class DeliveryConfig {
       case pricingDistance:
         return 'Por distancia';
       case pricingZones:
+        return 'Por intervalos';
+      case pricingAreaZones:
         return 'Por zonas';
       case pricingFree:
         return 'Gratis';
@@ -249,7 +392,12 @@ class DeliveryConfig {
       parts.add('Incluye: ${distance.includedKm} km');
       parts.add('Extra: ${distance.extraPricePerKm}$money/km');
     } else if (pricingType == pricingZones) {
-      parts.add('${zones.length} zona${zones.length == 1 ? '' : 's'}');
+      parts.add('${zones.length} intervalo${zones.length == 1 ? '' : 's'}');
+    } else if (pricingType == pricingAreaZones) {
+      parts.add('${areaZones.length} zona${areaZones.length == 1 ? '' : 's'}');
+      if (areaZonesFallback.enabled) {
+        parts.add('Permite pedidos fuera de zona (envío a confirmar)');
+      }
     }
     if (freeDeliveryEnabled) {
       parts.add('Gratis desde $freeDeliveryMinimum$money');
@@ -264,6 +412,8 @@ class DeliveryConfig {
     double? fixedPrice,
     DeliveryDistanceConfig? distance,
     List<DeliveryZone>? zones,
+    List<DeliveryAreaZone>? areaZones,
+    DeliveryAreaZonesFallback? areaZonesFallback,
     bool? freeDeliveryEnabled,
     double? freeDeliveryMinimum,
     double? minOrder,
@@ -278,6 +428,8 @@ class DeliveryConfig {
       fixedPrice: fixedPrice ?? this.fixedPrice,
       distance: distance ?? this.distance,
       zones: zones ?? this.zones,
+      areaZones: areaZones ?? this.areaZones,
+      areaZonesFallback: areaZonesFallback ?? this.areaZonesFallback,
       freeDeliveryEnabled: freeDeliveryEnabled ?? this.freeDeliveryEnabled,
       freeDeliveryMinimum: freeDeliveryMinimum ?? this.freeDeliveryMinimum,
       minOrder: minOrder ?? this.minOrder,
@@ -294,6 +446,8 @@ class DeliveryConfig {
         'fixed_price': fixedPrice,
         'distance_config': distance.toJson(),
         'zones': zones.map((zone) => zone.toJson()).toList(),
+        'area_zones': areaZones.map((zone) => zone.toJson()).toList(),
+        'area_zones_fallback': areaZonesFallback.toJson(),
         'free_delivery': {
           'enabled': freeDeliveryEnabled,
           'minimum_order': freeDeliveryMinimum,

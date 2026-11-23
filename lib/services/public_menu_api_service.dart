@@ -23,14 +23,22 @@ class PublicMenuApiService {
   final http.Client _client;
   final Duration _timeout;
 
-  Future<Map<String, dynamic>> fetchMenu(String comercioId) async {
+  Future<Map<String, dynamic>> fetchMenu(
+    String comercioId, {
+    String? accessToken,
+  }) async {
     final encoded = Uri.encodeComponent(comercioId.trim());
     final uri = ElmenuxfaApiConfig.uri('/api/menu/$encoded');
+    final token = (accessToken ?? '').trim();
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
 
     late http.Response response;
     try {
       response = await _client
-          .get(uri, headers: const <String, String>{'Accept': 'application/json'})
+          .get(uri, headers: headers)
           .timeout(_timeout);
     } on Exception {
       throw const PublicMenuApiException(

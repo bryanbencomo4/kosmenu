@@ -459,7 +459,12 @@ function buildWhatsappMessage(params: {
 
 function buildWhatsappFallbackUrl(recipient: string, text: string): string {
   const digits = recipient.replace(/\D/g, '');
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  if (!digits) return '';
+  const params = new URLSearchParams({ phone: digits });
+  const message = (text ?? '').trim();
+  if (message) params.set('text', message);
+  // api.whatsapp.com works with both WhatsApp and WhatsApp Business.
+  return `https://api.whatsapp.com/send?${params.toString()}`;
 }
 
 function normalizePhoneToE164(phone: string): string {

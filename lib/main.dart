@@ -5,17 +5,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
-import 'package:kosmenu_app/screens/billing_plan_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
 import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
-import 'package:kosmenu_app/screens/public_menu_view.dart';
+import 'package:kosmenu_app/screens/public_menu_view.dart' deferred as public_menu;
+import 'package:kosmenu_app/screens/staff_invite_accept_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:kosmenu_app/services/push_notification_service.dart';
+import 'package:kosmenu_app/widgets/deferred_library_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -29,7 +32,11 @@ final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 /// `Material` or `Scaffold`) because this can be rendered anywhere in the tree,
 /// including above the app's own providers.
 Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
-  debugPrint('UI build error: ${details.exceptionAsString()}');
+  final exceptionText = details.exceptionAsString().trim();
+  debugPrint('UI build error: $exceptionText');
+  if (details.stack != null) {
+    debugPrint('${details.stack}');
+  }
 
   return Directionality(
     textDirection: TextDirection.ltr,
@@ -62,6 +69,20 @@ Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0xFFB9AED7), fontSize: 14),
           ),
+          if (exceptionText.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              exceptionText.length > 280
+                  ? '${exceptionText.substring(0, 280)}…'
+                  : exceptionText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFC4B5FD),
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           GestureDetector(
             onTap: () => _navigatorKey.currentState?.pushAndRemoveUntil(
@@ -92,16 +113,13 @@ Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Real `/panel/...` paths (not `/#/panel`). Required for merchant shell URLs.
+  usePathUrlStrategy();
   passwordRecoveryPending.value =
       kIsWeb && Uri.base.queryParameters['flow'] == 'password-recovery';
   ErrorWidget.builder = _buildRecoverableErrorScreen;
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      statusBarBrightness: Brightness.dark,
-    ),
-  );
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(AppTheme.lightSystemUi);
 
   await _initializeSupabase();
 
@@ -236,10 +254,71 @@ class _KosmenuAppState extends State<KosmenuApp> {
         // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
         return '/';
       }
-      return uri.path.isEmpty ? '/' : uri.path;
+      // Chat supervision: remember id; prefer /panel/... as initial route so
+      // AuthGate opens the native inbox after login (WaSender → app host).
+      MerchantDeepLink.rememberConversationFromUri(uri);
+      // Keep query (e.g. /invite?t=…) — path alone drops the token and AuthGate wins.
+      final fromPath = _webDeepLinkRoute(uri.path, uri.query);
+      if (fromPath != null) return fromPath;
+
+      // HashUrlStrategy: app.elmenuxfa.com/#/invite?t=…
+      final fragment = uri.fragment.trim();
+      if (fragment.isNotEmpty) {
+        final fragUri = Uri.parse(
+          fragment.startsWith('/') ? fragment : '/$fragment',
+        );
+        final fromFrag = _webDeepLinkRoute(fragUri.path, fragUri.query);
+        if (fromFrag != null) return fromFrag;
+      }
+
+      return '/';
     }
 
     return '/';
+  }
+
+  /// Builds a named route that preserves query params for deep links.
+  String? _webDeepLinkRoute(String path, String query) {
+    final normalized = path.isEmpty ? '/' : path;
+    if (normalized == '/') return null;
+    final segments =
+        normalized.split('/').where((segment) => segment.isNotEmpty).toList();
+    if (segments.isEmpty) return null;
+    const known = <String>{
+      'invite',
+      'v',
+      'orders',
+      'order',
+      'capture',
+      'payment',
+      'billing',
+      'auth',
+      'panel',
+    };
+    if (!known.contains(segments.first)) return null;
+    if (query.isEmpty) return normalized;
+    return '$normalized?$query';
+  }
+
+  String _inviteTokenFrom(Uri uri) {
+    final direct =
+        (uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '').trim();
+    if (direct.isNotEmpty) return direct;
+    if (!kIsWeb) return '';
+    final base = Uri.base;
+    final fromSearch =
+        (base.queryParameters['t'] ?? base.queryParameters['token'] ?? '')
+            .trim();
+    if (fromSearch.isNotEmpty) return fromSearch;
+    final fragment = base.fragment.trim();
+    if (fragment.isEmpty) return '';
+    final fragUri = Uri.tryParse(
+      fragment.startsWith('/') ? fragment : '/$fragment',
+    );
+    return (fragUri?.queryParameters['t'] ??
+            fragUri?.queryParameters['token'] ??
+            '')
+        .trim();
   }
 
   Uri? _fallbackOrderUri(Uri uri, String orderId) {
@@ -328,11 +407,26 @@ class _KosmenuAppState extends State<KosmenuApp> {
     final routeName = settings.name ?? '/';
     final uri = Uri.parse(routeName.isEmpty ? '/' : routeName);
 
-    if (uri.path == '/' || uri.path.isEmpty) {
+    if (uri.path == '/' ||
+        uri.path.isEmpty ||
+        uri.path == '/panel' ||
+        uri.path.startsWith('/panel/')) {
+      MerchantDeepLink.rememberConversationFromUri(uri);
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => const _BrandedEntryScreen(),
+        builder: (_) => const AuthGate(),
       );
+    }
+
+    if (uri.path == '/invite' ||
+        (uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'invite')) {
+      final token = _inviteTokenFrom(uri);
+      if (token.isNotEmpty) {
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => StaffInviteAcceptScreen(token: token),
+        );
+      }
     }
 
     if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'capture') {
@@ -346,12 +440,17 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
     if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'v') {
       final comercioId = uri.pathSegments[1];
+      final assistedMode = uri.queryParameters['mode'] == 'assisted';
+      final entrySource = uri.queryParameters['source'];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => PublicMenuView(
-          comercioId: comercioId,
-          assistedMode: uri.queryParameters['mode'] == 'assisted',
-          entrySource: uri.queryParameters['source'],
+        builder: (_) => DeferredLibraryScreen(
+          load: public_menu.loadLibrary,
+          builder: () => public_menu.PublicMenuView(
+            comercioId: comercioId,
+            assistedMode: assistedMode,
+            entrySource: entrySource,
+          ),
         ),
       );
     }
@@ -392,18 +491,25 @@ class _KosmenuAppState extends State<KosmenuApp> {
     }
 
     if (uri.path == '/payment/success' || uri.path == '/billing') {
+      final showSuccess = uri.path == '/payment/success';
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => uri.path == '/payment/success'
-            ? const BillingPaymentSuccessScreen()
-            : const BillingPlanScreen(),
+        builder: (_) => DeferredLibraryScreen(
+          load: billing_screen.loadLibrary,
+          builder: () => showSuccess
+              ? billing_screen.BillingPaymentSuccessScreen()
+              : billing_screen.BillingPlanScreen(),
+        ),
       );
     }
 
     if (uri.path == '/payment/pending') {
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => const BillingPlanScreen(),
+        builder: (_) => DeferredLibraryScreen(
+          load: billing_screen.loadLibrary,
+          builder: () => billing_screen.BillingPlanScreen(),
+        ),
       );
     }
 
@@ -427,6 +533,14 @@ class _KosmenuAppState extends State<KosmenuApp> {
       },
       onGenerateRoute: _onGenerateRoute,
       theme: AppTheme.lightTheme(),
+      // Window chrome / web host tint while the first route paints.
+      color: const Color(0xFF5B21B6),
+      builder: (context, child) {
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: AppTheme.lightSystemUi,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -437,165 +551,3 @@ class _KosmenuAppState extends State<KosmenuApp> {
   }
 }
 
-class _BrandedEntryScreen extends StatefulWidget {
-  const _BrandedEntryScreen();
-
-  @override
-  State<_BrandedEntryScreen> createState() => _BrandedEntryScreenState();
-}
-
-class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
-  bool _startExit = false;
-  bool _showAuth = false;
-
-  @override
-  void initState() {
-    super.initState();
-    passwordRecoveryPending.addListener(_onPasswordRecoveryPending);
-    if (MerchantDeepLink.peekOrder() != null) {
-      _showAuth = true;
-      return;
-    }
-
-    Future<void>.delayed(const Duration(milliseconds: 880), () {
-      if (!mounted) return;
-      setState(() => _startExit = true);
-    });
-
-    Future<void>.delayed(const Duration(milliseconds: 1460), () {
-      if (!mounted) return;
-      setState(() => _showAuth = true);
-    });
-  }
-
-  @override
-  void dispose() {
-    passwordRecoveryPending.removeListener(_onPasswordRecoveryPending);
-    super.dispose();
-  }
-
-  void _onPasswordRecoveryPending() {
-    if (!mounted || !passwordRecoveryPending.value || _showAuth) return;
-    setState(() => _showAuth = true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 420),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, animation) {
-        final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
-        final slide = Tween<Offset>(
-          begin: const Offset(0, 0.08),
-          end: Offset.zero,
-        ).animate(fade);
-        return FadeTransition(
-          opacity: fade,
-          child: SlideTransition(position: slide, child: child),
-        );
-      },
-      child: _showAuth || passwordRecoveryPending.value
-          ? const AuthGate(key: ValueKey<String>('auth'))
-          : _BrandedSplash(
-              key: const ValueKey<String>('splash'),
-              exiting: _startExit,
-            ),
-    );
-  }
-}
-
-class _BrandedSplash extends StatelessWidget {
-  const _BrandedSplash({super.key, required this.exiting});
-
-  final bool exiting;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF5B21B6),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isotipoWidth = (constraints.maxWidth * 0.36)
-                .clamp(108.0, 160.0)
-                .toDouble();
-
-            return Center(
-              child: SingleChildScrollView(
-                physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0.94, end: 1),
-                  duration: const Duration(milliseconds: 760),
-                  curve: Curves.easeOutBack,
-                  builder: (context, value, child) {
-                    final introOpacity = value.clamp(0.0, 1.0).toDouble();
-                    final introScale = value;
-                    final outOpacity = exiting ? 0.0 : 1.0;
-                    final outOffset = exiting
-                        ? const Offset(0, -0.12)
-                        : Offset.zero;
-                    final outScale = exiting ? 0.9 : 1.0;
-
-                    return AnimatedSlide(
-                      duration: const Duration(milliseconds: 420),
-                      curve: Curves.easeInOutCubic,
-                      offset: outOffset,
-                      child: AnimatedScale(
-                        duration: const Duration(milliseconds: 420),
-                        curve: Curves.easeInOutCubic,
-                        scale: outScale,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 360),
-                          curve: Curves.easeIn,
-                          opacity: outOpacity,
-                          child: Opacity(
-                            opacity: introOpacity,
-                            child: Transform.scale(
-                              scale: introScale,
-                              child: child,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Image.asset(
-                        'assets/branding/isotipo.png',
-                        width: isotipoWidth,
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.high,
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'elmenuxfa.com',
-                        style: TextStyle(
-                          color: const Color(0xFFF4ECFF),
-                          fontSize: constraints.maxWidth < 380 ? 34 : 38,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.8,
-                          shadows: const [
-                            Shadow(
-                              color: Color(0x40000000),
-                              blurRadius: 12,
-                              offset: Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 
 class MerchantShellScope extends InheritedWidget {
@@ -94,11 +95,12 @@ class MerchantShellHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
+    final topInset = MediaQuery.paddingOf(context).top;
     final name = commerceName.trim().isEmpty ? 'Negocio' : commerceName.trim();
     final initials = _initials(name);
 
     return Container(
-      padding: EdgeInsets.fromLTRB(isMobile ? 8 : 20, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(isMobile ? 8 : 20, 12 + topInset, 16, 12),
       decoration: const BoxDecoration(
         color: Color(0xFFF8F7FC),
         border: Border(bottom: BorderSide(color: Color(0xFFEEEFF5))),
@@ -124,12 +126,15 @@ class MerchantShellHeader extends StatelessWidget {
             ),
           ),
           PopupMenuButton<bool>(
-            enabled: !isUpdatingOnline,
-            tooltip: 'Estado del negocio',
+            enabled:
+                !isUpdatingOnline && MerchantSession.canManageSettings,
+            tooltip: MerchantSession.canManageSettings
+                ? 'Visibilidad en el menú público'
+                : 'Visibilidad en el menú público (solo lectura)',
             onSelected: onToggleOnline,
             itemBuilder: (context) => const [
-              PopupMenuItem(value: true, child: Text('Negocio abierto')),
-              PopupMenuItem(value: false, child: Text('Negocio pausado')),
+              PopupMenuItem(value: true, child: Text('Mostrar al público')),
+              PopupMenuItem(value: false, child: Text('Ocultar al público')),
             ],
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -154,14 +159,17 @@ class MerchantShellHeader extends StatelessWidget {
                   if (!isMobile) ...[
                     const SizedBox(width: 8),
                     Text(
-                      businessOnline ? 'Negocio abierto' : 'Negocio pausado',
+                      businessOnline
+                          ? 'Mostrar al público'
+                          : 'Ocultar al público',
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: _text,
                       ),
                     ),
-                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                    if (MerchantSession.canManageSettings)
+                      const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
                   ],
                 ],
               ),

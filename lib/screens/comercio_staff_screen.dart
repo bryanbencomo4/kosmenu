@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
+import 'package:kosmenu_app/services/staff_invite_notify_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ComercioStaffScreen extends StatefulWidget {
@@ -76,7 +77,7 @@ class _ComercioStaffScreenState extends State<ComercioStaffScreen> {
     if (email.isEmpty) return;
     setState(() => _inviting = true);
     try {
-      await Supabase.instance.client.rpc(
+      final payload = await Supabase.instance.client.rpc(
         'invite_comercio_member',
         params: {
           'p_comercio_id': SupabaseConfig.currentComercioId,
@@ -84,15 +85,40 @@ class _ComercioStaffScreenState extends State<ComercioStaffScreen> {
           'p_role': _role.name,
         },
       );
+      final map = payload is Map
+          ? Map<String, dynamic>.from(payload)
+          : const <String, dynamic>{};
+      final status = (map['status'] ?? '').toString();
+
+      final notify = await StaffInviteNotifyService.notify(
+        comercioId: SupabaseConfig.currentComercioId,
+        email: email,
+        role: _role.name,
+      );
+
       _email.clear();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Invitación lista. Esa persona entra al negocio cuando inicie sesión con ese correo.',
+      if (!notify.ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              status == 'active'
+                  ? 'Usuario agregado, pero no se pudo enviar el correo: ${notify.error ?? 'error'}'
+                  : 'Invitación guardada, pero no se pudo enviar el correo: ${notify.error ?? 'error'}',
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              notify.existingUser
+                  ? 'Correo enviado. Esa persona ya tiene cuenta: que inicie sesión con $email.'
+                  : 'Correo enviado a $email con el enlace para crear contraseña y unirse.',
+            ),
+          ),
+        );
+      }
       await _load();
     } catch (error) {
       if (!mounted) return;
@@ -102,6 +128,27 @@ class _ComercioStaffScreenState extends State<ComercioStaffScreen> {
     } finally {
       if (mounted) setState(() => _inviting = false);
     }
+  }
+
+  Future<void> _resendInvite(ComercioTeamMember invite) async {
+    if (!invite.isInvite) return;
+    final email = invite.email.trim();
+    if (email.isEmpty) return;
+    final notify = await StaffInviteNotifyService.notify(
+      comercioId: SupabaseConfig.currentComercioId,
+      email: email,
+      role: invite.role.name,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          notify.ok
+              ? 'Correo reenviado a $email.'
+              : 'No se pudo reenviar: ${notify.error ?? 'error'}',
+        ),
+      ),
+    );
   }
 
   Future<void> _revoke({String? memberId, String? inviteId}) async {
@@ -212,14 +259,22 @@ class _ComercioStaffScreenState extends State<ComercioStaffScreen> {
                       ),
                       const SizedBox(height: 8),
                       for (final invite in _invites)
-                        _tile(invite, canRevoke: canManage),
+                        _tile(
+                          invite,
+                          canRevoke: canManage,
+                          onResend: canManage ? () => _resendInvite(invite) : null,
+                        ),
                     ],
                   ],
                 ),
     );
   }
 
-  Widget _tile(ComercioTeamMember member, {required bool canRevoke}) {
+  Widget _tile(
+    ComercioTeamMember member, {
+    required bool canRevoke,
+    VoidCallback? onResend,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
@@ -253,6 +308,12 @@ class _ComercioStaffScreenState extends State<ComercioStaffScreen> {
               ],
             ),
           ),
+          if (onResend != null)
+            IconButton(
+              tooltip: 'Reenviar correo',
+              onPressed: onResend,
+              icon: const Icon(Icons.mark_email_unread_outlined),
+            ),
           if (canRevoke)
             IconButton(
               tooltip: 'Quitar acceso',

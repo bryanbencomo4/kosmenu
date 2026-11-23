@@ -62,6 +62,7 @@ create table if not exists public.comercios (
   ai_images_generated_count integer not null default 0,
   ai_images_generation_completed_at timestamp without time zone,
   negocio_virtual boolean not null default false,
+  estados_operacion text[] not null default '{}'::text[],
   mostrar_en_directorio_publico boolean not null default true,
   menu_palette_primary integer,
   menu_palette_accent integer,

@@ -23,15 +23,21 @@ export function AdminKpiCard({
   tone: AdminKpiCardTone;
 }) {
   return (
-    <article className="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.35)]">
-      <div className={`rounded-[1.25rem] bg-[linear-gradient(145deg,var(--tw-gradient-stops))] px-4 py-4 ${toneClasses[tone]}`}>
-        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">{title}</p>
-        <p className="mt-3 font-[var(--font-display)] text-[2rem] font-black tracking-[-0.05em] text-slate-950">
+    <article className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.35)] sm:rounded-[1.6rem] sm:p-5">
+      <div
+        className={`rounded-xl bg-[linear-gradient(145deg,var(--tw-gradient-stops))] px-3 py-3 sm:rounded-[1.25rem] sm:px-4 sm:py-4 ${toneClasses[tone]}`}
+      >
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500 sm:text-[11px]">
+          {title}
+        </p>
+        <p className="mt-2 whitespace-pre-line font-[var(--font-display)] text-xl font-black leading-tight tracking-[-0.04em] text-slate-950 sm:mt-3 sm:text-[1.75rem]">
           {value}
         </p>
-        <p className="mt-2 text-sm font-semibold">{delta}</p>
+        <p className="mt-1.5 text-xs font-semibold sm:mt-2 sm:text-sm">{delta}</p>
       </div>
-      <p className="mt-4 text-sm leading-6 text-slate-600">{hint}</p>
+      <p className="mt-2 hidden text-sm leading-6 text-slate-600 sm:mt-4 sm:block">
+        {hint}
+      </p>
     </article>
   );
 }

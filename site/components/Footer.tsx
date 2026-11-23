@@ -9,6 +9,7 @@ import {
   supportEmailHref,
   termsPagePath,
 } from '../app/_lib/public-site-config';
+import { AppDownloadButtons } from './business/AppDownloadButtons';
 
 function isExternalHref(href: string) {
   return href.startsWith('http') || href.startsWith('mailto:');
@@ -69,7 +70,17 @@ const socialIconByLabel = {
   Facebook,
 } as const;
 
-export function Footer() {
+type FooterProps = {
+  androidDownloadHref?: string;
+  androidVersionName?: string | null;
+  androidVersionCode?: number | null;
+};
+
+export function Footer({
+  androidDownloadHref = '/api/app/android-download',
+  androidVersionName,
+  androidVersionCode,
+}: FooterProps) {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -165,7 +176,22 @@ export function Footer() {
       </div>
 
       <div className="border-t border-white/8">
-        <div className="mx-auto max-w-7xl px-6 py-5 text-sm text-slate-500">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">App del panel</p>
+            <p className="mt-1 text-sm text-slate-400">
+              Administra tu menú desde Android. iPhone estará disponible pronto.
+            </p>
+          </div>
+          <AppDownloadButtons
+            androidHref={androidDownloadHref}
+            androidVersionName={androidVersionName}
+            androidVersionCode={androidVersionCode}
+            size="compact"
+            className="sm:justify-end"
+          />
+        </div>
+        <div className="mx-auto max-w-7xl px-6 pb-5 text-sm text-slate-500">
           © {currentYear} elmenuxfa.com Todos los derechos reservados.
         </div>
       </div>

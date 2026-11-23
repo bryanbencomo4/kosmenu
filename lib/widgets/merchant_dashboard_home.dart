@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
+import 'package:kosmenu_app/models/merchant_panel.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 
 enum MerchantNavDestination {
@@ -77,6 +79,8 @@ class MerchantDashboardSidebar extends StatelessWidget {
 
   static const double expandedWidth = 248;
   static const double collapsedWidth = 80;
+  static final Future<String> _versionLabelFuture =
+      AppUpdateService.installedVersionLabel();
 
   final MerchantNavDestination selected;
   final String planName;
@@ -240,9 +244,18 @@ class MerchantDashboardSidebar extends StatelessWidget {
                     color: _text,
                   ),
                 ),
-                Text(
-                  'v1.0.0',
-                  style: GoogleFonts.poppins(fontSize: 10, color: _muted),
+                FutureBuilder<String>(
+                  future: _versionLabelFuture,
+                  builder: (context, snapshot) {
+                    final label = snapshot.data?.trim() ?? '';
+                    if (label.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Text(
+                      label,
+                      style: GoogleFonts.poppins(fontSize: 10, color: _muted),
+                    );
+                  },
                 ),
               ],
             ],
@@ -451,7 +464,8 @@ class MerchantHomeHeader extends StatelessWidget {
   static const _muted = Color(0xFF6B6F92);
 
   static String greetingFor(DateTime now) {
-    final hour = now.hour;
+    // America/Caracas wall clock (UTC−4, no DST).
+    final hour = now.toUtc().add(const Duration(hours: -4)).hour;
     if (hour < 12) return 'Buenos días';
     if (hour < 19) return 'Buenas tardes';
     return 'Buenas noches';
@@ -481,9 +495,10 @@ class MerchantHomeHeader extends StatelessWidget {
       'noviembre',
       'diciembre',
     ];
-    final weekday = weekdays[(now.weekday - 1).clamp(0, 6)];
-    final month = months[(now.month - 1).clamp(0, 11)];
-    return '$weekday, ${now.day} de $month de ${now.year}';
+    final caracas = now.toUtc().add(const Duration(hours: -4));
+    final weekday = weekdays[(caracas.weekday - 1).clamp(0, 6)];
+    final month = months[(caracas.month - 1).clamp(0, 11)];
+    return '$weekday, ${caracas.day} de $month de ${caracas.year}';
   }
 
   @override
@@ -513,9 +528,9 @@ class MerchantHomeHeader extends StatelessWidget {
         Text(
           hoursCaption?.trim().isNotEmpty == true
               ? hoursCaption!
-              : businessOnline
-              ? 'Tu negocio está abierto y listo para recibir más pedidos.'
-              : 'Tu negocio está pausado. Actívalo para recibir pedidos.',
+              :               businessOnline
+              ? 'Tu menú está visible al público y listo para recibir pedidos.'
+              : 'Tu menú está oculto al público. Muéstralo para recibir pedidos.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.poppins(
@@ -529,11 +544,11 @@ class MerchantHomeHeader extends StatelessWidget {
 
     final statusChip = PopupMenuButton<bool>(
       enabled: !isUpdatingOnline && MerchantSession.canManageSettings,
-      tooltip: 'Estado del negocio',
+      tooltip: 'Visibilidad en el menú público',
       onSelected: onToggleOnline,
       itemBuilder: (context) => const [
-        PopupMenuItem(value: true, child: Text('Negocio abierto')),
-        PopupMenuItem(value: false, child: Text('Negocio pausado')),
+        PopupMenuItem(value: true, child: Text('Mostrar al público')),
+        PopupMenuItem(value: false, child: Text('Ocultar al público')),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -557,7 +572,9 @@ class MerchantHomeHeader extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              businessOnline ? 'Negocio abierto' : 'Negocio pausado',
+              businessOnline
+                  ? 'Mostrar al público'
+                  : 'Ocultar al público',
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -628,7 +645,7 @@ class MerchantHomeHeader extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Administrador',
+                        MerchantSession.role.label,
                         style: GoogleFonts.poppins(fontSize: 10, color: _muted),
                       ),
                     ],
@@ -748,6 +765,7 @@ class MerchantQuickActions extends StatelessWidget {
     required this.onShareQr,
     required this.onImprovePhotos,
     required this.onConfigureHours,
+    this.onTakeAssistedOrder,
   });
 
   final VoidCallback onAddProduct;
@@ -755,11 +773,20 @@ class MerchantQuickActions extends StatelessWidget {
   final VoidCallback onShareQr;
   final VoidCallback onImprovePhotos;
   final VoidCallback onConfigureHours;
+  final VoidCallback? onTakeAssistedOrder;
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
     final actions = <_QuickActionData>[
+      if (onTakeAssistedOrder != null && MerchantSession.canTakeAssistedOrders)
+        _QuickActionData(
+          title: MerchantSession.isMesero ? 'Tomar pedido' : 'Nuevo pedido',
+          icon: Icons.point_of_sale_rounded,
+          color: const Color(0xFF6D28D9),
+          background: const Color(0xFFEDE9FE),
+          onTap: onTakeAssistedOrder!,
+        ),
       if (MerchantSession.canManageCatalog)
         _QuickActionData(
           title: 'Agregar producto',
@@ -807,7 +834,7 @@ class MerchantQuickActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Acciones rápidas',
+          MerchantSession.isMesero ? 'Tu turno' : 'Acciones rápidas',
           style: GoogleFonts.poppins(
             fontSize: 16,
             fontWeight: FontWeight.w800,
@@ -816,7 +843,9 @@ class MerchantQuickActions extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Todo lo que necesitas, en un solo lugar.',
+          MerchantSession.isMesero
+              ? 'Toma el pedido del cliente y envíalo a cocina.'
+              : 'Todo lo que necesitas, en un solo lugar.',
           style: GoogleFonts.poppins(
             fontSize: 12,
             color: const Color(0xFF6B6F92),

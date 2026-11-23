@@ -23,6 +23,8 @@ class MerchantSession {
   static bool get isAdmin =>
       isOwner || role == MerchantStaffRole.administrador;
 
+  static bool get isMesero => role == MerchantStaffRole.mesero;
+
   static bool get canManageCatalog => isAdmin;
   static bool get canManageStaff => isAdmin;
   static bool get canManageBilling => isAdmin;
@@ -39,6 +41,10 @@ class MerchantSession {
       role == MerchantStaffRole.caja ||
       role == MerchantStaffRole.marketing;
 
+  /// Assisted / "modo mesero" order entry inside the same mobile/web app.
+  static bool get canTakeAssistedOrders =>
+      isAdmin || role == MerchantStaffRole.mesero;
+
   static bool canOpen(MerchantNavDestination destination) {
     if (isAdmin) return true;
     switch (role) {
@@ -54,6 +60,9 @@ class MerchantSession {
             destination == MerchantNavDestination.digitalMenu ||
             destination == MerchantNavDestination.stats ||
             destination == MerchantNavDestination.marketing;
+      case MerchantStaffRole.mesero:
+        // Waiters only land on home and open the in-app assisted menu.
+        return destination == MerchantNavDestination.home;
       case MerchantStaffRole.administrador:
         return true;
     }

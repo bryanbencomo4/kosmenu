@@ -57,7 +57,6 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
 }));
 
 import { GET } from '../app/o/[code]/route';
-import { GET as openProof } from '../app/p/[code]/route';
 import { middleware } from '../middleware';
 
 const TOKEN = 'courierTokenAbcdefghijklmnopqrstuvwxyz_0123';
@@ -83,6 +82,20 @@ describe('GET /o/[code]', () => {
       'https://elmenuxfa.com/orders/EMXFA-000027?s=AbCdEf1234',
     );
     expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('forwards repeat and rate intents from email short links', async () => {
+    const repeatRequest = new NextRequest('https://elmenuxfa.com/o/AbCdEf1234?repeat=1');
+    const repeatResponse = await GET(repeatRequest, { params: Promise.resolve({ code: 'AbCdEf1234' }) });
+    expect(repeatResponse.headers.get('location')).toBe(
+      'https://elmenuxfa.com/orders/EMXFA-000027?s=AbCdEf1234&repeat=1',
+    );
+
+    const rateRequest = new NextRequest('https://elmenuxfa.com/o/AbCdEf1234?rate=1');
+    const rateResponse = await GET(rateRequest, { params: Promise.resolve({ code: 'AbCdEf1234' }) });
+    expect(rateResponse.headers.get('location')).toBe(
+      'https://elmenuxfa.com/orders/EMXFA-000027?s=AbCdEf1234&rate=1',
+    );
   });
 
   it('sends the accepted courier to the courier screen', async () => {
@@ -121,30 +134,9 @@ describe('GET /o/[code]', () => {
 });
 
 describe('GET /p/[code]', () => {
-  it('does not rewrite proof links to public menus', () => {
+  it('does not rewrite proof links to public menus (served as a fast Next.js page)', () => {
     const response = middleware(new NextRequest('https://elmenuxfa.com/p/AbCdEf1234'));
     expect(response.headers.get('location')).toBeNull();
     expect(response.headers.get('x-middleware-next')).toBe('1');
-  });
-  it('redirects to the authenticated merchant viewer without exposing a proof URL', async () => {
-    const response = await openProof(new Request('https://elmenuxfa.com/p/AbCdEf1234'), {
-      params: Promise.resolve({ code: 'AbCdEf1234' }),
-    });
-    expect(response.status).toBe(302);
-    const destination = new URL(response.headers.get('location')!);
-    expect(destination.pathname).toBe('/orders/view/EMXFA-000027');
-    expect(destination.searchParams.get('comprobante')).toBe('1');
-    expect(destination.searchParams.get('shortCode')).toBe('AbCdEf1234');
-    expect(response.headers.get('cache-control')).toBe('private, no-store');
-    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
-    expect(destination.toString()).not.toContain('storage');
-    expect(response.headers.get('set-cookie')).toBeNull();
-  });
-  it('rejects unknown and malformed codes', async () => {
-    for (const code of ['ZZZZZZZZZZ', 'bad', '%E0%A4%A']) {
-      expect((await openProof(new Request('https://elmenuxfa.com/p/bad'), {
-        params: Promise.resolve({ code }),
-      })).status).toBe(404);
-    }
   });
 });

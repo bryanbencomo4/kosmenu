@@ -18,7 +18,9 @@ import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/exchange_rate_adjustment.dart';
 import 'package:kosmenu_app/core/search_text.dart';
+import 'package:kosmenu_app/core/venezuela_states.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/models/kiosk_home_config.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
@@ -31,6 +33,7 @@ import 'package:kosmenu_app/services/logo_image_guard.dart';
 import 'package:kosmenu_app/services/logo_palette.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
+import 'package:kosmenu_app/utils/phone_national_normalize.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/exchange_adjustment_panel.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
@@ -243,6 +246,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedCategory = 'Restaurante';
   final Set<String> _selectedCurrencies = <String>{'USD'};
   String _activeCheckoutCurrency = 'USD';
+  /// Independent of [_activeCheckoutCurrency]: FX tabs vs payment-method tabs.
+  String _activePaymentCurrency = 'USD';
   String _primaryCheckoutCurrency = '';
   String _selectedLayoutId = 'cards';
   String _selectedPaletteId = 'smart';
@@ -298,6 +303,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final Map<String, String> _exchangeRateByCurrency = <String, String>{
     'USD': '1',
   };
+  /// Last manual quote-per-base rate per currency. Switching Manual→Auto can
+  /// overwrite `_exchangeRateByCurrency` with the live source; this stash lets
+  /// Manual←Auto restore what the merchant had set (avoids silently saving
+  /// the automatic rate as their manual rate).
+  final Map<String, String> _stashedManualExchangeRateByCurrency =
+      <String, String>{};
   final Map<String, Set<String>> _selectedPaymentsByCurrency =
       <String, Set<String>>{};
   final Map<String, Map<String, _PaymentMethodDraft>>
@@ -315,13 +326,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedFooter = 'Simple';
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
-  String _whatsappOrderFormat = 'summary';
-  String _orderManagementMode = 'platform';
+  /// Catalog browsing (cart + payments, no WhatsApp send). Default off;
+  /// auto-on when there is no WhatsApp number.
+  bool _catalogModeEnabled = false;
+  /// Shown on public home when catalog is on. Defaults to on with catalog.
+  bool _showPaymentMethodsOnHome = true;
+  /// New businesses default to WhatsApp manual + full comanda; merchants can
+  /// switch to platform / summary later in settings.
+  String _whatsappOrderFormat = 'detailed';
+  String _orderManagementMode = 'whatsapp_manual';
   bool _isVirtualBusiness = false;
 
-  /// Hidden until the public business directory ships on the landing page.
-  static const bool _publicDirectoryUiEnabled = false;
-  bool _showOnPublicDirectory = false;
+  /// Venezuela state slugs where a virtual business operates (directory + delivery area).
+  final Set<String> _operatingStateSlugs = <String>{};
+
+  /// Directory discovery at /clientes — merchants opt in and can promote manually.
+  static const bool _publicDirectoryUiEnabled = true;
+  bool _showOnPublicDirectory = true;
+  bool _directoryPromoted = false;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
   String _menuAiSetupMode = '';
@@ -381,7 +403,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     MerchantBusinessSettingsSection.appearance =>
       'Ajusta colores, tema, tipografía y diseño del menú.',
     MerchantBusinessSettingsSection.payments =>
-      'Configura monedas, tasas y los datos de cobro.',
+      'Moneda principal, tasa de cambio y datos de cobro.',
     MerchantBusinessSettingsSection.operations =>
       'Define cómo contactarte y cómo recibes pedidos.',
     null => '',
@@ -720,14 +742,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final seedBusinessConfig = _toStringDynamicMap(
       seedBranding['config_negocio'],
     );
-    _orderManagementMode =
-        seedBusinessConfig['order_management_mode'] == 'whatsapp_manual'
-        ? 'whatsapp_manual'
-        : 'platform';
-    _whatsappOrderFormat =
-        seedBusinessConfig['whatsapp_order_format'] == 'detailed'
-        ? 'detailed'
-        : 'summary';
+    // Explicit saved values win; missing keys keep the new-registration defaults.
+    if (seedBusinessConfig.containsKey('order_management_mode')) {
+      _orderManagementMode =
+          seedBusinessConfig['order_management_mode'] == 'whatsapp_manual'
+          ? 'whatsapp_manual'
+          : 'platform';
+    } else {
+      _orderManagementMode = 'whatsapp_manual';
+    }
+    if (seedBusinessConfig.containsKey('whatsapp_order_format')) {
+      _whatsappOrderFormat =
+          seedBusinessConfig['whatsapp_order_format'] == 'detailed'
+          ? 'detailed'
+          : 'summary';
+    } else if (_orderManagementMode == 'whatsapp_manual') {
+      _whatsappOrderFormat = 'detailed';
+    } else {
+      _whatsappOrderFormat = 'summary';
+    }
     final seedSocialLinks = _toStringDynamicMap(
       seedBusinessConfig['social_links'],
     );
@@ -740,6 +773,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _tiktokController.text = seedSocialLinks['tiktok']?.toString().trim() ?? '';
     final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
     _isVirtualBusiness = raw?['negocio_virtual'] == true;
+    _operatingStateSlugs
+      ..clear()
+      ..addAll(sanitizeVenezuelaStateSlugs(raw?['estados_operacion'] as List?));
     if (_isVirtualBusiness) {
       _addressController.clear();
       _locationNoteController.clear();
@@ -757,14 +793,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
+    final seedHome = KioskHomeConfig.fromConfigNegocio(seedBusinessConfig);
+    _catalogModeEnabled = seedHome.catalogo;
+    _showPaymentMethodsOnHome = seedHome.catalogo
+        ? seedHome.verMetodosPago
+        : true;
+    if (_whatsappE164.isEmpty) {
+      _catalogModeEnabled = true;
+      if (!seedHome.catalogo) {
+        _showPaymentMethodsOnHome = true;
+      }
+    }
     _showOnPublicDirectory =
         _publicDirectoryUiEnabled &&
         (raw?['mostrar_en_directorio_publico'] is bool
             ? raw!['mostrar_en_directorio_publico'] as bool
-            : false);
-    if (_isVirtualBusiness) {
-      _allowDelivery = false;
-    }
+            : true);
+    _directoryPromoted =
+        seedBusinessConfig['destacado_directorio'] == true ||
+        seedBusinessConfig['promovido'] == true;
 
     final layout = (raw?['menu_layout']?.toString().trim() ?? '');
     if (_layouts.any((item) => item.id == layout)) {
@@ -902,9 +949,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final dynamicRate = _parseExchangeRate(raw?['exchange_rate_value']);
     final effectiveRate = dynamicRate > 0 ? dynamicRate : rate;
     if (effectiveRate > 0) {
-      _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
-        effectiveRate,
-      );
+      _exchangeRateByCurrency[_activeCheckoutCurrency] =
+          _persistExchangeRateValue(effectiveRate);
       _loadActiveCurrencyIntoController();
       _lastSuggestedRateCurrency = _activeCheckoutCurrency;
     }
@@ -930,6 +976,78 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     _hydrateExchangeAdjustments(seedBusinessConfig);
+    _hydrateCheckoutExchangeConfig(seedBusinessConfig);
+    // Reload after per-currency rates are hydrated so COP→USD inverse
+    // display sees the full-precision value (not a stale/empty controller).
+    _loadActiveCurrencyIntoController();
+  }
+
+  /// Restores per-currency rates/modes/sources saved in config_negocio.
+  void _hydrateCheckoutExchangeConfig(Map<String, dynamic> configNegocio) {
+    final rawCheckout = configNegocio['checkout_currencies'];
+    final checkoutCurrencies = (rawCheckout is List ? rawCheckout : const [])
+        .map((item) => item.toString().trim().toUpperCase())
+        .where(_currencies.contains)
+        .toList();
+    if (checkoutCurrencies.isNotEmpty) {
+      _selectedCurrencies
+        ..clear()
+        ..addAll(checkoutCurrencies);
+      if (!_selectedCurrencies.contains(_primaryCheckoutCurrency) &&
+          _primaryCheckoutCurrency.trim().isNotEmpty) {
+        _selectedCurrencies.add(_primaryCheckoutCurrency);
+      }
+      if (!_selectedCurrencies.contains(_activeCheckoutCurrency)) {
+        _activeCheckoutCurrency = _selectedCurrencies.contains(
+              _primaryCheckoutCurrency,
+            )
+            ? _primaryCheckoutCurrency
+            : _selectedCurrencies.first;
+      }
+    }
+
+    final rawRates = _toStringDynamicMap(configNegocio['exchange_rates']);
+    for (final entry in rawRates.entries) {
+      final code = entry.key.trim().toUpperCase();
+      if (!_currencies.contains(code) || code == _baseCurrency) {
+        continue;
+      }
+      final rate = _parseExchangeRate(entry.value);
+      if (rate > 0) {
+        final stored = _persistExchangeRateValue(rate);
+        _exchangeRateByCurrency[code] = stored;
+        // Seed restore-point for Manual↔Auto toggles this session.
+        _stashedManualExchangeRateByCurrency.putIfAbsent(code, () => stored);
+      }
+    }
+
+    final rawModes = _toStringDynamicMap(configNegocio['exchange_rate_modes']);
+    for (final entry in rawModes.entries) {
+      final code = entry.key.trim().toUpperCase();
+      final mode = entry.value.toString().trim().toLowerCase();
+      if (!_currencies.contains(code)) {
+        continue;
+      }
+      if (mode == _exchangeModeAuto || mode == _exchangeModeManual) {
+        _exchangeRateModeByCurrency[code] = mode;
+      }
+    }
+
+    final rawSources = _toStringDynamicMap(
+      configNegocio['exchange_rate_sources'],
+    );
+    for (final entry in rawSources.entries) {
+      final code = entry.key.trim().toUpperCase();
+      final source = entry.value.toString().trim().toLowerCase();
+      if (!_currencies.contains(code)) {
+        continue;
+      }
+      if (source == _exchangeSourceP2pBinance ||
+          source == _exchangeSourceGoogle ||
+          _isBcvSource(source)) {
+        _exchangeRateSourceByCurrency[code] = _canonicalExchangeSource(source);
+      }
+    }
   }
 
   /// Restores saved adjustments (and the auto mode/source they depend on).
@@ -970,6 +1088,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String get _currentCurrency {
     if (_selectedCurrencies.contains(_activeCheckoutCurrency)) {
       return _activeCheckoutCurrency;
+    }
+    return _selectedCurrencies.isNotEmpty ? _selectedCurrencies.first : 'USD';
+  }
+
+  /// Currency selected in the payment-methods tab bar (includes primary).
+  String get _paymentCurrency {
+    if (_selectedCurrencies.contains(_activePaymentCurrency)) {
+      return _activePaymentCurrency;
+    }
+    if (_selectedCurrencies.contains(_baseCurrency)) {
+      return _baseCurrency;
     }
     return _selectedCurrencies.isNotEmpty ? _selectedCurrencies.first : 'USD';
   }
@@ -1225,8 +1354,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   void _syncActiveCurrencyDataFromController() {
     final currency = _currentCurrency;
     final text = _exchangeRateController.text.trim();
-    _exchangeRateByCurrency[currency] =
-        _requiresExchangeRateForCurrency(currency) ? text : '1';
+    if (!_requiresExchangeRateForCurrency(currency)) {
+      _exchangeRateByCurrency[currency] = '1';
+    } else {
+      final canonical = _canonicalRateTextFromInput(
+        text,
+        baseCurrency: _baseCurrency,
+        quoteCurrency: currency,
+      );
+      _exchangeRateByCurrency[currency] = canonical;
+      if (_parseExchangeRate(canonical) > 0) {
+        _stashedManualExchangeRateByCurrency[currency] = canonical;
+      }
+    }
     _syncExchangeConfigForCurrency(currency);
   }
 
@@ -1236,8 +1376,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _enforceExchangeRulesForCurrency(currency);
     _syncExchangeConfigForCurrency(currency);
     _ensureCurrencyConfig(currency);
-    final value = _requiresExchangeRateForCurrency(currency)
+    final stored = _requiresExchangeRateForCurrency(currency)
         ? (_exchangeRateByCurrency[currency] ?? '')
+        : '1';
+    final value = _requiresExchangeRateForCurrency(currency)
+        ? _inputTextFromCanonicalRate(
+            stored,
+            baseCurrency: _baseCurrency,
+            quoteCurrency: currency,
+          )
         : '1';
     _exchangeRateController.value = TextEditingValue(
       text: value,
@@ -1313,17 +1460,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           final current =
               target['Transferencia'] ??
               _PaymentMethodDraft(method: 'Transferencia');
-          final detailsRaw = map['detalles']?.toString().trim() ?? '';
+          final detailsValue = map['detalles'];
+          final detailsRaw = detailsValue is String
+              ? detailsValue.trim()
+              : '';
           _TransferAccountDraft? account;
-          if (detailsRaw.isNotEmpty) {
-            try {
-              final parsed = jsonDecode(detailsRaw);
-              if (parsed is Map<String, dynamic>) {
-                account = _TransferAccountDraft.fromMap(parsed);
-              }
-            } catch (_) {
-              account = null;
+          try {
+            final parsedMap = _paymentDetallesAsMap(detailsValue);
+            if (parsedMap != null) {
+              account = _TransferAccountDraft.fromMap(parsedMap);
             }
+          } catch (_) {
+            account = null;
           }
 
           account ??= _TransferAccountDraft.fromLegacyColumns(
@@ -1345,10 +1493,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             transferAccounts: mergedAccounts,
           );
         } else {
+          final detailsValue = map['detalles'];
           target[method] = _PaymentMethodDraft(
             method: method,
             description: map['descripcion']?.toString() ?? '',
-            extraDetails: map['detalles']?.toString() ?? '',
+            extraDetails: detailsValue is String
+                ? detailsValue
+                : (detailsValue?.toString() ?? ''),
           );
         }
       }
@@ -1357,6 +1508,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return;
       }
 
+      final previousPrimary = _primaryCheckoutCurrency.trim().toUpperCase();
+
       _selectedCurrencies
         ..clear()
         ..addAll(selectedByCurrency.keys);
@@ -1364,18 +1517,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _selectedCurrencies.add('USD');
       }
       if (!_selectedCurrencies.contains(_activeCheckoutCurrency)) {
-        _activeCheckoutCurrency = _selectedCurrencies.first;
+        _activeCheckoutCurrency = _selectedCurrencies.contains(previousPrimary)
+            ? previousPrimary
+            : _selectedCurrencies.first;
       }
-      _primaryCheckoutCurrency = _activeCheckoutCurrency;
+      // Keep the menu's primary currency when it is still available. Overwriting
+      // it with the active editor tab broke COP businesses after loading
+      // multi-currency payment rows.
+      if (_currencies.contains(previousPrimary) &&
+          _selectedCurrencies.contains(previousPrimary)) {
+        _primaryCheckoutCurrency = previousPrimary;
+      } else if (!_selectedCurrencies.contains(_primaryCheckoutCurrency) ||
+          _primaryCheckoutCurrency.trim().isEmpty) {
+        _primaryCheckoutCurrency = _selectedCurrencies.contains('COP')
+            ? 'COP'
+            : _selectedCurrencies.first;
+      }
 
       _selectedPaymentsByCurrency
         ..clear()
         ..addEntries(
           selectedByCurrency.entries.map(
-            (entry) => MapEntry(
-              entry.key,
-              entry.value.where(_paymentMethods.contains).toSet(),
-            ),
+            (entry) {
+              final methods = entry.value.where(_paymentMethods.contains).toSet();
+              return MapEntry(
+                entry.key,
+                methods.isEmpty ? <String>{'Efectivo'} : methods,
+              );
+            },
           ),
         );
 
@@ -1386,9 +1555,32 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       for (final currency in _selectedCurrencies) {
         _ensurePaymentDraftsForSelection(currency);
       }
+      _loadActiveCurrencyIntoController();
     } catch (_) {
       // Keep local defaults if loading fails.
     }
+  }
+
+  Map<String, dynamic>? _paymentDetallesAsMap(dynamic raw) {
+    if (raw == null) {
+      return null;
+    }
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    final text = raw.toString().trim();
+    if (text.isEmpty || !text.startsWith('{')) {
+      return null;
+    }
+    try {
+      final parsed = jsonDecode(text);
+      if (parsed is Map) {
+        return Map<String, dynamic>.from(parsed);
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   String _draftKeyFor(String userId) => '$_draftKeyPrefix:$userId';
@@ -1448,6 +1640,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _activeCheckoutCurrency = _selectedCurrencies.contains(activeCurrency)
           ? activeCurrency
           : _selectedCurrencies.first;
+      final paymentCurrency = (map['activePaymentCurrency'] as String? ?? '')
+          .trim()
+          .toUpperCase();
+      _activePaymentCurrency = _selectedCurrencies.contains(paymentCurrency)
+          ? paymentCurrency
+          : (_selectedCurrencies.contains(primaryCurrency)
+                ? primaryCurrency
+                : _selectedCurrencies.first);
       _primaryCheckoutCurrency = _selectedCurrencies.contains(primaryCurrency)
           ? primaryCurrency
           : _activeCheckoutCurrency;
@@ -1489,9 +1689,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       final exchangeRate = _parseExchangeRate(map['exchangeRate']);
       if (exchangeRate > 0) {
-        _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
-          exchangeRate,
-        );
+        _exchangeRateByCurrency[_activeCheckoutCurrency] =
+            _persistExchangeRateValue(exchangeRate);
       }
 
       final draftMode = (map['exchangeRateMode'] as String? ?? '')
@@ -1609,6 +1808,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         }
       }
 
+      final stashedManualRates = _toStringDynamicMap(
+        map['stashedManualExchangeRates'],
+      );
+      if (stashedManualRates.isNotEmpty) {
+        for (final entry in stashedManualRates.entries) {
+          final currencyCode = entry.key.trim().toUpperCase();
+          final value = entry.value?.toString().trim() ?? '';
+          if (!_currencies.contains(currencyCode) ||
+              _parseExchangeRate(value) <= 0) {
+            continue;
+          }
+          _stashedManualExchangeRateByCurrency[currencyCode] = value;
+          // Prefer stashed established rate over a draft map that Auto may
+          // have overwritten earlier in the session.
+          _exchangeRateByCurrency[currencyCode] = value;
+        }
+      }
+
       _lastSuggestedRateCurrency =
           (map['lastSuggestedRateCurrency'] as String? ?? '').trim();
       _exchangeRateManuallyEdited =
@@ -1642,13 +1859,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _allowDelivery = map['allowDelivery'] as bool? ?? false;
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
+      _catalogModeEnabled = map['catalogModeEnabled'] as bool? ?? false;
+      _showPaymentMethodsOnHome =
+          map['showPaymentMethodsOnHome'] as bool? ?? true;
+      if (_whatsappE164.isEmpty) {
+        _catalogModeEnabled = true;
+      }
       _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
+      _operatingStateSlugs
+        ..clear()
+        ..addAll(
+          sanitizeVenezuelaStateSlugs(map['operatingStateSlugs'] as List?),
+        );
       _showOnPublicDirectory =
           _publicDirectoryUiEnabled &&
-          (map['showOnPublicDirectory'] as bool? ?? false);
-      if (_isVirtualBusiness) {
-        _allowDelivery = false;
-      }
+          (map['showOnPublicDirectory'] as bool? ?? true);
+      _directoryPromoted = map['directoryPromoted'] as bool? ?? false;
       _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
       _menuAiSetupMode = (map['menuAiSetupMode'] as String? ?? '').trim();
       _manualMenuSetupSelected =
@@ -1790,6 +2016,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'currency': _currentCurrency,
       'currencies': _selectedCurrencies.toList(),
       'activeCurrency': _currentCurrency,
+      'activePaymentCurrency': _paymentCurrency,
       'primaryCurrency': _baseCurrency,
       'layout': _selectedLayoutId,
       'palette': _selectedPaletteId,
@@ -1802,6 +2029,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _exchangeRateByCurrency[_currentCurrency] ??
           _exchangeRateController.text.trim(),
       'exchangeRates': _exchangeRateByCurrency,
+      'stashedManualExchangeRates': _stashedManualExchangeRateByCurrency,
       'exchangeRateMode': _exchangeRateMode,
       'exchangeRateSource': _exchangeRateSource,
       'exchangeRateModes': _exchangeRateModeByCurrency,
@@ -1833,10 +2061,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'businessLongitude': _businessLongitude,
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
+      'catalogModeEnabled': _effectiveCatalogModeEnabled,
+      'showPaymentMethodsOnHome': _showPaymentMethodsOnHome,
       'isVirtualBusiness': _isVirtualBusiness,
+      'operatingStateSlugs': sanitizeVenezuelaStateSlugs(_operatingStateSlugs),
       'showOnPublicDirectory': _publicDirectoryUiEnabled
           ? _showOnPublicDirectory
           : false,
+      'directoryPromoted': _directoryPromoted,
       'menuScanCompleted': _menuScanCompleted,
       'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
@@ -3236,10 +3468,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  bool get _hasLogoSelected =>
+      _selectedLogo != null || _selectedLogoUrl.trim().isNotEmpty;
+
   bool _canContinueIdentity() {
     final name = _nameController.text.trim();
     final slug = _normalizeSlug(_slugController.text);
-    return name.length >= 3 && slug.length >= 3 && _isSlugAvailable;
+    return name.length >= 3 &&
+        slug.length >= 3 &&
+        _isSlugAvailable &&
+        _hasLogoSelected;
+  }
+
+  String? _identityContinueBlocker() {
+    final name = _nameController.text.trim();
+    final slug = _normalizeSlug(_slugController.text);
+    if (name.length < 3) {
+      return 'Escribe el nombre de tu negocio (mínimo 3 caracteres).';
+    }
+    if (slug.length < 3 || !_isSlugAvailable) {
+      return 'Elige una URL disponible para tu menú.';
+    }
+    if (!_hasLogoSelected) {
+      return 'Sube el logo de tu negocio para continuar.';
+    }
+    return null;
   }
 
   double? _toDoubleOrNull(dynamic value) {
@@ -3293,35 +3546,95 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               b.fullCountryCode.length.compareTo(a.fullCountryCode.length),
         );
 
-    String digitsToMatch = normalizedDigits;
-    if (normalized.startsWith('+')) {
-      digitsToMatch = normalized.substring(1).replaceAll(RegExp(r'\D'), '');
-    }
+    // Only peel a dial code when the merchant typed an international form.
+    // National numbers like CO mobiles (300…) must NOT match Greece (30), etc.
+    final hasExplicitIntlPrefix =
+        normalized.startsWith('+') || normalized.startsWith('00');
+    if (hasExplicitIntlPrefix) {
+      var digitsToMatch = normalizedDigits;
+      if (normalized.startsWith('+')) {
+        digitsToMatch = normalized.substring(1).replaceAll(RegExp(r'\D'), '');
+      } else if (normalized.startsWith('00')) {
+        digitsToMatch = normalizedDigits.startsWith('00')
+            ? normalizedDigits.substring(2)
+            : normalizedDigits;
+      }
 
-    for (final country in candidates) {
-      final dialDigits = country.fullCountryCode;
-      if (digitsToMatch.startsWith(dialDigits) &&
-          digitsToMatch.length > dialDigits.length) {
-        return _ParsedPhoneNumber(
-          countryIso: country.code,
-          nationalNumber: digitsToMatch.substring(dialDigits.length),
-        );
+      for (final country in candidates) {
+        final dialDigits = country.fullCountryCode;
+        if (dialDigits.isEmpty) {
+          continue;
+        }
+        if (digitsToMatch.startsWith(dialDigits) &&
+            digitsToMatch.length > dialDigits.length) {
+          final national = normalizeNationalPhoneDigits(
+            digitsToMatch.substring(dialDigits.length),
+            iso: country.code,
+          );
+          return _ParsedPhoneNumber(
+            countryIso: country.code,
+            nationalNumber: national,
+          );
+        }
       }
     }
 
     return _ParsedPhoneNumber(
       countryIso: fallbackCountry,
-      nationalNumber: normalizedDigits,
+      nationalNumber: normalizeNationalPhoneDigits(
+        normalizedDigits,
+        iso: fallbackCountry,
+      ),
     );
   }
 
   String get _whatsappE164 {
-    final local = _whatsappController.text.replaceAll(RegExp(r'\D'), '');
+    final local = normalizeNationalPhoneDigits(
+      _whatsappController.text,
+      iso: _selectedPhoneCountryIso,
+    );
     if (local.isEmpty) {
       return '';
     }
     final country = _countryByIso(_selectedPhoneCountryIso);
     return '+${country.fullCountryCode}$local';
+  }
+
+  void _syncWhatsappControllerNational(String iso, String nationalRaw) {
+    final normalized = normalizeNationalPhoneDigits(nationalRaw, iso: iso);
+    if (normalized == _whatsappController.text) return;
+    _whatsappController.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
+  }
+
+  /// Without WhatsApp, catalog must stay on so clients can still browse totals.
+  bool get _effectiveCatalogModeEnabled =>
+      _whatsappE164.isEmpty ? true : _catalogModeEnabled;
+
+  String get _publicCatalogMenuUrl {
+    final slug = _normalizeSlug(_slugController.text);
+    final id = (_editingComercioId ?? '').trim();
+    final identifier = slug.isNotEmpty
+        ? slug
+        : (id.isNotEmpty
+              ? id
+              : (SupabaseConfig.currentComercioSlug ??
+                    SupabaseConfig.currentComercioId));
+    if (identifier.trim().isEmpty) {
+      return '${AppLinks.productionUrl}/v/tu-slug?catalogo=1';
+    }
+    return AppLinks.publicMenuCatalogByComercio(identifier.trim());
+  }
+
+  Future<void> _copyPublicCatalogMenuUrl() async {
+    final url = _publicCatalogMenuUrl;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Enlace de catálogo copiado.')),
+    );
   }
 
   String? _operationValidationMessage() {
@@ -3353,7 +3666,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return 'Selecciona la ubicacion exacta del negocio en el mapa.';
     }
 
+    if (_isVirtualBusiness && _operatingStateSlugs.isEmpty) {
+      return 'Selecciona al menos un estado donde opera tu negocio.';
+    }
+
     return null;
+  }
+
+  List<String> _persistedOperatingStates() {
+    if (!_isVirtualBusiness) {
+      // Physical shops use direccion + coords; never leave stale virtual states.
+      return const <String>[];
+    }
+    return sanitizeVenezuelaStateSlugs(_operatingStateSlugs);
+  }
+
+  void _toggleOperatingState(String slug) {
+    setState(() {
+      if (_operatingStateSlugs.contains(slug)) {
+        _operatingStateSlugs.remove(slug);
+      } else {
+        _operatingStateSlugs.add(slug);
+      }
+    });
+    unawaited(_saveDraft());
   }
 
   Future<String?> _reverseGeocodeFromLatLng(LatLng position) async {
@@ -4284,7 +4620,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     if (_step == _SetupStep.identity && !_canContinueIdentity()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa nombre y URL disponible.')),
+        SnackBar(
+          content: Text(
+            _identityContinueBlocker() ??
+                'Completa nombre, URL disponible y logo.',
+          ),
+        ),
       );
       return;
     }
@@ -4312,16 +4653,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_step == _SetupStep.checkout &&
-        !_hasPaymentDetailsForSelectedMethods()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Agrega al menos un detalle en cada metodo de pago seleccionado.',
-          ),
-        ),
-      );
-      return;
+    if (_step == _SetupStep.checkout) {
+      final paymentIssue = _paymentDetailsIssueMessage();
+      if (paymentIssue != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(paymentIssue)));
+        return;
+      }
     }
 
     if (_step == _SetupStep.operation) {
@@ -4462,10 +4801,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'Configura una tasa de cambio antes de guardar.',
             );
           }
-          if (!_hasPaymentDetailsForSelectedMethods()) {
-            throw const FormatException(
-              'Completa los datos de cada método de pago.',
-            );
+          final paymentIssue = _paymentDetailsIssueMessage();
+          if (paymentIssue != null) {
+            throw FormatException(paymentIssue);
           }
           final methods = _selectedCurrencies
               .expand(_selectedPaymentsForCurrency)
@@ -4515,7 +4853,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'latitud': _isVirtualBusiness ? null : _businessLatitude,
               'longitud': _isVirtualBusiness ? null : _businessLongitude,
               'negocio_virtual': _isVirtualBusiness,
-              'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+              'estados_operacion': _persistedOperatingStates(),
+              'permite_delivery': _allowDelivery,
+              if (_publicDirectoryUiEnabled)
+                'mostrar_en_directorio_publico': _showOnPublicDirectory,
+              'branding_ia': _buildBrandingIaPayload(),
             },
             removable: <String>{
               'whatsapp',
@@ -4524,7 +4866,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'latitud',
               'longitud',
               'negocio_virtual',
+              'estados_operacion',
               'permite_delivery',
+              'mostrar_en_directorio_publico',
+              'branding_ia',
             },
           );
           await _saveWhatsappOrderFormat(comercioId);
@@ -4674,6 +5019,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return value.toStringAsFixed(2);
   }
 
+  /// Persists quote-per-base into `_exchangeRateByCurrency`.
+  ///
+  /// Tiny rates (e.g. USD-per-COP ≈ 0.00025) must keep full precision —
+  /// `_formatExchangeRate` would turn them into `"0.00"` and the inverse
+  /// COP→USD field would load empty.
+  String _persistExchangeRateValue(double rate) {
+    if (rate <= 0 || !rate.isFinite) {
+      return '';
+    }
+    // Quote-per-COP (USD/VES) is often < 1; 2 dp would distort 1/2.8 → 0.36.
+    if (rate < 1) {
+      return _storeCanonicalExchangeRate(rate);
+    }
+    return _formatExchangeRate(rate);
+  }
+
   String _formatExchangeRateMasked(double value) {
     if (value <= 0) {
       return '';
@@ -4685,6 +5046,134 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       (_) => ',',
     );
     return '$integerPart.${parts[1]}';
+  }
+
+  /// COP→USD / COP→VES are stored as quote-per-1-COP (often < 1), but
+  /// merchants think in "3200 COP = 1 USD" / "2,8 COP = 1 VES". This flag
+  /// only flips the manual field / summary presentation; canonical storage
+  /// stays quote-per-base.
+  bool _usesInverseManualRateUi(String baseCurrency, String quoteCurrency) {
+    return baseCurrency == 'COP' &&
+        (quoteCurrency == 'USD' || quoteCurrency == 'VES');
+  }
+
+  /// True when [rate] must not replace the merchant's established manual
+  /// value in `_exchangeRateByCurrency` (Auto uses live sources for display).
+  bool _shouldPreserveManualExchangeRate(String currency) {
+    if (!_requiresExchangeRateForCurrency(currency)) {
+      return false;
+    }
+    final existing = _parseExchangeRate(_exchangeRateByCurrency[currency]);
+    if (existing <= 0) {
+      return false;
+    }
+    // Always preserve once a positive rate exists — Auto must not clobber it.
+    return true;
+  }
+
+  String _storeCanonicalExchangeRate(double rate) {
+    if (rate <= 0 || !rate.isFinite) {
+      return '';
+    }
+    // Keep full precision for tiny USD-per-COP values (2 dp would become 0.00).
+    var text = rate.toStringAsFixed(12);
+    if (text.contains('.')) {
+      text = text.replaceFirst(RegExp(r'0+$'), '');
+      text = text.replaceFirst(RegExp(r'\.$'), '');
+    }
+    return text;
+  }
+
+  /// Map/controller bridge: display text → canonical quote-per-base string.
+  String _canonicalRateTextFromInput(
+    String input, {
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final entered = _parseExchangeRate(input);
+    if (entered <= 0) {
+      return input.trim();
+    }
+    if (_usesInverseManualRateUi(baseCurrency, quoteCurrency)) {
+      final canonical = 1 / entered;
+      return _storeCanonicalExchangeRate(canonical);
+    }
+    return input.trim();
+  }
+
+  /// Canonical quote-per-base string → what the merchant types in the field.
+  String _inputTextFromCanonicalRate(
+    String stored, {
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final rate = _parseExchangeRate(stored);
+    if (rate <= 0) {
+      return '';
+    }
+    if (_usesInverseManualRateUi(baseCurrency, quoteCurrency)) {
+      final inverse = 1 / rate;
+      if (!inverse.isFinite || inverse <= 0) {
+        return '';
+      }
+      return _formatExchangeRateMasked(inverse);
+    }
+    return stored;
+  }
+
+  /// Writes a canonical quote-per-base rate into the map and, when active,
+  /// into the text field using the friendly display form.
+  ///
+  /// When [preserveManualIfSet] is true (default for Auto-driven updates),
+  /// an existing positive manual rate is left untouched so switching
+  /// Manual→Auto→Manual (or refreshing market rates) cannot silently
+  /// replace e.g. 2,8 COP/VES with the live 0,33 source.
+  void _setCanonicalExchangeRateForCurrency(
+    String currency,
+    double rate, {
+    bool preserveManualIfSet = false,
+  }) {
+    if (rate <= 0 || !rate.isFinite) {
+      return;
+    }
+    if (preserveManualIfSet && _shouldPreserveManualExchangeRate(currency)) {
+      // Keep map; only refresh the visible field when this currency is active
+      // and we are in Manual (Auto hides the field / uses live summary).
+      if (currency == _currentCurrency &&
+          _exchangeRateMode == _exchangeModeManual) {
+        final stored = _exchangeRateByCurrency[currency] ?? '';
+        final display = _inputTextFromCanonicalRate(
+          stored,
+          baseCurrency: _baseCurrency,
+          quoteCurrency: currency,
+        );
+        _exchangeRateController.value = TextEditingValue(
+          text: display,
+          selection: TextSelection.collapsed(offset: display.length),
+        );
+      }
+      return;
+    }
+    final stored = _usesInverseManualRateUi(_baseCurrency, currency)
+        ? _storeCanonicalExchangeRate(rate)
+        : (rate < 0.01
+              ? _storeCanonicalExchangeRate(rate)
+              : _formatExchangeRateMasked(rate));
+    _exchangeRateByCurrency[currency] = stored;
+    if (_parseExchangeRate(stored) > 0) {
+      _stashedManualExchangeRateByCurrency.putIfAbsent(currency, () => stored);
+    }
+    if (currency == _currentCurrency) {
+      final display = _inputTextFromCanonicalRate(
+        stored,
+        baseCurrency: _baseCurrency,
+        quoteCurrency: currency,
+      );
+      _exchangeRateController.value = TextEditingValue(
+        text: display,
+        selection: TextSelection.collapsed(offset: display.length),
+      );
+    }
   }
 
   int _exchangeRateInputDecimalDigits(String quoteCurrency) {
@@ -4780,9 +5269,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           if (source == _exchangeSourceP2pBinance) {
             return _adjustP2pRateForBuyer(liveRate);
           }
-          if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
-            return liveRate * (_googleAnchorRates['USD/EUR'] ?? 0);
-          }
+          // BCV EUR is VES per 1 EUR; when pivoting through USD for
+          // USD/VES (or COP/VES) we apply that official number as the
+          // commercial VES rate — do NOT multiply by USD/EUR (that made
+          // BCV EUR collapse to nearly the same value as BCV USD).
           return liveRate;
         }
         return _usdToCurrencyRate('VES');
@@ -4791,6 +5281,55 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'EUR' => _googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'),
       _ => 0,
     };
+  }
+
+  /// Official BCV EUR (VES per 1 EUR) applied to a tracked VES pair.
+  ///
+  /// For EUR/VES this is the literal official rate. For USD/VES (and COP via
+  /// USD) merchants who pick "BCV EUR" use that same official number as their
+  /// commercial VES rate, distinct from BCV USD.
+  double _bcvEurRateForPair({
+    required String baseCurrency,
+    required String quoteCurrency,
+    double? eurVesRate,
+    double? usdCopRate,
+  }) {
+    final eurVes = eurVesRate ?? (_marketRates[_exchangeSourceBcvEur] ?? 0);
+    if (eurVes <= 0) {
+      return 0;
+    }
+    final base = baseCurrency.toUpperCase();
+    final quote = quoteCurrency.toUpperCase();
+    if (base == quote) {
+      return 1;
+    }
+
+    if (base == 'EUR' && quote == 'VES') {
+      return eurVes;
+    }
+    if (base == 'VES' && quote == 'EUR') {
+      return 1 / eurVes;
+    }
+    if (base == 'USD' && quote == 'VES') {
+      return eurVes;
+    }
+    if (base == 'VES' && quote == 'USD') {
+      return 1 / eurVes;
+    }
+
+    final usdCop =
+        usdCopRate ??
+        (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'));
+    if (usdCop <= 0) {
+      return 0;
+    }
+    if (base == 'COP' && quote == 'VES') {
+      return eurVes / usdCop;
+    }
+    if (base == 'VES' && quote == 'COP') {
+      return usdCop / eurVes;
+    }
+    return 0;
   }
 
   String _pairKey(String baseCurrency, String quoteCurrency) {
@@ -4908,7 +5447,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return derived > 0 ? derived : null;
     }
 
-    if (source == _exchangeSourceBcv &&
+    if (_isBcvSource(source) &&
         !_canUseBcvSourceForPair(
           quoteCurrency: quoteCurrency,
           baseCurrency: baseCurrency,
@@ -4923,30 +5462,62 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return null;
     }
 
-    final liveRate = switch (source) {
-      _exchangeSourceBcv => _parseExchangeRate(row['bcv_rate']),
-      _exchangeSourceP2pBinance => _adjustP2pRateForBuyer(
-        _parseExchangeRate(row['p2p_binance_rate']),
-      ),
-      _ => 0,
-    };
+    final payload = row['payload'];
+    final bcvRates = payload is Map ? payload['bcv_rates'] : null;
+    final googleRates = _googleRatesFromPayload(payload);
+    final usdCop =
+        (googleRates['USD/COP'] ??
+                _googleAnchorRates['USD/COP'] ??
+                _usdToCurrencyRate('COP'))
+            .toDouble();
+
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurRate = bcvRates is Map
+          ? _parseExchangeRate(bcvRates['EUR'])
+          : 0.0;
+      if (eurRate <= 0) {
+        return null;
+      }
+      final derived = _bcvEurRateForPair(
+        baseCurrency: baseCurrency,
+        quoteCurrency: quoteCurrency,
+        eurVesRate: eurRate,
+        usdCopRate: usdCop,
+      );
+      return derived > 0 ? derived : null;
+    }
+
+    final canonical = _canonicalExchangeSource(source);
+    final liveRate = () {
+      if (canonical == _exchangeSourceBcvUsd ||
+          canonical == _exchangeSourceBcv) {
+        final fromPayload = bcvRates is Map
+            ? _parseExchangeRate(bcvRates['USD'])
+            : 0.0;
+        return fromPayload > 0
+            ? fromPayload
+            : _parseExchangeRate(row['bcv_rate']);
+      }
+      if (canonical == _exchangeSourceP2pBinance) {
+        return _adjustP2pRateForBuyer(
+          _parseExchangeRate(row['p2p_binance_rate']),
+        );
+      }
+      return 0.0;
+    }();
     if (liveRate <= 0) {
       return null;
     }
 
     double usdToCurrency(String currency) {
-      final usdCop =
-          (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'))
-              .toDouble();
       final usdEur =
-          (_googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'))
+          (googleRates['USD/EUR'] ??
+                  _googleAnchorRates['USD/EUR'] ??
+                  _usdToCurrencyRate('EUR'))
               .toDouble();
       return switch (currency) {
         'USD' => 1.0,
-        'VES' =>
-          source == _exchangeSourceBcvEur
-              ? liveRate * usdEur
-              : liveRate.toDouble(),
+        'VES' => liveRate.toDouble(),
         'COP' => usdCop,
         'EUR' => usdEur,
         _ => 0.0,
@@ -5422,6 +5993,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return false;
     }
 
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      return _bcvEurRateForPair(
+            baseCurrency: base,
+            quoteCurrency: quoteCurrency,
+          ) >
+          0;
+    }
+
     final usdToBase = _usdToCurrencyRateForSource(source, base);
     final usdToQuote = _usdToCurrencyRateForSource(source, quoteCurrency);
     return usdToBase > 0 && usdToQuote > 0;
@@ -5438,6 +6017,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     };
   }
 
+  String _formatExchangeRateCompact(double value) {
+    if (value <= 0 || !value.isFinite) {
+      return '';
+    }
+    if (value >= 0.01) {
+      return _formatExchangeRateMasked(value);
+    }
+    var text = value.toStringAsFixed(6);
+    text = text.replaceFirst(RegExp(r'0+$'), '');
+    text = text.replaceFirst(RegExp(r'\.$'), '');
+    return text;
+  }
+
   String _formatConversionRateText({
     required double rate,
     required String baseCurrency,
@@ -5446,7 +6038,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (rate <= 0) {
       return '--';
     }
-    return '${_formatExchangeRateMasked(rate)} $quoteCurrency por 1 $baseCurrency';
+    return '${_formatExchangeRateCompact(rate)} $quoteCurrency por 1 $baseCurrency';
   }
 
   String _formatConversionEquivalenceText({
@@ -5464,7 +6056,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       quoteCurrency: quoteCurrency,
     );
     final inverse =
-        '${_formatExchangeRateMasked(1 / rate)} $baseCurrency por 1 $quoteCurrency';
+        '${_formatExchangeRateCompact(1 / rate)} $baseCurrency por 1 $quoteCurrency';
     return '$direct  |  $inverse';
   }
 
@@ -5482,6 +6074,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         !_canUseP2pSourceForPair(quoteCurrency: currency, baseCurrency: base)) {
       return 0;
     }
+
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurDerived = _bcvEurRateForPair(
+        baseCurrency: base,
+        quoteCurrency: currency,
+      );
+      if (eurDerived > 0) {
+        return eurDerived;
+      }
+      final fallback = _defaultExchangeRateFor(currency, baseCurrency: base);
+      return fallback > 0 ? fallback : 0;
+    }
+
     if (!_canDeriveExchangeRateFromSource(
       source,
       quoteCurrency: currency,
@@ -5507,6 +6112,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   String _rateBadgeText(String source, {String? quoteCurrency}) {
     final currency = quoteCurrency ?? _currentCurrency;
+    // Show the official BCV unit for each source so EUR is not labeled as USD.
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurRate = _marketRates[_exchangeSourceBcvEur] ?? 0;
+      if (eurRate <= 0) {
+        return '--';
+      }
+      return _formatConversionRateText(
+        rate: eurRate,
+        baseCurrency: 'EUR',
+        quoteCurrency: 'VES',
+      );
+    }
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvUsd) {
+      final usdRate = _bcvVesRate(_exchangeSourceBcvUsd);
+      if (usdRate <= 0) {
+        return '--';
+      }
+      return _formatConversionRateText(
+        rate: usdRate,
+        baseCurrency: 'USD',
+        quoteCurrency: 'VES',
+      );
+    }
+
     final rate = _rateForSource(source, quoteCurrency: currency);
     if (rate <= 0) {
       return '--';
@@ -5572,9 +6201,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _enforceExchangeRulesForCurrency(_currentCurrency);
           final synced = _rateForSource(_exchangeRateSource);
           if (synced > 0) {
-            final formatted = _formatExchangeRateMasked(synced);
-            _exchangeRateByCurrency[_currentCurrency] = formatted;
-            _exchangeRateController.text = formatted;
+            // Never clobber the merchant's established manual rate.
+            _setCanonicalExchangeRateForCurrency(
+              _currentCurrency,
+              synced,
+              preserveManualIfSet: true,
+            );
             _exchangeRateMessage = null;
             _exchangeRateIsError = false;
             _lastSuggestedRateCurrency = _currentCurrency;
@@ -5657,46 +6289,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (value.length > _maxTransferFieldValueLength) {
       return 'Maximo $_maxTransferFieldValueLength caracteres.';
     }
-    if (field.type == 'correo' && !_isValidEmail(value)) {
-      return 'Correo invalido.';
-    }
-    if (field.type == 'numero_cuenta') {
-      if (!RegExp(r'^\d+$').hasMatch(value)) {
-        return 'Solo numeros.';
-      }
-      if (value.length < 6) {
-        return 'Debe tener al menos 6 digitos.';
-      }
-    }
-    if (field.type == 'id') {
-      final parsed = _parseIdentityValue(value);
-      final prefix = parsed.prefix.trim();
-      final identifier = parsed.document.trim();
-
-      if (prefix.isEmpty || identifier.isEmpty) {
-        return 'Completa el DNI/Cedula (ej. V-12345678).';
-      }
-
-      if (!RegExp(r'^[A-Z0-9]+$').hasMatch(prefix)) {
-        return 'Prefijo invalido.';
-      }
-      if (prefix.length > 6) {
-        return 'Prefijo demasiado largo.';
-      }
-
-      if (!RegExp(r'^[A-Z0-9]+(?:-[A-Z0-9])?$').hasMatch(identifier)) {
-        return 'Documento invalido. Formato permitido: 12345678 o 26679415-7.';
-      }
-
-      if (identifier.endsWith('-')) {
-        return 'Falta el digito verificador.';
-      }
-
-      final baseDocument = identifier.split('-').first;
-      if (baseDocument.length < 3) {
-        return 'Agrega al menos 3 caracteres en el numero/documento.';
-      }
-    }
     if (field.type == 'telefono') {
       final parsed = _parsePhoneValue(
         value,
@@ -5706,14 +6298,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (local.isEmpty) {
         return 'Ingresa un numero de telefono.';
       }
-      final country = _countryByIso(parsed.countryIso);
-      final phone = intl_phone_number.PhoneNumber(
-        countryISOCode: parsed.countryIso,
-        countryCode: '+${country.fullCountryCode}',
-        number: local,
+      // Merchants mix VE/CO WhatsApp with USD accounts (Zelle US phones, etc.).
+      // Never call intl_phone_field.isValidNumber() here: it throws bare
+      // Exception subclasses (no message) → "Instance of 'minified:…'" in
+      // release, and this path runs during Cobros build via configured-count.
+      final candidateIsos = <String>{
+        parsed.countryIso.trim().toUpperCase(),
+        _selectedPhoneCountryIso.trim().toUpperCase(),
+        'VE',
+        'CO',
+        // USD checkout / Zelle and similar US numbers
+        'US',
+        'CA',
+      }.where((iso) => iso.isNotEmpty);
+      final accepted = candidateIsos.any(
+        (iso) => isPlausibleNationalForCountry(local, iso: iso),
       );
-      final isValid = phone.isValidNumber();
-      if (!isValid) {
+      if (!accepted) {
         return 'Numero invalido para ese pais.';
       }
     }
@@ -5737,6 +6338,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ],
       'telefono' => <TextInputFormatter>[
         FilteringTextInputFormatter.digitsOnly,
+        const NormalizeNationalPhoneFormatter(iso: 'VE'),
       ],
       'id' => <TextInputFormatter>[
         FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9-]')),
@@ -6201,40 +6803,51 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return rate > 0 && !_adjustmentBlocksSave(currency);
   }
 
-  bool _hasPaymentDetailsForCurrency(String currency) {
+  String? _paymentDetailsIssueForCurrency(String currency) {
     final selected = _selectedPaymentsForCurrency(currency);
     if (selected.isEmpty) {
-      return false;
+      return 'Selecciona al menos un método de pago en $currency.';
     }
 
     final drafts = _paymentDraftsForCurrency(currency);
     for (final method in selected) {
       final draft = drafts[method];
       if (draft == null || !draft.hasAnyDetail) {
-        return false;
+        return '$currency · $method: completa los datos del método.';
       }
 
       if (method == 'Efectivo') {
         final message = _cashValidationMessage(draft.extraDetails);
         if (message != null) {
-          return false;
+          return '$currency · Efectivo: $message';
         }
       }
 
       if (method == 'Transferencia') {
-        if (draft.transferAccounts.isEmpty ||
-            draft.transferAccounts.length > _maxTransferAccountsPerCurrency) {
-          return false;
+        if (draft.transferAccounts.isEmpty) {
+          return '$currency · Transferencia: agrega al menos una cuenta digital.';
+        }
+        if (draft.transferAccounts.length > _maxTransferAccountsPerCurrency) {
+          return '$currency · Transferencia: máximo '
+              '$_maxTransferAccountsPerCurrency cuentas.';
         }
 
         for (final account in draft.transferAccounts) {
-          if (_transferAccountValidationMessage(account) != null) {
-            return false;
+          final accountName = account.name.trim().isEmpty
+              ? 'Cuenta sin nombre'
+              : account.name.trim();
+          final message = _transferAccountValidationMessage(account);
+          if (message != null) {
+            return '$currency · $accountName: $message';
           }
         }
       }
     }
-    return true;
+    return null;
+  }
+
+  bool _hasPaymentDetailsForCurrency(String currency) {
+    return _paymentDetailsIssueForCurrency(currency) == null;
   }
 
   bool _isCurrencyCheckoutConfigured(String currency) {
@@ -6265,17 +6878,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return true;
   }
 
-  bool _hasPaymentDetailsForSelectedMethods() {
+  String? _paymentDetailsIssueMessage() {
     if (_selectedCurrencies.isEmpty) {
-      return false;
+      return 'Selecciona al menos una moneda de cobro.';
     }
 
     for (final currency in _selectedCurrencies) {
-      if (!_hasPaymentDetailsForCurrency(currency)) {
-        return false;
+      final issue = _paymentDetailsIssueForCurrency(currency);
+      if (issue != null) {
+        return issue;
       }
     }
-    return true;
+    return null;
+  }
+
+  bool _hasPaymentDetailsForSelectedMethods() {
+    return _paymentDetailsIssueMessage() == null;
   }
 
   List<String> _paymentSummaryLines(String method, _PaymentMethodDraft draft) {
@@ -6322,7 +6940,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openCashEditor() async {
-    final currency = _currentCurrency;
+    final currency = _paymentCurrency;
     final drafts = _paymentDraftsForCurrency(currency);
     final current =
         drafts['Efectivo'] ?? _PaymentMethodDraft(method: 'Efectivo');
@@ -6470,7 +7088,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openTransferAccountEditor({int? index}) async {
-    final currency = _currentCurrency;
+    final currency = _paymentCurrency;
     final currencyLabel = _currencyLabel(currency);
     final drafts = _paymentDraftsForCurrency(currency);
     final current =
@@ -6494,7 +7112,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         : _TransferAccountDraft.empty();
 
     var accountName = editing.name;
-    final fields = editing.fields.map((item) => item.copyWith()).toList();
+    final fields = editing.fields
+        .map(
+          (item) => item.copyWith(
+            type: item.type == 'telefono' ? 'telefono' : 'texto',
+          ),
+        )
+        .toList();
     final phoneCountryByField = <int, String>{};
     final emailControllerByField = <int, TextEditingController>{};
     final emailFocusByField = <int, FocusNode>{};
@@ -6740,131 +7364,47 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: DropdownButtonFormField<String>(
-                                      initialValue: field.type,
-                                      decoration: InputDecoration(
-                                        labelText: 'Tipo de campo',
-                                        filled: true,
-                                        fillColor: const Color(0xFF120E25),
-                                        labelStyle: const TextStyle(
-                                          color: _setupTextLow,
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: const BorderSide(
-                                            color: Color(0xFF3B2F63),
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: const BorderSide(
-                                            color: Color(0xFF3B2F63),
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: const BorderSide(
-                                            color: Color(0xFF6B5A9A),
-                                          ),
+                                    child: SwitchListTile.adaptive(
+                                      contentPadding: EdgeInsets.zero,
+                                      dense: true,
+                                      value: field.type == 'telefono',
+                                      activeThumbColor: _palette.primary,
+                                      title: const Text(
+                                        'Número de teléfono',
+                                        style: TextStyle(
+                                          color: _setupTextHigh,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
-                                      dropdownColor: const Color(0xFF1A1432),
-                                      style: const TextStyle(
-                                        color: _setupTextHigh,
+                                      subtitle: const Text(
+                                        'Activa esto solo si el dato es un teléfono.',
+                                        style: TextStyle(
+                                          color: _setupTextMedium,
+                                          fontSize: 11,
+                                        ),
                                       ),
-                                      iconEnabledColor: _setupTextHigh,
-                                      iconDisabledColor: _setupTextLow,
-                                      items: _TransferFieldDraft.typeOptions
-                                          .map(
-                                            (
-                                              option,
-                                            ) => DropdownMenuItem<String>(
-                                              value: option,
-                                              child: Text(
-                                                _TransferFieldDraft.labelForType(
-                                                  option,
-                                                ),
-                                              ),
-                                            ),
-                                          )
-                                          .toList(),
-                                      onChanged: (value) {
-                                        if (value == null) {
-                                          return;
-                                        }
+                                      onChanged: (enabled) {
                                         setModalState(() {
                                           final currentField =
                                               fields[fieldIndex];
-                                          final currentDefaultLabel =
-                                              _TransferFieldDraft.labelForType(
-                                                currentField.type,
-                                              );
-                                          final keepAutoLabel =
-                                              currentField.label
-                                                  .trim()
-                                                  .isEmpty ||
-                                              currentField.label.trim() ==
-                                                  currentDefaultLabel;
-                                          final nextValue =
-                                              value == 'numero_cuenta'
-                                              ? currentField.value.replaceAll(
-                                                  RegExp(r'[^0-9]'),
-                                                  '',
-                                                )
-                                              : value == 'telefono'
-                                              ? () {
-                                                  final parsed = _parsePhoneValue(
-                                                    currentField.value,
-                                                    fallbackIso:
-                                                        _selectedPhoneCountryIso,
-                                                  );
-                                                  phoneCountryByField[fieldIndex] =
-                                                      parsed.countryIso;
-                                                  final digits = parsed
-                                                      .nationalNumber
-                                                      .replaceAll(
-                                                        RegExp(r'\D'),
-                                                        '',
-                                                      );
-                                                  if (digits.isEmpty) {
-                                                    return '';
-                                                  }
-                                                  final country = _countryByIso(
-                                                    parsed.countryIso,
-                                                  );
-                                                  return '+${country.fullCountryCode}$digits';
-                                                }()
-                                              : value == 'id'
-                                              ? (currentField.value
-                                                        .trim()
-                                                        .isEmpty
-                                                    ? 'V-'
-                                                    : _normalizeIdentityValue(
-                                                        currentField.value,
-                                                      ))
-                                              : currentField.value;
-                                          if (value != 'telefono') {
-                                            phoneCountryByField.remove(
-                                              fieldIndex,
+                                          if (enabled) {
+                                            final parsed = _parsePhoneValue(
+                                              currentField.value,
+                                              fallbackIso:
+                                                  _selectedPhoneCountryIso,
                                             );
-                                          }
-                                          if (value == 'correo') {
-                                            ensureEmailController(
-                                              fieldIndex,
-                                              nextValue,
+                                            phoneCountryByField[fieldIndex] =
+                                                parsed.countryIso;
+                                            final digits = parsed
+                                                .nationalNumber
+                                                .replaceAll(RegExp(r'\D'), '');
+                                            final country = _countryByIso(
+                                              parsed.countryIso,
                                             );
-                                            ensureEmailFocusNode(fieldIndex);
-                                            emailAnchorByField.putIfAbsent(
-                                              fieldIndex,
-                                              GlobalKey.new,
-                                            );
-                                          } else {
+                                            final nextValue = digits.isEmpty
+                                                ? ''
+                                                : '+${country.fullCountryCode}$digits';
                                             emailControllerByField.remove(
                                               fieldIndex,
                                             );
@@ -6874,18 +7414,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                             emailAnchorByField.remove(
                                               fieldIndex,
                                             );
-                                          }
-                                          if (value == 'id') {
-                                            ensureIdPrefixController(
-                                              fieldIndex,
-                                              'V',
-                                            );
-                                            ensureIdPrefixFocusNode(fieldIndex);
-                                            ensureIdDocumentController(
-                                              fieldIndex,
-                                              '',
-                                            );
-                                          } else {
                                             idPrefixControllerByField.remove(
                                               fieldIndex,
                                             );
@@ -6895,22 +7423,42 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                             idDocumentControllerByField.remove(
                                               fieldIndex,
                                             );
+                                            fields[fieldIndex] = currentField
+                                                .copyWith(
+                                                  type: 'telefono',
+                                                  label:
+                                                      currentField.label
+                                                          .trim()
+                                                          .isEmpty
+                                                      ? _TransferFieldDraft
+                                                            .labelForType(
+                                                              'telefono',
+                                                            )
+                                                      : currentField.label,
+                                                  value: nextValue,
+                                                );
+                                          } else {
+                                            phoneCountryByField.remove(
+                                              fieldIndex,
+                                            );
+                                            fields[fieldIndex] = currentField
+                                                .copyWith(
+                                                  type: 'texto',
+                                                  label:
+                                                      currentField.label
+                                                                  .trim() ==
+                                                              _TransferFieldDraft
+                                                                  .labelForType(
+                                                                    'telefono',
+                                                                  )
+                                                          ? ''
+                                                          : currentField.label,
+                                                );
                                           }
-                                          fields[fieldIndex] = currentField
-                                              .copyWith(
-                                                type: value,
-                                                label: keepAutoLabel
-                                                    ? _TransferFieldDraft.labelForType(
-                                                        value,
-                                                      )
-                                                    : currentField.label,
-                                                value: nextValue,
-                                              );
                                         });
                                       },
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
                                   IconButton(
                                     onPressed: () {
                                       if (fields.length <= 1) {
@@ -6930,7 +7478,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                           fieldIndex,
                                         );
                                         emailFocusByField.remove(fieldIndex);
-
+                                        emailAnchorByField.remove(fieldIndex);
+                                        idPrefixControllerByField.remove(
+                                          fieldIndex,
+                                        );
+                                        idPrefixFocusByField.remove(fieldIndex);
+                                        idDocumentControllerByField.remove(
+                                          fieldIndex,
+                                        );
+                                        phoneCountryByField.remove(fieldIndex);
                                         fields.removeAt(fieldIndex);
 
                                         final shiftedControllers =
@@ -7026,6 +7582,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                           ..addAll(
                                             shiftedIdDocumentControllers,
                                           );
+
+                                        final shiftedPhones = <int, String>{};
+                                        for (final entry
+                                            in phoneCountryByField.entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedPhones[nextIndex] =
+                                              entry.value;
+                                        }
+                                        phoneCountryByField
+                                          ..clear()
+                                          ..addAll(shiftedPhones);
                                       });
                                     },
                                     icon: const Icon(
@@ -7052,8 +7622,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 style: const TextStyle(color: _setupTextHigh),
                                 decoration: InputDecoration(
                                   labelText: 'Etiqueta visible',
-                                  hintText:
-                                      'Opcional (se autocompleta segun tipo)',
+                                  hintText: 'Ej. Banco, Titular, Cédula',
                                   filled: true,
                                   fillColor: const Color(0xFF120E25),
                                   labelStyle: const TextStyle(
@@ -7119,10 +7688,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                       ),
                                       invalidNumberMessage:
                                           'Numero invalido para ese pais.',
+                                      disableLengthCheck: true,
                                       autovalidateMode:
                                           AutovalidateMode.onUserInteraction,
                                       inputFormatters: <TextInputFormatter>[
                                         FilteringTextInputFormatter.digitsOnly,
+                                        NormalizeNationalPhoneFormatter(
+                                          iso: currentIso.trim().isEmpty
+                                              ? 'VE'
+                                              : currentIso,
+                                        ),
                                       ],
                                       decoration: InputDecoration(
                                         labelText: 'Numero de telefono',
@@ -7167,8 +7742,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                         });
                                       },
                                       onChanged: (phone) {
-                                        final localDigits = phone.number
-                                            .replaceAll(RegExp(r'\D'), '');
+                                        final localDigits =
+                                            normalizeNationalPhoneDigits(
+                                              phone.number,
+                                              iso: phone.countryISOCode,
+                                            );
                                         final country = _countryByIso(
                                           phone.countryISOCode,
                                         );
@@ -7209,456 +7787,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                     );
                                   },
                                 )
-                              else if (field.type == 'correo')
-                                Builder(
-                                  builder: (context) {
-                                    final emailController =
-                                        ensureEmailController(
-                                          fieldIndex,
-                                          field.value,
-                                        );
-                                    final emailFocus = ensureEmailFocusNode(
-                                      fieldIndex,
-                                    );
-                                    final emailAnchor = emailAnchorByField
-                                        .putIfAbsent(fieldIndex, GlobalKey.new);
-
-                                    if (!emailFocus.hasFocus &&
-                                        emailController.text != field.value) {
-                                      emailController.value = TextEditingValue(
-                                        text: field.value,
-                                        selection: TextSelection.collapsed(
-                                          offset: field.value.length,
-                                        ),
-                                      );
-                                    }
-
-                                    final suggestions =
-                                        _emailAutocompleteOptions(
-                                          emailController.text,
-                                        ).toList();
-                                    return Container(
-                                      key: emailAnchor,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          TextFormField(
-                                            key: ValueKey(
-                                              'transfer-email-$fieldIndex',
-                                            ),
-                                            controller: emailController,
-                                            focusNode: emailFocus,
-                                            onChanged: (text) {
-                                              fields[fieldIndex] =
-                                                  fields[fieldIndex].copyWith(
-                                                    value: text,
-                                                  );
-                                              setModalState(() {});
-                                              if (text.trim().isNotEmpty) {
-                                                scrollEmailIntoView(fieldIndex);
-                                              }
-                                            },
-                                            maxLength:
-                                                _maxTransferFieldValueLength,
-                                            style: const TextStyle(
-                                              color: _setupTextHigh,
-                                            ),
-                                            keyboardType:
-                                                TextInputType.emailAddress,
-                                            inputFormatters: <TextInputFormatter>[
-                                              FilteringTextInputFormatter.deny(
-                                                RegExp(r'\s'),
-                                              ),
-                                            ],
-                                            decoration: InputDecoration(
-                                              labelText: 'Correo',
-                                              hintText: 'usuario@dominio.com',
-                                              helperText:
-                                                  'Puedes usar sugerencias o escribir otro dominio.',
-                                              filled: true,
-                                              fillColor: const Color(
-                                                0xFF120E25,
-                                              ),
-                                              labelStyle: const TextStyle(
-                                                color: _setupTextLow,
-                                              ),
-                                              hintStyle: const TextStyle(
-                                                color: _setupTextLow,
-                                              ),
-                                              helperStyle: const TextStyle(
-                                                color: _setupTextLow,
-                                                fontSize: 11,
-                                              ),
-                                              border: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                borderSide: const BorderSide(
-                                                  color: Color(0xFF3B2F63),
-                                                ),
-                                              ),
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                borderSide: const BorderSide(
-                                                  color: Color(0xFF3B2F63),
-                                                ),
-                                              ),
-                                              focusedBorder: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                borderSide: const BorderSide(
-                                                  color: Color(0xFF6B5A9A),
-                                                ),
-                                              ),
-                                              errorText: showInlineErrors
-                                                  ? _transferFieldValueError(
-                                                      fields[fieldIndex],
-                                                    )
-                                                  : null,
-                                            ),
-                                          ),
-                                          if (suggestions.isNotEmpty) ...[
-                                            const SizedBox(height: 6),
-                                            Wrap(
-                                              spacing: 6,
-                                              runSpacing: 6,
-                                              children: suggestions
-                                                  .map(
-                                                    (option) => ActionChip(
-                                                      backgroundColor:
-                                                          const Color(
-                                                            0xFF1A1432,
-                                                          ),
-                                                      side: const BorderSide(
-                                                        color: Color(
-                                                          0xFF3B2F63,
-                                                        ),
-                                                      ),
-                                                      label: Text(
-                                                        option,
-                                                        style: const TextStyle(
-                                                          color: _setupTextHigh,
-                                                          fontSize: 12,
-                                                        ),
-                                                      ),
-                                                      onPressed: () {
-                                                        emailController.value =
-                                                            TextEditingValue(
-                                                              text: option,
-                                                              selection:
-                                                                  TextSelection.collapsed(
-                                                                    offset: option
-                                                                        .length,
-                                                                  ),
-                                                            );
-                                                        fields[fieldIndex] =
-                                                            fields[fieldIndex]
-                                                                .copyWith(
-                                                                  value: option,
-                                                                );
-                                                        setModalState(() {});
-                                                        emailFocus
-                                                            .requestFocus();
-                                                        scrollEmailIntoView(
-                                                          fieldIndex,
-                                                        );
-                                                      },
-                                                    ),
-                                                  )
-                                                  .toList(),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                )
-                              else if (field.type == 'id')
-                                Builder(
-                                  builder: (context) {
-                                    final parsedIdentity = _parseIdentityValue(
-                                      fields[fieldIndex].value,
-                                    );
-                                    final prefixController =
-                                        ensureIdPrefixController(
-                                          fieldIndex,
-                                          parsedIdentity.prefix,
-                                        );
-                                    final prefixFocus = ensureIdPrefixFocusNode(
-                                      fieldIndex,
-                                    );
-                                    final documentController =
-                                        ensureIdDocumentController(
-                                          fieldIndex,
-                                          parsedIdentity.document,
-                                        );
-
-                                    if (!prefixFocus.hasFocus &&
-                                        prefixController.text !=
-                                            parsedIdentity.prefix) {
-                                      prefixController.value = TextEditingValue(
-                                        text: parsedIdentity.prefix,
-                                        selection: TextSelection.collapsed(
-                                          offset: parsedIdentity.prefix.length,
-                                        ),
-                                      );
-                                    }
-                                    final maskedDocument =
-                                        _formatIdentityDocumentForDisplay(
-                                          parsedIdentity.document,
-                                        );
-                                    if (documentController.text !=
-                                        maskedDocument) {
-                                      documentController.value =
-                                          TextEditingValue(
-                                            text: maskedDocument,
-                                            selection: TextSelection.collapsed(
-                                              offset: maskedDocument.length,
-                                            ),
-                                          );
-                                    }
-
-                                    final idError = showInlineErrors
-                                        ? _transferFieldValueError(
-                                            fields[fieldIndex],
-                                          )
-                                        : null;
-                                    return Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            SizedBox(
-                                              width: 110,
-                                              child: TextFormField(
-                                                controller: prefixController,
-                                                focusNode: prefixFocus,
-                                                maxLength: 6,
-                                                style: const TextStyle(
-                                                  color: _setupTextHigh,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                                textCapitalization:
-                                                    TextCapitalization
-                                                        .characters,
-                                                inputFormatters:
-                                                    <TextInputFormatter>[
-                                                      FilteringTextInputFormatter.allow(
-                                                        RegExp(r'[a-zA-Z0-9]'),
-                                                      ),
-                                                      _UpperCaseTextFormatter(),
-                                                    ],
-                                                decoration: InputDecoration(
-                                                  labelText: 'Prefijo',
-                                                  counterText: '',
-                                                  hintText: 'V',
-                                                  filled: true,
-                                                  fillColor: const Color(
-                                                    0xFF120E25,
-                                                  ),
-                                                  labelStyle: const TextStyle(
-                                                    color: _setupTextLow,
-                                                  ),
-                                                  hintStyle: const TextStyle(
-                                                    color: _setupTextMedium,
-                                                  ),
-                                                  border: OutlineInputBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                    borderSide:
-                                                        const BorderSide(
-                                                          color: Color(
-                                                            0xFF3B2F63,
-                                                          ),
-                                                        ),
-                                                  ),
-                                                  enabledBorder:
-                                                      OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                        borderSide:
-                                                            const BorderSide(
-                                                              color: Color(
-                                                                0xFF3B2F63,
-                                                              ),
-                                                            ),
-                                                      ),
-                                                  focusedBorder:
-                                                      OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                        borderSide:
-                                                            const BorderSide(
-                                                              color: Color(
-                                                                0xFF6B5A9A,
-                                                              ),
-                                                            ),
-                                                      ),
-                                                ),
-                                                onChanged: (text) {
-                                                  final typedPrefix = text
-                                                      .trim()
-                                                      .toUpperCase();
-                                                  final nextPrefix =
-                                                      typedPrefix.isEmpty
-                                                      ? 'V'
-                                                      : typedPrefix;
-                                                  final rawDocument =
-                                                      _identityDocumentRaw(
-                                                        documentController.text,
-                                                      );
-                                                  fields[fieldIndex] =
-                                                      fields[fieldIndex].copyWith(
-                                                        value:
-                                                            '$nextPrefix-$rawDocument',
-                                                      );
-                                                  if (showInlineErrors) {
-                                                    setModalState(() {});
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: TextFormField(
-                                                controller: documentController,
-                                                maxLength: 24,
-                                                style: const TextStyle(
-                                                  color: _setupTextHigh,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                                textCapitalization:
-                                                    TextCapitalization
-                                                        .characters,
-                                                inputFormatters:
-                                                    <TextInputFormatter>[
-                                                      _UpperCaseTextFormatter(),
-                                                      _IdentityDocumentFormatter(),
-                                                    ],
-                                                decoration: InputDecoration(
-                                                  labelText: 'Documento',
-                                                  hintText:
-                                                      '12345678, 12345678-7 o AB123456',
-                                                  counterText: '',
-                                                  filled: true,
-                                                  fillColor: const Color(
-                                                    0xFF120E25,
-                                                  ),
-                                                  labelStyle: const TextStyle(
-                                                    color: _setupTextLow,
-                                                  ),
-                                                  hintStyle: const TextStyle(
-                                                    color: _setupTextMedium,
-                                                  ),
-                                                  border: OutlineInputBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                    borderSide:
-                                                        const BorderSide(
-                                                          color: Color(
-                                                            0xFF3B2F63,
-                                                          ),
-                                                        ),
-                                                  ),
-                                                  enabledBorder:
-                                                      OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                        borderSide:
-                                                            const BorderSide(
-                                                              color: Color(
-                                                                0xFF3B2F63,
-                                                              ),
-                                                            ),
-                                                      ),
-                                                  focusedBorder:
-                                                      OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                        borderSide:
-                                                            const BorderSide(
-                                                              color: Color(
-                                                                0xFF6B5A9A,
-                                                              ),
-                                                            ),
-                                                      ),
-                                                ),
-                                                onChanged: (_) {
-                                                  final nextPrefix =
-                                                      prefixController.text
-                                                          .trim()
-                                                          .isEmpty
-                                                      ? 'V'
-                                                      : prefixController.text
-                                                            .trim()
-                                                            .toUpperCase();
-                                                  final rawDocument =
-                                                      _identityDocumentRaw(
-                                                        documentController.text,
-                                                      );
-                                                  fields[fieldIndex] =
-                                                      fields[fieldIndex].copyWith(
-                                                        value:
-                                                            '$nextPrefix-$rawDocument',
-                                                      );
-                                                  if (showInlineErrors) {
-                                                    setModalState(() {});
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 4),
-                                        const Text(
-                                          'Formato: PREFIJO-DOCUMENTO (ej. V-12345678 o J-26679415-7).',
-                                          style: TextStyle(
-                                            color: _setupTextMedium,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                        if (idError != null) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            idError,
-                                            style: const TextStyle(
-                                              color: Color(0xFFFFD1DC),
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    );
-                                  },
-                                )
                               else
                                 TextFormField(
                                   key: ValueKey(
-                                    'transfer-value-$fieldIndex-${field.type}',
+                                    'transfer-value-$fieldIndex-texto',
                                   ),
                                   initialValue: field.value,
                                   onChanged: (text) {
-                                    final normalizedText = field.type == 'id'
-                                        ? _normalizeIdentityValue(text)
-                                        : text;
                                     fields[fieldIndex] = fields[fieldIndex]
-                                        .copyWith(value: normalizedText);
+                                        .copyWith(value: text);
                                     if (showInlineErrors) {
                                       setModalState(() {});
                                     }
@@ -7666,19 +7803,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                   maxLength: _maxTransferFieldValueLength,
                                   style: const TextStyle(color: _setupTextHigh),
                                   minLines: 1,
-                                  maxLines: field.type == 'nota' ? 3 : 1,
-                                  keyboardType: _transferFieldKeyboardType(
-                                    field.type,
-                                  ),
-                                  inputFormatters:
-                                      _transferFieldInputFormatters(field.type),
+                                  maxLines: 3,
+                                  keyboardType: TextInputType.text,
                                   decoration: InputDecoration(
-                                    labelText: field.type == 'id'
-                                        ? 'DNI / Cedula'
-                                        : 'Valor',
-                                    hintText: field.type == 'id'
-                                        ? 'Ej. V-12345678, E-98765432, PAS-AB1234'
-                                        : 'Dato que vera el cliente',
+                                    labelText: 'Valor',
+                                    hintText: 'Dato que vera el cliente',
                                     filled: true,
                                     fillColor: const Color(0xFF120E25),
                                     labelStyle: const TextStyle(
@@ -7707,7 +7836,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                     ),
                                     errorText: showInlineErrors
                                         ? _transferFieldValueError(
-                                            fields[fieldIndex],
+                                            fields[fieldIndex].copyWith(
+                                              type: 'texto',
+                                            ),
                                           )
                                         : null,
                                   ),
@@ -7764,6 +7895,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               final cleaned = fields
                                   .map(
                                     (field) => field.copyWith(
+                                      type: field.type == 'telefono'
+                                          ? 'telefono'
+                                          : 'texto',
                                       label: field.label.trim(),
                                       value: field.value.trim(),
                                     ),
@@ -7871,12 +8005,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final fallback = canUseAuto
         ? _rateForSource(_exchangeRateSource)
         : _defaultExchangeRateFor(currency);
-    final formattedFallback = canUseAuto
-        ? _formatExchangeRateMasked(fallback)
-        : _formatExchangeRate(fallback);
     setState(() {
-      if (_exchangeRateController.text.trim().isEmpty || force) {
-        _exchangeRateController.text = formattedFallback;
+      if ((_exchangeRateController.text.trim().isEmpty || force) &&
+          fallback > 0) {
+        _setCanonicalExchangeRateForCurrency(
+          currency,
+          fallback,
+          // Auto suggestions must not wipe an established manual rate.
+          preserveManualIfSet: canUseAuto,
+        );
       }
       _isExchangeRateLoading = true;
       _exchangeRateIsError = false;
@@ -7889,12 +8026,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     setState(() {
-      if (!_exchangeRateManuallyEdited ||
-          force ||
-          _lastSuggestedRateCurrency != currency) {
-        _exchangeRateController.text = formattedFallback;
+      if ((!_exchangeRateManuallyEdited ||
+              force ||
+              _lastSuggestedRateCurrency != currency) &&
+          fallback > 0) {
+        _setCanonicalExchangeRateForCurrency(
+          currency,
+          fallback,
+          preserveManualIfSet: canUseAuto && !force,
+        );
+      } else {
+        // Keep whatever the merchant typed; persist canonical form.
+        _syncActiveCurrencyDataFromController();
       }
-      _exchangeRateByCurrency[currency] = _exchangeRateController.text.trim();
       _lastSuggestedRateCurrency = currency;
       _exchangeRateIsError = false;
       _exchangeRateMessage = canUseAuto
@@ -8094,6 +8238,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'config_negocio': <String, dynamic>{
         'metodos_pago': <String>['efectivo'],
         'moneda_default': _baseCurrency,
+        'order_management_mode': 'whatsapp_manual',
+        'whatsapp_order_format': 'detailed',
       },
       'colores_personalizados': <String, dynamic>{
         'background': surface,
@@ -8135,7 +8281,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _whatsappOrderFormat == 'detailed'
         ? 'detailed'
         : 'summary';
-    branding['config_negocio'] = config;
+    final catalogEnabled = _effectiveCatalogModeEnabled;
+    _catalogModeEnabled = catalogEnabled;
+    final homeConfig = KioskHomeConfig.fromConfigNegocio(config).copyWith(
+      catalogo: catalogEnabled,
+      verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+    );
+    branding['config_negocio'] = homeConfig.mergeIntoConfigNegocio(config);
     final saved = await client
         .from('comercios')
         .update({'branding_ia': branding})
@@ -8149,7 +8301,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Formato de pedidos por WhatsApp guardado.'),
+          content: Text('Operación y WhatsApp guardados.'),
         ),
       );
     }
@@ -8172,7 +8324,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _toStringDynamicMap(payload['config_negocio']),
       );
       config['social_links'] = _socialLinksPayload();
-      payload['config_negocio'] = config;
+      config['order_management_mode'] =
+          _orderManagementMode == 'whatsapp_manual'
+          ? 'whatsapp_manual'
+          : 'platform';
+      config['whatsapp_order_format'] =
+          _orderManagementMode == 'whatsapp_manual' ||
+              _whatsappOrderFormat == 'detailed'
+          ? 'detailed'
+          : 'summary';
+      final catalogEnabled = _effectiveCatalogModeEnabled;
+      _catalogModeEnabled = catalogEnabled;
+      payload['config_negocio'] = KioskHomeConfig.fromConfigNegocio(config)
+          .copyWith(
+            catalogo: catalogEnabled,
+            verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+          )
+          .mergeIntoConfigNegocio(config);
       return payload;
     }
 
@@ -8213,6 +8381,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       merged['config_negocio'] = <String, dynamic>{
         'metodos_pago': <String>['efectivo'],
         'moneda_default': _baseCurrency,
+        'order_management_mode': 'whatsapp_manual',
+        'whatsapp_order_format': 'detailed',
       };
     }
 
@@ -8222,6 +8392,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     configNegocio['social_links'] = _socialLinksPayload();
     configNegocio['moneda_default'] = _baseCurrency;
     configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
+    configNegocio['order_management_mode'] =
+        _orderManagementMode == 'whatsapp_manual'
+        ? 'whatsapp_manual'
+        : 'platform';
+    configNegocio['whatsapp_order_format'] =
+        _orderManagementMode == 'whatsapp_manual' ||
+            _whatsappOrderFormat == 'detailed'
+        ? 'detailed'
+        : 'summary';
+    // Promotion is admin-only (admin.elmenuxfa.com). Preserve existing flag.
+    // Do not let the restaurant self-promote from this panel.
 
     final exchangeRates = <String, dynamic>{};
     final exchangeRateModes = <String, dynamic>{};
@@ -8230,12 +8411,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (currency == _baseCurrency) {
         continue;
       }
-      final rate = _effectiveExchangeRateForCurrency(currency);
+      final mode =
+          _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+      // Persist the established (manual/map) rate — never the live Auto
+      // source — so saving while mode is Auto cannot replace e.g. 2,8 with
+      // 0,33 in branding. Live conversion still uses sources when mode=auto.
+      final established = _parseExchangeRate(
+        _stashedManualExchangeRateByCurrency[currency] ??
+            _exchangeRateByCurrency[currency],
+      );
+      final rate = established > 0
+          ? established
+          : _effectiveExchangeRateForCurrency(currency);
       if (rate > 0) {
         exchangeRates[currency] = rate;
       }
-      exchangeRateModes[currency] =
-          _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+      exchangeRateModes[currency] = mode;
       exchangeRateSources[currency] =
           _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
     }
@@ -8255,7 +8446,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         configNegocio.containsKey('exchange_rate_adjustments')) {
       configNegocio['exchange_rate_adjustments'] = exchangeRateAdjustments;
     }
-    merged['config_negocio'] = configNegocio;
+    final catalogEnabled = _effectiveCatalogModeEnabled;
+    _catalogModeEnabled = catalogEnabled;
+    merged['config_negocio'] = KioskHomeConfig.fromConfigNegocio(configNegocio)
+        .copyWith(
+          catalogo: catalogEnabled,
+          verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+        )
+        .mergeIntoConfigNegocio(configNegocio);
 
     return merged;
   }
@@ -8400,9 +8598,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if (_businessLatitude != null) 'latitud': _businessLatitude,
         if (_businessLongitude != null) 'longitud': _businessLongitude,
       },
-      'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+      'permite_delivery': _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       'negocio_virtual': _isVirtualBusiness,
+      'estados_operacion': _persistedOperatingStates(),
       if (_publicDirectoryUiEnabled)
         'mostrar_en_directorio_publico': _showOnPublicDirectory,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
@@ -8447,6 +8646,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'permite_delivery',
       'recibe_pedidos_whatsapp',
       'negocio_virtual',
+      'estados_operacion',
       'mostrar_en_directorio_publico',
       'slug',
       'logo_url',
@@ -8532,7 +8732,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     if (!_canContinueIdentity()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa nombre y URL disponible.')),
+        SnackBar(
+          content: Text(
+            _identityContinueBlocker() ??
+                'Completa nombre, URL disponible y logo.',
+          ),
+        ),
       );
       return;
     }
@@ -8562,14 +8767,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (!_hasPaymentDetailsForSelectedMethods()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Completa al menos un detalle en cada metodo de pago seleccionado.',
-          ),
-        ),
-      );
+    final paymentIssue = _paymentDetailsIssueMessage();
+    if (paymentIssue != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(paymentIssue)));
       return;
     }
 
@@ -8924,6 +9126,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           onPickLogo: _pickLogo,
           selectedLogo: _selectedLogo,
           selectedLogoUrl: _selectedLogoUrl,
+          logoRequiredMissing: !_hasLogoSelected,
         ),
         const SizedBox(height: 12),
         _UrlBar(
@@ -9315,6 +9518,576 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Widget _buildCheckoutStep() {
+    try {
+      return _buildCheckoutStepBody();
+    } catch (error, stack) {
+      final message = Error.safeToString(error);
+      debugPrint('Checkout step build error: $message\n$stack');
+      final showTechnical = message.isNotEmpty &&
+          !message.startsWith("Instance of ") &&
+          !message.contains('minified:');
+      return Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No se pudo mostrar cobros y tasa de cambio.',
+              style: TextStyle(
+                color: _setupTextHigh,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (showTechnical) ...[
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: const TextStyle(color: Color(0xFFFFD1DC), fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Text(
+              'Vuelve al inicio e intenta de nuevo. Si sigue fallando, recarga la pagina.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  String _checkoutCurrencyTitle(String code) {
+    return switch (code) {
+      'USD' => 'Dólares (USD)',
+      'VES' => 'Bolívares (VES)',
+      'COP' => 'Pesos colombianos (COP)',
+      'EUR' => 'Euros (EUR)',
+      _ => code,
+    };
+  }
+
+  String _checkoutCurrencyFlag(String code) {
+    return switch (code) {
+      'USD' => '🇺🇸',
+      'VES' => '🇻🇪',
+      'COP' => '🇨🇴',
+      'EUR' => '🇪🇺',
+      _ => '💱',
+    };
+  }
+
+  Widget _checkoutStepCard({
+    required int number,
+    required String title,
+    String? subtitle,
+    Widget? trailing,
+    Widget? child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17122E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF3B2F63)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stackTrailing = trailing != null && constraints.maxWidth < 520;
+          final heading = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _palette.primary.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _palette.primary.withValues(alpha: 0.55),
+                  ),
+                ),
+                child: Text(
+                  '$number',
+                  style: TextStyle(
+                    color: _palette.primary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        color: _setupTextHigh,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: _setupTextMedium,
+                          fontSize: 12.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null && !stackTrailing) ...[
+                const SizedBox(width: 12),
+                trailing,
+              ],
+            ],
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              heading,
+              if (trailing != null && stackTrailing) ...[
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: trailing),
+              ],
+              if (child != null) ...[
+                const SizedBox(height: 14),
+                child,
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _switchCheckoutEditingCurrency(String currency) {
+    if (_activeCheckoutCurrency == currency) {
+      return;
+    }
+    setState(() {
+      _syncActiveCurrencyDataFromController();
+      _activeCheckoutCurrency = currency;
+      _ensureCurrencyConfig(currency);
+      _exchangeRateManuallyEdited = false;
+      _exchangeRateMessage = null;
+      _exchangeRateIsError = false;
+      _loadActiveCurrencyIntoController();
+    });
+    unawaited(_saveDraft());
+  }
+
+  void _switchPaymentEditingCurrency(String currency) {
+    if (_activePaymentCurrency == currency) {
+      return;
+    }
+    setState(() {
+      _activePaymentCurrency = currency;
+      _ensureCurrencyConfig(currency);
+    });
+    unawaited(_saveDraft());
+  }
+
+  Widget _checkoutEditingCurrencyTabs({
+    required List<String> currencies,
+    required String activeCurrency,
+    required ValueChanged<String> onSelected,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF120E25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF3B2F63)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var index = 0; index < currencies.length; index++) ...[
+              if (index > 0) const SizedBox(width: 4),
+              Builder(
+                builder: (context) {
+                  final currency = currencies[index];
+                  final selected = currency == activeCurrency;
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => onSelected(currency),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Ink(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? _palette.primary
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _checkoutCurrencyFlag(currency),
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              currency,
+                              style: TextStyle(
+                                color: selected
+                                    ? Colors.white
+                                    : _setupTextMedium,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _checkoutSelectableCurrencyCard({
+    required String currency,
+    required bool selected,
+    required bool isActive,
+    required VoidCallback onTap,
+    double? width,
+  }) {
+    final borderColor = selected
+        ? (isActive ? _palette.primary : _palette.primary.withValues(alpha: 0.55))
+        : const Color(0xFF3B2F63);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          width: width ?? 188,
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF221A3F)
+                : const Color(0xFF14102A),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: selected ? 1.6 : 1),
+          ),
+          child: Row(
+            children: [
+              Text(
+                _checkoutCurrencyFlag(currency),
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _checkoutCurrencyTitle(currency),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.circle_outlined,
+                size: 18,
+                color: selected
+                    ? const Color(0xFF7DD3FC)
+                    : _setupTextLow,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _checkoutModeSegment({
+    required bool canUseAuto,
+    required bool isAuto,
+    required ValueChanged<bool> onChanged,
+  }) {
+    Widget segment({
+      required String label,
+      required IconData icon,
+      required bool selected,
+      required VoidCallback? onTap,
+    }) {
+      return Expanded(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Ink(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: selected
+                    ? _palette.primary
+                    : const Color(0xFF120E25),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: selected ? Colors.white : _setupTextMedium,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? Colors.white : _setupTextMedium,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF120E25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF3B2F63)),
+      ),
+      child: Row(
+        children: [
+          segment(
+            label: 'Automática',
+            icon: Icons.trending_up_rounded,
+            selected: isAuto,
+            onTap: !canUseAuto
+                ? null
+                : () {
+                    if (!isAuto) onChanged(true);
+                  },
+          ),
+          const SizedBox(width: 4),
+          segment(
+            label: 'Manual',
+            icon: Icons.edit_rounded,
+            selected: !isAuto,
+            onTap: () {
+              if (isAuto || !canUseAuto) onChanged(false);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _checkoutSourceCard({
+    required String label,
+    required String value,
+    required bool selected,
+    required VoidCallback onTap,
+    Widget? trailing,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          width: 132,
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF221A3F)
+                : const Color(0xFF120E25),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? _palette.primary : const Color(0xFF3B2F63),
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: selected ? _setupTextHigh : _setupTextMedium,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  ?trailing,
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: _setupTextLow,
+                  fontSize: 11,
+                  height: 1.25,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _checkoutRateSummaryCard({
+    required double rate,
+    required String baseCurrency,
+    required String quoteCurrency,
+    required String? freshnessText,
+    required Color healthColor,
+    required VoidCallback onHistory,
+  }) {
+    final quoteLabel = quoteCurrency == 'VES' ? 'VES' : quoteCurrency;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A2740),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Spacer(),
+              if (freshnessText != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF12261C),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFF245C3A)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: healthColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        freshnessText,
+                        style: const TextStyle(
+                          color: Color(0xFFA7F3D0),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            rate > 0
+                ? '${_formatExchangeRateMasked(rate)} $quoteLabel'
+                : '-- $quoteLabel',
+            style: GoogleFonts.poppins(
+              color: _setupTextHigh,
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'por 1 $baseCurrency',
+            style: const TextStyle(
+              color: _setupTextMedium,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (rate > 0) ...[
+            const SizedBox(height: 8),
+            Text(
+              _formatConversionEquivalenceText(
+                rate: rate,
+                baseCurrency: baseCurrency,
+                quoteCurrency: quoteCurrency,
+              ),
+              style: const TextStyle(
+                color: Color(0xFFD3E8FF),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: onHistory,
+              icon: const Icon(Icons.bar_chart_rounded, size: 18),
+              label: const Text('Ver historial →'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF7DD3FC),
+                textStyle: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutStepBody() {
     if (_selectedCurrencies.isEmpty) {
       _selectedCurrencies.add('USD');
     }
@@ -9323,9 +10096,44 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _selectedCurrencies.add(_primaryCheckoutCurrency);
     }
 
-    final currentCurrency = _currentCurrency;
     final baseCurrency = _baseCurrency;
-    final currentPairLabel = '$baseCurrency/$currentCurrency';
+    // Secondary currencies only (need FX). Payment methods use ALL selected
+    // currencies including the primary (COP) — merchants also receive in base.
+    final editingCurrencies = _selectedCurrencies
+        .where((currency) => currency != baseCurrency)
+        .toList(growable: false);
+    final paymentCurrencies = _selectedCurrencies.toList(growable: false);
+    final hasSecondary = editingCurrencies.isNotEmpty;
+    // FX tab: prefer a secondary currency (primary has no rate to edit).
+    if (!_selectedCurrencies.contains(_activeCheckoutCurrency) ||
+        (_activeCheckoutCurrency == baseCurrency &&
+            editingCurrencies.isNotEmpty)) {
+      _activeCheckoutCurrency = editingCurrencies.isNotEmpty
+          ? editingCurrencies.first
+          : (paymentCurrencies.isNotEmpty
+                ? paymentCurrencies.first
+                : baseCurrency);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _loadActiveCurrencyIntoController();
+      });
+    }
+    // Payment tab: independent; may be the primary (COP).
+    if (!_selectedCurrencies.contains(_activePaymentCurrency)) {
+      _activePaymentCurrency = paymentCurrencies.contains(baseCurrency)
+          ? baseCurrency
+          : (paymentCurrencies.isNotEmpty
+                ? paymentCurrencies.first
+                : baseCurrency);
+    }
+    final currentCurrency = _currentCurrency;
+    final paymentCurrency = _paymentCurrency;
+    _ensureCurrencyConfig(currentCurrency);
+    _ensureCurrencyConfig(paymentCurrency);
+    _loadExchangeConfigForCurrency(currentCurrency);
+    _enforceExchangeRulesForCurrency(currentCurrency);
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
     final canUseAuto =
         requiresRate && _hasAutoSourcesForCurrency(currentCurrency);
@@ -9355,1115 +10163,996 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final allowBcv = _isBcvPairAvailable(currentCurrency);
     final allowP2p = _isP2pPairAvailable(currentCurrency);
     final allowGoogle = _isGooglePairAvailable(currentCurrency);
-    final currenciesForEditing = <String>[
-      if (_selectedCurrencies.contains(baseCurrency)) baseCurrency,
-      ..._selectedCurrencies.where((currency) => currency != baseCurrency),
+    final availableRadioSources = <String>[
+      if (allowBcv) ...[_exchangeSourceBcvEur, _exchangeSourceBcvUsd],
+      if (allowP2p) _exchangeSourceP2pBinance,
+      if (allowGoogle) _exchangeSourceGoogle,
     ];
-    _ensureCurrencyConfig(currentCurrency);
-    _enforceExchangeRulesForCurrency(currentCurrency);
-    final currentPayments = _selectedPaymentsForCurrency(currentCurrency);
-    final currentDrafts = _paymentDraftsForCurrency(currentCurrency);
+    final safeExchangeSource =
+        availableRadioSources.contains(_exchangeRateSource)
+        ? _exchangeRateSource
+        : (availableRadioSources.isNotEmpty
+              ? availableRadioSources.first
+              : _exchangeRateSource);
+    if (safeExchangeSource != _exchangeRateSource) {
+      _exchangeRateSource = safeExchangeSource;
+    }
+    final currentPayments = _selectedPaymentsForCurrency(paymentCurrency);
+    final currentDrafts = _paymentDraftsForCurrency(paymentCurrency);
     final isExchangeRateEditable =
         requiresRate && _exchangeRateMode == _exchangeModeManual;
+    final isAutoMode =
+        canUseAuto && _exchangeRateMode == _exchangeModeAuto;
+    final secondaryCurrencies = _currencies
+        .where((currency) => currency != baseCurrency)
+        .toList();
+
+    Future<void> setExchangeMode(bool enabled) async {
+      setState(() {
+        if (enabled) {
+          // Leaving Manual: remember the established rate. Do NOT write the
+          // live Auto rate into `_exchangeRateByCurrency` — the summary already
+          // reads live sources while mode is Auto, and overwriting here was
+          // silently replacing e.g. 2,8 with 0,33 on Manual→Auto→Manual.
+          final fromController = _canonicalRateTextFromInput(
+            _exchangeRateController.text.trim(),
+            baseCurrency: baseCurrency,
+            quoteCurrency: currentCurrency,
+          );
+          final fromMap =
+              _exchangeRateByCurrency[currentCurrency]?.trim() ?? '';
+          final established = _parseExchangeRate(fromController) > 0
+              ? fromController
+              : fromMap;
+          if (_parseExchangeRate(established) > 0) {
+            _exchangeRateByCurrency[currentCurrency] = established;
+            _stashedManualExchangeRateByCurrency[currentCurrency] =
+                established;
+          }
+          _exchangeRateMode = _exchangeModeAuto;
+          _syncExchangeConfigForCurrency(currentCurrency);
+          _exchangeRateManuallyEdited = false;
+        } else {
+          // Returning to Manual: prefer stash, else whatever is still in map.
+          _exchangeRateMode = _exchangeModeManual;
+          _syncExchangeConfigForCurrency(currentCurrency);
+          final stashed =
+              _stashedManualExchangeRateByCurrency[currentCurrency];
+          if (stashed != null && _parseExchangeRate(stashed) > 0) {
+            _exchangeRateByCurrency[currentCurrency] = stashed;
+          }
+          final stored = _exchangeRateByCurrency[currentCurrency] ?? '';
+          final display = _inputTextFromCanonicalRate(
+            stored,
+            baseCurrency: baseCurrency,
+            quoteCurrency: currentCurrency,
+          );
+          _exchangeRateController.value = TextEditingValue(
+            text: display,
+            selection: TextSelection.collapsed(offset: display.length),
+          );
+        }
+      });
+      await _saveDraft();
+    }
+
+    Future<void> selectExchangeSource(String value) async {
+      if (value != _exchangeRateSource) {
+        final proceed = await _confirmSourceChangeWithAdjustment(
+          currentCurrency,
+          _exchangeRateSource,
+          value,
+        );
+        if (!proceed || !mounted) {
+          return;
+        }
+      }
+      setState(() {
+        _exchangeRateSource = value;
+        _syncExchangeConfigForCurrency(currentCurrency);
+        final synced = _rateForSource(value);
+        if (synced > 0) {
+          // Only seed the map when empty; never replace an established rate.
+          _setCanonicalExchangeRateForCurrency(
+            currentCurrency,
+            synced,
+            preserveManualIfSet: true,
+          );
+        }
+      });
+      await _saveDraft();
+    }
+
+    final rateControls = <Widget>[
+      _checkoutModeSegment(
+        canUseAuto: canUseAuto,
+        isAuto: isAutoMode,
+        onChanged: (enabled) {
+          unawaited(setExchangeMode(enabled));
+        },
+      ),
+      if (!canUseAuto) ...[
+        const SizedBox(height: 8),
+        const Text(
+          'Este par no tiene fuente automática disponible. Configúralo manualmente.',
+          style: TextStyle(color: Color(0xFFFBBF24), fontSize: 11),
+        ),
+      ],
+      if (isAutoMode && availableRadioSources.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        const Text(
+          'Fuente de la tasa',
+          style: TextStyle(
+            color: _setupTextMedium,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (allowBcv)
+              _checkoutSourceCard(
+                label: 'BCV USD',
+                value: _rateBadgeText(
+                  _exchangeSourceBcvUsd,
+                  quoteCurrency: currentCurrency,
+                ),
+                selected: safeExchangeSource == _exchangeSourceBcvUsd,
+                onTap: () {
+                  unawaited(selectExchangeSource(_exchangeSourceBcvUsd));
+                },
+              ),
+            if (allowBcv)
+              _checkoutSourceCard(
+                label: 'BCV EUR',
+                value: _rateBadgeText(
+                  _exchangeSourceBcvEur,
+                  quoteCurrency: currentCurrency,
+                ),
+                selected: safeExchangeSource == _exchangeSourceBcvEur,
+                onTap: () {
+                  unawaited(selectExchangeSource(_exchangeSourceBcvEur));
+                },
+              ),
+            if (allowP2p)
+              _checkoutSourceCard(
+                label: 'P2P Binance',
+                value: _rateBadgeText(
+                  _exchangeSourceP2pBinance,
+                  quoteCurrency: currentCurrency,
+                ),
+                selected: safeExchangeSource == _exchangeSourceP2pBinance,
+                onTap: () {
+                  unawaited(selectExchangeSource(_exchangeSourceP2pBinance));
+                },
+              ),
+            if (allowGoogle)
+              _checkoutSourceCard(
+                label: 'Google',
+                value: _rateBadgeText(
+                  _exchangeSourceGoogle,
+                  quoteCurrency: currentCurrency,
+                ),
+                selected: safeExchangeSource == _exchangeSourceGoogle,
+                trailing: _latestGoogleIsFallback
+                    ? const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 14,
+                        color: Color(0xFFFBBF24),
+                      )
+                    : null,
+                onTap: () {
+                  unawaited(selectExchangeSource(_exchangeSourceGoogle));
+                },
+              ),
+          ],
+        ),
+        if (isAdjustableExchangeSource(_exchangeRateSource)) ...[
+          const SizedBox(height: 8),
+          _buildExchangeAdjustmentSection(
+            baseCurrency: baseCurrency,
+            quoteCurrency: currentCurrency,
+          ),
+        ],
+        if (_exchangeRateSource == _exchangeSourceGoogle &&
+            selectedProviderFallback) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                size: 16,
+                color: Color(0xFFFBBF24),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  providerHealth.message == 'Usando respaldo'
+                      ? 'Google está usando un valor recuperado por fallo de conexión o parseo.'
+                      : providerHealth.message,
+                  style: const TextStyle(
+                    color: Color(0xFFFBBF24),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+      if (isExchangeRateEditable) ...[
+        const SizedBox(height: 14),
+        Builder(
+          builder: (context) {
+            final inverseUi = _usesInverseManualRateUi(
+              baseCurrency,
+              currentCurrency,
+            );
+            final defaultCanonical = _defaultExchangeRateFor(currentCurrency);
+            final hint = inverseUi && defaultCanonical > 0
+                ? _formatExchangeRateMasked(1 / defaultCanonical)
+                : _formatExchangeRateMasked(defaultCanonical);
+            return TextField(
+              controller: _exchangeRateController,
+              enabled: true,
+              enableInteractiveSelection: false,
+              onTap: _forceExchangeRateCursorAtEnd,
+              textAlign: TextAlign.right,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: <TextInputFormatter>[
+                _MoneyAmountInputFormatter(
+                  decimalDigits: _exchangeRateInputDecimalDigits(
+                    currentCurrency,
+                  ),
+                  maxIntegerDigits: 7,
+                ),
+              ],
+              style: const TextStyle(color: _setupTextHigh),
+              decoration: InputDecoration(
+                labelText: 'Tasa manual',
+                prefixText: inverseUi ? null : '1 $baseCurrency = ',
+                suffixText: inverseUi
+                    ? ' $baseCurrency = 1 $currentCurrency'
+                    : ' $currentCurrency',
+                hintText: hint,
+                filled: true,
+                fillColor: const Color(0xFF120E25),
+                labelStyle: const TextStyle(color: _setupTextLow),
+                hintStyle: const TextStyle(color: _setupTextLow),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                ),
+              ),
+              onChanged: (_) {
+                _exchangeRateManuallyEdited = true;
+                final canonical = _canonicalRateTextFromInput(
+                  _exchangeRateController.text.trim(),
+                  baseCurrency: baseCurrency,
+                  quoteCurrency: currentCurrency,
+                );
+                _exchangeRateByCurrency[currentCurrency] = canonical;
+                if (_parseExchangeRate(canonical) > 0) {
+                  _stashedManualExchangeRateByCurrency[currentCurrency] =
+                      canonical;
+                }
+                unawaited(_saveDraft());
+              },
+            );
+          },
+        ),
+      ],
+      if (_exchangeRateMessage != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _exchangeRateMessage!,
+          style: TextStyle(
+            color: _exchangeRateIsError
+                ? const Color(0xFFFFC7D8)
+                : const Color(0xFFD3E8FF),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Moneda principal',
-          style: GoogleFonts.poppins(
-            color: _setupTextHigh,
-            fontSize: 19,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Selecciona la moneda en la que están expresados los precios de tu menú físico.',
-          style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFF17122E),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF3B2F63)),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _currencies.map((currency) {
-                final selected = _primaryCheckoutCurrency == currency;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text('${_currencyLabel(currency)} ($currency)'),
-                    selected: selected,
-                    onSelected: (_) {
-                      setState(() {
-                        _syncActiveCurrencyDataFromController();
-                        _primaryCheckoutCurrency = currency;
-                        _selectedCurrencies.add(currency);
-                        _activeCheckoutCurrency = currency;
-                        _ensureCurrencyConfig(currency);
-                        _exchangeRateManuallyEdited = false;
-                        _exchangeRateMessage = null;
-                        _exchangeRateIsError = false;
-                        _loadActiveCurrencyIntoController();
-                      });
-                      unawaited(_saveDraft());
-                    },
-                    selectedColor: const Color(0xFF2D2152),
-                    backgroundColor: const Color(0xFF1A1432),
-                    labelStyle: const TextStyle(
-                      color: _setupTextHigh,
-                      fontSize: 13,
-                    ),
-                    side: BorderSide(
-                      color: selected
-                          ? _palette.primary
-                          : const Color(0xFF3B2F63),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        if (!hasPrimary) ...[
-          const SizedBox(height: 10),
-          const Text(
-            'Selecciona la moneda principal para continuar con la configuracion de cobros.',
-            style: TextStyle(color: _setupTextMedium, fontSize: 12),
-          ),
-        ],
-        if (!hasPrimary) const SizedBox(height: 14),
-        if (hasPrimary) ...[
-          const SizedBox(height: 10),
-          Text(
-            'Tambien aceptamos',
-            style: GoogleFonts.poppins(
-              color: _setupTextHigh,
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Selecciona monedas adicionales para configurar sus pares con $baseCurrency.',
-            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        _checkoutStepCard(
+          number: 1,
+          title: 'Moneda principal',
+          subtitle: 'Selecciona la moneda en la que tienes tus precios.',
+          trailing: Container(
+            constraints: const BoxConstraints(minWidth: 180, maxWidth: 420),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFF17122E),
+              color: const Color(0xFF120E25),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFF3B2F63)),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _currencies
-                    .where((currency) => currency != baseCurrency)
-                    .map((currency) {
-                      final selected = _selectedCurrencies.contains(currency);
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          avatar: Icon(
-                            selected
-                                ? Icons.check_circle_rounded
-                                : Icons.circle_outlined,
-                            size: 16,
-                            color: selected
-                                ? const Color(0xFFA7F3D0)
-                                : _setupTextLow,
-                          ),
-                          label: Text(
-                            '${_currencyLabel(currency)} ($currency)',
-                          ),
-                          selected: selected,
-                          onSelected: (active) {
-                            setState(() {
-                              _syncActiveCurrencyDataFromController();
-                              if (active) {
-                                _selectedCurrencies.add(currency);
-                                _activeCheckoutCurrency = currency;
-                                _ensureCurrencyConfig(currency);
-                              } else {
-                                _selectedCurrencies.remove(currency);
-                                _selectedPaymentsByCurrency.remove(currency);
-                                _paymentMethodDraftsByCurrency.remove(currency);
-                                _exchangeRateByCurrency.remove(currency);
-                                _adjustmentByCurrency.remove(currency);
-                                _adjustmentIssueByCurrency.remove(currency);
-                                _adjustmentDirtyCurrencies.remove(currency);
-                                if (_activeCheckoutCurrency == currency) {
-                                  _activeCheckoutCurrency = baseCurrency;
-                                }
-                              }
-                              _exchangeRateManuallyEdited = false;
-                              _exchangeRateMessage = null;
-                              _exchangeRateIsError = false;
-                              _loadActiveCurrencyIntoController();
-                            });
-                            unawaited(_saveDraft());
-                          },
-                          selectedColor: const Color(0xFF2D2152),
-                          backgroundColor: const Color(0xFF1A1432),
-                          labelStyle: const TextStyle(
-                            color: _setupTextHigh,
-                            fontSize: 13,
-                          ),
-                          side: BorderSide(
-                            color: selected
-                                ? _palette.primary
-                                : const Color(0xFF3B2F63),
-                          ),
-                          showCheckmark: false,
-                        ),
-                      );
-                    })
-                    .toList(),
-              ),
-            ),
-          ),
-        ],
-        if (hasPrimary) ...[
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF17122E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF3B2F63)),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.checklist_rounded,
-                  size: 16,
-                  color: _setupTextMedium,
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: hasPrimary ? _primaryCheckoutCurrency : null,
+                hint: const Text(
+                  'Elegir moneda',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 13),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${_configuredCurrenciesCount()}/${_selectedCurrencies.length} monedas configuradas',
-                    style: const TextStyle(
-                      color: _setupTextMedium,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_selectedCurrencies.length > 1) ...[
-            const SizedBox(height: 10),
-            Text(
-              'Moneda en edicion: ${_currencyLabel(currentCurrency)} ($currentCurrency)',
-              style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF17122E),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF3B2F63)),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: currenciesForEditing.map((currency) {
-                    final isActive = currency == currentCurrency;
-                    final isReady = _isCurrencyCheckoutConfigured(currency);
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(currency),
-                            if (!isReady) ...[
-                              const SizedBox(width: 6),
-                              const Icon(
-                                Icons.warning_amber_rounded,
-                                size: 16,
-                                color: Color(0xFFF59E0B),
-                              ),
-                            ],
-                          ],
-                        ),
-                        selected: isActive,
-                        onSelected: (_) {
-                          setState(() {
-                            _syncActiveCurrencyDataFromController();
-                            _activeCheckoutCurrency = currency;
-                            _exchangeRateManuallyEdited = false;
-                            _exchangeRateMessage = null;
-                            _exchangeRateIsError = false;
-                            _loadActiveCurrencyIntoController();
-                          });
-                          unawaited(_saveDraft());
-                        },
-                        selectedColor: const Color(0xFF2D2152),
-                        backgroundColor: const Color(0xFF1A1432),
-                        labelStyle: const TextStyle(color: _setupTextHigh),
-                        side: BorderSide(
-                          color: isActive
-                              ? _palette.primary
-                              : const Color(0xFF3B2F63),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ],
-        ],
-        if (hasPrimary && requiresRate) const SizedBox(height: 12),
-        if (hasPrimary && requiresRate)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF17122E),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF3B2F63)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Par de conversion: $currentPairLabel',
-                        style: GoogleFonts.poppins(
-                          color: _setupTextHigh,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color:
-                            _isCurrencyExchangeRateConfigured(currentCurrency)
-                            ? const Color(0xFF153222)
-                            : const Color(0xFF32151D),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        _isCurrencyExchangeRateConfigured(currentCurrency)
-                            ? 'Completa'
-                            : 'Pendiente',
-                        style: TextStyle(
-                          color:
-                              _isCurrencyExchangeRateConfigured(currentCurrency)
-                              ? const Color(0xFFA7F3D0)
-                              : const Color(0xFFFFD1DC),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  requiresRate
-                      ? 'Define como convertir desde $baseCurrency hacia $currentCurrency.'
-                      : 'Esta es tu moneda principal. No requiere tasa de conversion.',
-                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-                ),
-                if (requiresRate && currentDisplayedRate > 0) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _formatConversionEquivalenceText(
-                      rate: currentDisplayedRate,
-                      baseCurrency: baseCurrency,
-                      quoteCurrency: currentCurrency,
-                    ),
-                    style: const TextStyle(
-                      color: Color(0xFFD3E8FF),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                if (!requiresRate) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Selecciona otra moneda para crear su par de conversion.',
-                    style: TextStyle(color: _setupTextLow, fontSize: 11),
-                  ),
-                ],
-                if (requiresRate && !canUseAuto) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Este par no tiene fuente automatica disponible. Configuralo manualmente.',
-                    style: TextStyle(color: Color(0xFFFBBF24), fontSize: 11),
-                  ),
-                ],
-                if (requiresRate) ...[
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: canUseAuto && _exchangeRateMode == _exchangeModeAuto,
-                    onChanged: !canUseAuto
-                        ? null
-                        : (enabled) async {
-                            setState(() {
-                              _exchangeRateMode = enabled
-                                  ? _exchangeModeAuto
-                                  : _exchangeModeManual;
-                              // Persist per-currency, otherwise the stale
-                              // saved mode for this currency wins on save.
-                              _syncExchangeConfigForCurrency(currentCurrency);
-                              if (enabled) {
-                                final synced = _rateForSource(
-                                  _exchangeRateSource,
-                                );
-                                if (synced > 0) {
-                                  final masked = _formatExchangeRateMasked(
-                                    synced,
-                                  );
-                                  _exchangeRateByCurrency[currentCurrency] =
-                                      masked;
-                                  _exchangeRateController.text = masked;
-                                  _exchangeRateManuallyEdited = false;
-                                }
-                              }
-                            });
-                            await _saveDraft();
-                          },
-                    activeThumbColor: _palette.primary,
-                    activeTrackColor: _palette.primary.withValues(alpha: 0.45),
-                    inactiveThumbColor: const Color(0xFFE7E0F9),
-                    inactiveTrackColor: const Color(0xFF3A305A),
-                    title: Text(
-                      'Actualizar tasa automaticamente',
-                      style: TextStyle(
-                        color: canUseAuto ? _setupTextHigh : _setupTextMedium,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: Text(
-                      _exchangeRateMode == _exchangeModeAuto
-                          ? 'El sistema sincroniza la tasa segun la fuente seleccionada.'
-                          : 'La tasa se mantiene fija hasta que la cambies.',
-                      style: const TextStyle(
-                        color: _setupTextMedium,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-                if (requiresRate &&
-                    canUseAuto &&
-                    _exchangeRateMode == _exchangeModeAuto) ...[
-                  const SizedBox(height: 8),
-                  RadioGroup<String>(
-                    groupValue: _exchangeRateSource,
-                    onChanged: (value) async {
-                      if (value == null) {
-                        return;
-                      }
-                      if (value != _exchangeRateSource) {
-                        final proceed =
-                            await _confirmSourceChangeWithAdjustment(
-                              currentCurrency,
-                              _exchangeRateSource,
-                              value,
-                            );
-                        if (!proceed || !mounted) {
-                          return;
-                        }
-                      }
-                      setState(() {
-                        _exchangeRateSource = value;
-                        // Persist per-currency, otherwise the stale saved
-                        // source for this currency wins over this selection.
-                        _syncExchangeConfigForCurrency(currentCurrency);
-                        final synced = _rateForSource(value);
-                        final masked = _formatExchangeRateMasked(synced);
-                        _exchangeRateByCurrency[currentCurrency] = masked;
-                        _exchangeRateController.text = masked;
-                      });
-                      await _saveDraft();
-                    },
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        if (allowBcv)
-                          SizedBox(
-                            width: 220,
-                            child: RadioListTile<String>(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              value: _exchangeSourceBcvEur,
-                              activeColor: _palette.primary,
-                              title: const Text(
-                                'BCV EUR',
-                                style: TextStyle(
-                                  color: _setupTextHigh,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'BCV: ${_rateBadgeText(_exchangeSourceBcvEur, quoteCurrency: currentCurrency)}',
-                                style: const TextStyle(
-                                  color: _setupTextMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (allowBcv)
-                          SizedBox(
-                            width: 220,
-                            child: RadioListTile<String>(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              value: _exchangeSourceBcvUsd,
-                              activeColor: _palette.primary,
-                              title: const Text(
-                                'BCV USD',
-                                style: TextStyle(
-                                  color: _setupTextHigh,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'BCV: ${_rateBadgeText(_exchangeSourceBcvUsd, quoteCurrency: currentCurrency)}',
-                                style: const TextStyle(
-                                  color: _setupTextMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (allowP2p)
-                          SizedBox(
-                            width: 220,
-                            child: RadioListTile<String>(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              value: _exchangeSourceP2pBinance,
-                              activeColor: _palette.primary,
-                              title: const Text(
-                                'Tasa Mercado (P2P)',
-                                style: TextStyle(
-                                  color: _setupTextHigh,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'Binance: ${_rateBadgeText(_exchangeSourceP2pBinance, quoteCurrency: currentCurrency)}',
-                                style: const TextStyle(
-                                  color: _setupTextMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (allowGoogle)
-                          SizedBox(
-                            width: 220,
-                            child: RadioListTile<String>(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              value: _exchangeSourceGoogle,
-                              activeColor: _palette.primary,
-                              title: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text(
-                                    'Google',
-                                    style: TextStyle(
-                                      color: _setupTextHigh,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (_latestGoogleIsFallback) ...[
-                                    const SizedBox(width: 6),
-                                    const Icon(
-                                      Icons.warning_amber_rounded,
-                                      size: 16,
-                                      color: Color(0xFFFBBF24),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              subtitle: Text(
-                                'Google: ${_rateBadgeText(_exchangeSourceGoogle, quoteCurrency: currentCurrency)}',
-                                style: const TextStyle(
-                                  color: _setupTextMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (isAdjustableExchangeSource(_exchangeRateSource))
-                    _buildExchangeAdjustmentSection(
-                      baseCurrency: baseCurrency,
-                      quoteCurrency: currentCurrency,
-                    ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
+                isExpanded: true,
+                dropdownColor: const Color(0xFF1A1432),
+                iconEnabledColor: _setupTextHigh,
+                style: const TextStyle(color: _setupTextHigh, fontSize: 13),
+                items: _currencies
+                    .map(
+                      (currency) => DropdownMenuItem<String>(
+                        value: currency,
                         child: Text(
-                          'Fuente: ${_exchangeSourceLabel(_exchangeRateSource)}',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          '${_checkoutCurrencyFlag(currency)}  ${_checkoutCurrencyTitle(currency)}',
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: _showRateHistorySheet,
-                        icon: const Icon(Icons.history_rounded, size: 18),
-                        label: const Text('Ver historial'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (marketRatesFreshnessText != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: providerHealth.color,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          marketRatesFreshnessText,
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (_exchangeRateSource == _exchangeSourceGoogle &&
-                      selectedProviderFallback) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          size: 16,
-                          color: Color(0xFFFBBF24),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            providerHealth.message == 'Usando respaldo'
-                                ? 'Google esta usando un valor recuperado por fallo de conexion o parseo.'
-                                : providerHealth.message,
-                            style: const TextStyle(
-                              color: Color(0xFFFBBF24),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-                if (isExchangeRateEditable)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _exchangeRateController,
-                          enabled: true,
-                          enableInteractiveSelection: false,
-                          onTap: _forceExchangeRateCursorAtEnd,
-                          textAlign: TextAlign.right,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: <TextInputFormatter>[
-                            _MoneyAmountInputFormatter(
-                              decimalDigits: _exchangeRateInputDecimalDigits(
-                                currentCurrency,
-                              ),
-                              maxIntegerDigits: 7,
-                            ),
-                          ],
-                          style: const TextStyle(color: _setupTextHigh),
-                          decoration: InputDecoration(
-                            labelText: 'Tasa manual',
-                            prefixText: '1 $baseCurrency = ',
-                            suffixText: ' $currentCurrency',
-                            hintText: _formatExchangeRateMasked(
-                              _defaultExchangeRateFor(currentCurrency),
-                            ),
-                            filled: true,
-                            fillColor: const Color(0xFF120E25),
-                            labelStyle: const TextStyle(color: _setupTextLow),
-                            hintStyle: const TextStyle(color: _setupTextLow),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF3B2F63),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF3B2F63),
-                              ),
-                            ),
-                          ),
-                          onChanged: (_) {
-                            _exchangeRateManuallyEdited = true;
-                            _exchangeRateByCurrency[currentCurrency] =
-                                _exchangeRateController.text.trim();
-                            unawaited(_saveDraft());
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                if (_exchangeRateMessage != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    _exchangeRateMessage!,
-                    style: TextStyle(
-                      color: _exchangeRateIsError
-                          ? const Color(0xFFFFC7D8)
-                          : const Color(0xFFD3E8FF),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        if (hasPrimary) ...[
-          const SizedBox(height: 18),
-          Text(
-            'Metodos de pago - $currentCurrency',
-            style: GoogleFonts.poppins(
-              color: _setupTextHigh,
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Usa Efectivo o Pagos digitales. En Pagos digitales puedes crear cuentas para bancos y procesadores (Binance, Zinli, Zelle, pago movil, etc.).',
-            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _paymentMethods.map((method) {
-              final selected = currentPayments.contains(method);
-              return FilterChip(
-                avatar: Icon(_paymentMethodIcon(method), size: 18),
-                label: Text(_paymentMethodLabel(method)),
-                selected: selected,
-                onSelected: (active) async {
-                  if (!active && selected && currentPayments.length == 1) {
-                    if (!mounted) {
-                      return;
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Selecciona al menos un metodo de pago.'),
-                      ),
-                    );
-                    return;
-                  }
+                    )
+                    .toList(),
+                onChanged: (currency) {
+                  if (currency == null) return;
                   setState(() {
-                    if (active) {
-                      currentPayments.add(method);
-                      currentDrafts.putIfAbsent(
-                        method,
-                        () => method == 'Efectivo'
-                            ? const _PaymentMethodDraft(
-                                method: 'Efectivo',
-                                extraDetails: _defaultCashNote,
+                    _syncActiveCurrencyDataFromController();
+                    _primaryCheckoutCurrency = currency;
+                    _selectedCurrencies.add(currency);
+                    final remainingSecondaries = _selectedCurrencies
+                        .where((code) => code != currency)
+                        .toList();
+                    _activeCheckoutCurrency = remainingSecondaries.isNotEmpty
+                        ? (remainingSecondaries.contains(
+                                _activeCheckoutCurrency,
                               )
-                            : _PaymentMethodDraft(method: method),
-                      );
-                    } else {
-                      currentPayments.remove(method);
-                    }
+                              ? _activeCheckoutCurrency
+                              : remainingSecondaries.first)
+                        : currency;
+                    _ensureCurrencyConfig(_activeCheckoutCurrency);
+                    _exchangeRateManuallyEdited = false;
+                    _exchangeRateMessage = null;
+                    _exchangeRateIsError = false;
+                    _loadActiveCurrencyIntoController();
                   });
                   unawaited(_saveDraft());
-
-                  if (active && method == 'Transferencia') {
-                    final transferDraft =
-                        currentDrafts['Transferencia'] ??
-                        const _PaymentMethodDraft(method: 'Transferencia');
-                    if (transferDraft.transferAccounts.isEmpty) {
-                      await _openPaymentMethodEditor('Transferencia');
-                    }
-                  }
                 },
-                selectedColor: const Color(0xFF2D2152),
-                backgroundColor: const Color(0xFF1A1432),
-                labelStyle: const TextStyle(
-                  color: _setupTextHigh,
-                  fontSize: 14,
-                ),
-                side: BorderSide(
-                  color: selected ? _palette.primary : const Color(0xFF3B2F63),
-                ),
-                showCheckmark: false,
-              );
-            }).toList(),
+              ),
+            ),
+          ),
+          child: !hasPrimary
+              ? const Text(
+                  'Selecciona la moneda principal para continuar con la configuración de cobros.',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 12),
+                )
+              : null,
+        ),
+        if (hasPrimary) ...[
+          const SizedBox(height: 14),
+          _checkoutStepCard(
+            number: 2,
+            title: 'Monedas que también aceptas',
+            subtitle:
+                'Selecciona las monedas en las que recibirás pagos. ${_configuredCurrenciesCount()}/${_selectedCurrencies.length} monedas configuradas.',
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxW = constraints.maxWidth;
+                final cardWidth = maxW < 360
+                    ? maxW
+                    : maxW < 720
+                    ? (maxW - 10) / 2
+                    : 200.0;
+                return Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: secondaryCurrencies.map((currency) {
+                    final selected = _selectedCurrencies.contains(currency);
+                    final isActive = _activeCheckoutCurrency == currency;
+                    return _checkoutSelectableCurrencyCard(
+                      currency: currency,
+                      selected: selected,
+                      isActive: isActive,
+                      width: cardWidth,
+                      onTap: () {
+                        setState(() {
+                          _syncActiveCurrencyDataFromController();
+                          if (!selected) {
+                            _selectedCurrencies.add(currency);
+                            _activeCheckoutCurrency = currency;
+                            _ensureCurrencyConfig(currency);
+                          } else if (!isActive) {
+                            _activeCheckoutCurrency = currency;
+                          } else {
+                            _selectedCurrencies.remove(currency);
+                            _selectedPaymentsByCurrency.remove(currency);
+                            _paymentMethodDraftsByCurrency.remove(currency);
+                            _exchangeRateByCurrency.remove(currency);
+                            _adjustmentByCurrency.remove(currency);
+                            _adjustmentIssueByCurrency.remove(currency);
+                            _adjustmentDirtyCurrencies.remove(currency);
+                            final remaining = _selectedCurrencies
+                                .where((code) => code != baseCurrency)
+                                .toList();
+                            _activeCheckoutCurrency = remaining.isNotEmpty
+                                ? remaining.first
+                                : baseCurrency;
+                          }
+                          _exchangeRateManuallyEdited = false;
+                          _exchangeRateMessage = null;
+                          _exchangeRateIsError = false;
+                          _loadActiveCurrencyIntoController();
+                        });
+                        unawaited(_saveDraft());
+                      },
+                    );
+                  }).toList(),
+                );
+              },
+            ),
           ),
           const SizedBox(height: 14),
-          ...currentPayments.map((method) {
-            final draft =
-                currentDrafts[method] ?? _PaymentMethodDraft(method: method);
-            final details = _paymentSummaryLines(method, draft);
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+          if (!hasSecondary)
+            _checkoutStepCard(
+              number: 3,
+              title: 'Configurar tasa de cambio',
+              subtitle:
+                  'Marca otra moneda arriba para crear el par con $baseCurrency y editar su tasa.',
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF17122E),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: draft.hasAnyDetail
-                        ? _palette.primary.withValues(alpha: 0.5)
-                        : const Color(0xFF5A3351),
+                  color: const Color(0xFF120E25),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: const Text(
+                  'Ejemplo: si tus precios están en USD y cobras en bolívares, marca Bolívares (VES). Entonces verás la tasa aquí.',
+                  style: TextStyle(
+                    color: Color(0xFFCBD5E1),
+                    fontSize: 12.5,
+                    height: 1.4,
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(_paymentMethodIcon(method), color: _setupTextHigh),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _paymentMethodLabel(method),
-                            style: GoogleFonts.poppins(
-                              color: _setupTextHigh,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: draft.hasAnyDetail
-                                ? const Color(0xFF153222)
-                                : const Color(0xFF32151D),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            draft.hasAnyDetail ? 'Completo' : 'Pendiente',
-                            style: TextStyle(
-                              color: draft.hasAnyDetail
-                                  ? const Color(0xFFA7F3D0)
-                                  : const Color(0xFFFFD1DC),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        // Removing requires a second method already active,
-                        // otherwise the merchant would be left with none.
-                        if (currentPayments.length > 1) ...[
-                          const SizedBox(width: 6),
-                          IconButton(
-                            onPressed: () {
-                              setState(() {
-                                currentPayments.remove(method);
-                              });
-                              unawaited(_saveDraft());
-                            },
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                            color: _setupTextMedium,
-                            tooltip: 'Quitar ${_paymentMethodLabel(method)}',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 32,
-                              minHeight: 32,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    if (details.isEmpty)
-                      const Text(
-                        'Aun no has agregado datos para este metodo.',
-                        style: TextStyle(color: _setupTextMedium, fontSize: 12),
-                      )
-                    else
-                      ...details
-                          .take(4)
-                          .map(
-                            (line) => Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Text(
-                                line,
-                                style: const TextStyle(
-                                  color: _setupTextMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: _setupTextHigh,
-                          side: const BorderSide(color: Color(0xFF6B5A9A)),
-                        ),
-                        onPressed: () {
-                          if (method == 'Transferencia' &&
-                              draft.transferAccounts.length >=
-                                  _maxTransferAccountsPerCurrency) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          unawaited(_openPaymentMethodEditor(method));
-                        },
-                        icon: const Icon(Icons.edit_rounded, size: 16),
-                        label: Text(
-                          method == 'Transferencia'
-                              ? 'Agregar cuenta digital'
-                              : details.isEmpty
-                              ? 'Agregar datos'
-                              : 'Editar datos',
-                        ),
+              ),
+            )
+          else
+            _checkoutStepCard(
+              number: 3,
+              title: 'Configurar tasa de cambio',
+              subtitle: _usesInverseManualRateUi(baseCurrency, currentCurrency)
+                  ? 'Editando ${_checkoutCurrencyTitle(currentCurrency)}. Indica cuántos $baseCurrency equivalen a 1 $currentCurrency.'
+                  : 'Editando ${_checkoutCurrencyTitle(currentCurrency)}. Define cuánto vale 1 $baseCurrency en $currentCurrency.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _checkoutEditingCurrencyTabs(
+                    currencies: editingCurrencies,
+                    activeCurrency: currentCurrency,
+                    onSelected: _switchCheckoutEditingCurrency,
+                  ),
+                  const SizedBox(height: 14),
+                  if (!requiresRate)
+                    const Text(
+                      'Selecciona una moneda aceptada en las pestañas para configurar su tasa.',
+                      style: TextStyle(
+                        color: _setupTextMedium,
+                        fontSize: 12.5,
                       ),
-                    ),
-                    if (method == 'Transferencia' &&
-                        draft.transferAccounts.isEmpty) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF120E25),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF3B2F63)),
-                        ),
-                        child: Column(
+                    )
+                  else
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final wide = constraints.maxWidth >= 760;
+                        final controls = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: rateControls,
+                        );
+                        final inverseUi = _usesInverseManualRateUi(
+                          baseCurrency,
+                          currentCurrency,
+                        );
+                        final summaryRate = inverseUi && currentDisplayedRate > 0
+                            ? 1 / currentDisplayedRate
+                            : currentDisplayedRate;
+                        final summary = _checkoutRateSummaryCard(
+                          rate: summaryRate,
+                          baseCurrency: inverseUi
+                              ? currentCurrency
+                              : baseCurrency,
+                          quoteCurrency: inverseUi
+                              ? baseCurrency
+                              : currentCurrency,
+                          freshnessText:
+                              isAutoMode ? marketRatesFreshnessText : null,
+                          healthColor: providerHealth.color,
+                          onHistory: _showRateHistorySheet,
+                        );
+                        if (!wide) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              controls,
+                              const SizedBox(height: 14),
+                              summary,
+                            ],
+                          );
+                        }
+                        return Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Aun no tienes cuentas de pago digital.',
-                              style: TextStyle(
-                                color: _setupTextHigh,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Crea la primera cuenta y agrega solo los campos que necesites.',
-                              style: TextStyle(
-                                color: _setupTextMedium,
-                                fontSize: 12,
-                              ),
+                            Expanded(flex: 7, child: controls),
+                            const SizedBox(width: 16),
+                            Expanded(flex: 5, child: summary),
+                          ],
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 14),
+          _checkoutStepCard(
+            number: 4,
+            title: 'Métodos de pago en $paymentCurrency',
+            subtitle:
+                'Configura cómo recibes pagos en ${_currencyLabel(paymentCurrency)}.',
+            child: Column(
+              children: [
+                if (paymentCurrencies.length > 1) ...[
+                  _checkoutEditingCurrencyTabs(
+                    currencies: paymentCurrencies,
+                    activeCurrency: paymentCurrency,
+                    onSelected: _switchPaymentEditingCurrency,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                ..._paymentMethods.map((method) {
+                final selected = currentPayments.contains(method);
+                final draft =
+                    currentDrafts[method] ??
+                    _PaymentMethodDraft(method: method);
+                final details = selected
+                    ? _paymentSummaryLines(method, draft)
+                    : const <String>[];
+                final configured = selected && draft.hasAnyDetail;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF120E25),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selected
+                            ? (configured
+                                  ? _palette.primary.withValues(alpha: 0.45)
+                                  : const Color(0xFF5A3351))
+                            : const Color(0xFF3B2F63),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 36,
+                                  height: 36,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: method == 'Efectivo'
+                                        ? const Color(0xFF153222)
+                                        : const Color(0xFF1A2740),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    _paymentMethodIcon(method),
+                                    color: method == 'Efectivo'
+                                        ? const Color(0xFFA7F3D0)
+                                        : const Color(0xFF7DD3FC),
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _paymentMethodLabel(method),
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(
+                                      color: _setupTextHigh,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                if (selected && currentPayments.length > 1)
+                                  IconButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        currentPayments.remove(method);
+                                      });
+                                      unawaited(_saveDraft());
+                                    },
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                    ),
+                                    color: _setupTextMedium,
+                                    tooltip:
+                                        'Quitar ${_paymentMethodLabel(method)}',
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 32,
+                                      minHeight: 32,
+                                    ),
+                                  ),
+                              ],
                             ),
                             const SizedBox(height: 10),
-                            FilledButton.icon(
-                              onPressed: () {
-                                if (draft.transferAccounts.length >=
-                                    _maxTransferAccountsPerCurrency) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
-                                      ),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                unawaited(
-                                  _openPaymentMethodEditor('Transferencia'),
-                                );
-                              },
-                              icon: const Icon(Icons.add_rounded, size: 16),
-                              label: const Text('Crear primera cuenta'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (method == 'Transferencia' &&
-                        draft.transferAccounts.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      ...List.generate(draft.transferAccounts.length, (index) {
-                        final account = draft.transferAccounts[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF120E25),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: const Color(0xFF3B2F63),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        account.name.trim().isEmpty
-                                            ? 'Cuenta ${index + 1}'
-                                            : account.name.trim(),
-                                        style: const TextStyle(
-                                          color: _setupTextHigh,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
+                                if (selected)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: configured
+                                          ? const Color(0xFF153222)
+                                          : const Color(0xFF3A2A12),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          configured
+                                              ? Icons.check_circle_rounded
+                                              : Icons.schedule_rounded,
+                                          size: 13,
+                                          color: configured
+                                              ? const Color(0xFFA7F3D0)
+                                              : const Color(0xFFFBBF24),
                                         ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          final updated = draft.transferAccounts
-                                              .toList();
-                                          updated.removeAt(index);
-                                          _paymentMethodDraftsByCurrency[currentCurrency]!['Transferencia'] =
-                                              draft.copyWith(
-                                                transferAccounts: updated,
-                                              );
-                                        });
-                                        unawaited(_saveDraft());
-                                      },
-                                      icon: const Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 18,
-                                        color: Color(0xFFFFD1DC),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (account.fields.isEmpty)
-                                  const Text(
-                                    'Sin campos configurados',
-                                    style: TextStyle(
-                                      color: _setupTextMedium,
-                                      fontSize: 12,
-                                    ),
-                                  )
-                                else
-                                  ...account.fields
-                                      .take(3)
-                                      .map(
-                                        (field) => Padding(
-                                          padding: const EdgeInsets.only(
-                                            bottom: 2,
-                                          ),
-                                          child: Text(
-                                            '${field.label.trim().isEmpty ? _TransferFieldDraft.labelForType(field.type) : field.label}: ${field.value}',
-                                            style: const TextStyle(
-                                              color: _setupTextMedium,
-                                              fontSize: 12,
-                                            ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          configured
+                                              ? 'Configurado'
+                                              : 'Pendiente',
+                                          style: TextStyle(
+                                            color: configured
+                                                ? const Color(0xFFA7F3D0)
+                                                : const Color(0xFFFBBF24),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
                                           ),
                                         ),
-                                      ),
-                                const SizedBox(height: 6),
+                                      ],
+                                    ),
+                                  ),
                                 OutlinedButton.icon(
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: _setupTextHigh,
                                     side: const BorderSide(
                                       color: Color(0xFF6B5A9A),
                                     ),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  onPressed: () async {
+                                    if (!selected) {
+                                      setState(() {
+                                        currentPayments.add(method);
+                                        currentDrafts.putIfAbsent(
+                                          method,
+                                          () => method == 'Efectivo'
+                                              ? const _PaymentMethodDraft(
+                                                  method: 'Efectivo',
+                                                  extraDetails:
+                                                      _defaultCashNote,
+                                                )
+                                              : _PaymentMethodDraft(
+                                                  method: method,
+                                                ),
+                                        );
+                                      });
+                                      unawaited(_saveDraft());
+                                    }
+                                    if (method == 'Transferencia' &&
+                                        (currentDrafts['Transferencia']
+                                                    ?.transferAccounts
+                                                    .length ??
+                                                0) >=
+                                            _maxTransferAccountsPerCurrency) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    await _openPaymentMethodEditor(method);
+                                  },
+                                  icon: const Icon(
+                                    Icons.settings_rounded,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Configurar'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        if (selected) ...[
+                          if (details.isEmpty) ...[
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Aún no has agregado datos para este método.',
+                              style: TextStyle(
+                                color: _setupTextMedium,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 10),
+                            ...details.take(4).map(
+                              (line) => Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Text(
+                                  line,
+                                  style: const TextStyle(
+                                    color: _setupTextMedium,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (method == 'Transferencia' &&
+                              draft.transferAccounts.isEmpty) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF17122E),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFF3B2F63),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Aún no tienes cuentas de pago digital.',
+                                    style: TextStyle(
+                                      color: _setupTextHigh,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Crea la primera cuenta y agrega solo los campos que necesites.',
+                                    style: TextStyle(
+                                      color: _setupTextMedium,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  FilledButton.icon(
+                                    onPressed: () {
+                                      if (draft.transferAccounts.length >=
+                                          _maxTransferAccountsPerCurrency) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      unawaited(
+                                        _openPaymentMethodEditor(
+                                          'Transferencia',
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.add_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('Crear primera cuenta'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (method == 'Transferencia' &&
+                              draft.transferAccounts.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            ...List.generate(draft.transferAccounts.length, (
+                              index,
+                            ) {
+                              final account = draft.transferAccounts[index];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF17122E),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: const Color(0xFF3B2F63),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              account.name.trim().isEmpty
+                                                  ? 'Cuenta ${index + 1}'
+                                                  : account.name.trim(),
+                                              style: const TextStyle(
+                                                color: _setupTextHigh,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () {
+                                              setState(() {
+                                                final updated = draft
+                                                    .transferAccounts
+                                                    .toList();
+                                                updated.removeAt(index);
+                                                _paymentMethodDraftsByCurrency[currentCurrency]!['Transferencia'] =
+                                                    draft.copyWith(
+                                                      transferAccounts:
+                                                          updated,
+                                                    );
+                                              });
+                                              unawaited(_saveDraft());
+                                            },
+                                            icon: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 18,
+                                              color: Color(0xFFFFD1DC),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (account.fields.isEmpty)
+                                        const Text(
+                                          'Sin campos configurados',
+                                          style: TextStyle(
+                                            color: _setupTextMedium,
+                                            fontSize: 12,
+                                          ),
+                                        )
+                                      else
+                                        ...account.fields
+                                            .take(3)
+                                            .map(
+                                              (field) => Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 2,
+                                                ),
+                                                child: Text(
+                                                  '${field.label.trim().isEmpty ? _TransferFieldDraft.labelForType(field.type) : field.label}: ${field.value}',
+                                                  style: const TextStyle(
+                                                    color: _setupTextMedium,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                      const SizedBox(height: 6),
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: _setupTextHigh,
+                                          side: const BorderSide(
+                                            color: Color(0xFF6B5A9A),
+                                          ),
+                                        ),
+                                        onPressed: () {
+                                          unawaited(
+                                            _openPaymentMethodEditor(
+                                              'Transferencia',
+                                              transferIndex: index,
+                                            ),
+                                          );
+                                        },
+                                        icon: const Icon(
+                                          Icons.edit_rounded,
+                                          size: 15,
+                                        ),
+                                        label: const Text('Editar cuenta'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                            if (draft.transferAccounts.length <
+                                _maxTransferAccountsPerCurrency) ...[
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: _setupTextHigh,
+                                    side: const BorderSide(
+                                      color: Color(0xFFC4B5FD),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
                                   ),
                                   onPressed: () {
                                     unawaited(
                                       _openPaymentMethodEditor(
                                         'Transferencia',
-                                        transferIndex: index,
                                       ),
                                     );
                                   },
                                   icon: const Icon(
-                                    Icons.edit_rounded,
-                                    size: 15,
+                                    Icons.add_rounded,
+                                    size: 18,
                                   ),
-                                  label: const Text('Editar cuenta'),
+                                  label: Text(
+                                    draft.transferAccounts.length == 1
+                                        ? 'Añadir otro método digital'
+                                        : 'Añadir otra cuenta digital',
+                                  ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          }),
+                              ),
+                            ],
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              ],
+            ),
+          ),
         ],
       ],
     );
@@ -10537,13 +11226,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ),
           ),
           invalidNumberMessage: 'Numero invalido para ese pais.',
+          disableLengthCheck: true,
           autovalidateMode: AutovalidateMode.onUserInteraction,
           inputFormatters: <TextInputFormatter>[
             FilteringTextInputFormatter.digitsOnly,
+            NormalizeNationalPhoneFormatter(
+              iso: _selectedPhoneCountryIso.trim().isEmpty
+                  ? 'VE'
+                  : _selectedPhoneCountryIso,
+            ),
           ],
           decoration: InputDecoration(
             labelText: 'Numero de telefono / WhatsApp',
-            hintText: 'Ingresa el numero',
+            hintText: 'Ej. 4141234567',
             filled: true,
             fillColor: const Color(0xFF120E25),
             labelStyle: const TextStyle(color: _setupTextLow),
@@ -10563,21 +11258,40 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
           onCountryChanged: (country) {
             setState(() => _selectedPhoneCountryIso = country.code);
+            _syncWhatsappControllerNational(
+              country.code,
+              _whatsappController.text,
+            );
             unawaited(_saveDraft());
           },
           onChanged: (phone) {
+            _syncWhatsappControllerNational(
+              phone.countryISOCode,
+              phone.number,
+            );
             setState(() {
               _selectedPhoneCountryIso = phone.countryISOCode;
-              if (_whatsappE164.isEmpty && _receiveOrdersOnWhatsapp) {
+              if (_whatsappE164.isEmpty) {
                 _receiveOrdersOnWhatsapp = false;
+                _catalogModeEnabled = true;
               }
             });
             unawaited(_saveDraft());
           },
           validator: (phone) {
-            final number = phone?.number.trim() ?? '';
+            final number = normalizeNationalPhoneDigits(
+              phone?.number ?? '',
+              iso: phone?.countryISOCode ?? _selectedPhoneCountryIso,
+            );
             if (_receiveOrdersOnWhatsapp && number.isEmpty) {
               return 'Ingresa un numero de WhatsApp.';
+            }
+            final iso = (phone?.countryISOCode ?? _selectedPhoneCountryIso)
+                .toUpperCase();
+            if (number.isNotEmpty &&
+                iso == 'VE' &&
+                !isPlausibleVeNational(number)) {
+              return 'Numero invalido para ese pais.';
             }
             return null;
           },
@@ -10614,7 +11328,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             setState(() {
               _isVirtualBusiness = value;
               if (value) {
-                _allowDelivery = false;
+                _addressController.clear();
+                _locationNoteController.clear();
+                _businessLatitude = null;
+                _businessLongitude = null;
               }
             });
             unawaited(_saveDraft());
@@ -10624,12 +11341,114 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Negocio virtual'),
+          title: const Text('No tengo una dirección'),
           subtitle: const Text(
-            'Sin ubicacion fisica publica. Ideal para ventas solo por WhatsApp o redes.',
+            'No se muestra ubicación física pública. Puedes vender y ofrecer delivery igual.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
+        if (_isVirtualBusiness) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '¿En qué estado(s) operas?',
+                  style: TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Se usa en elmenuxfa.com para mostrarte en la región correcta y para saber dónde puedes hacer delivery.',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _operatingStateSlugs
+                            ..clear()
+                            ..addAll(
+                              venezuelaStates.map((state) => state.slug),
+                            );
+                        });
+                        unawaited(_saveDraft());
+                      },
+                      child: const Text('Todos'),
+                    ),
+                    TextButton(
+                      onPressed: _operatingStateSlugs.isEmpty
+                          ? null
+                          : () {
+                              setState(_operatingStateSlugs.clear);
+                              unawaited(_saveDraft());
+                            },
+                      child: const Text('Ninguno'),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_operatingStateSlugs.length}/${venezuelaStates.length}',
+                      style: const TextStyle(
+                        color: _setupTextLow,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final state in venezuelaStates)
+                      FilterChip(
+                        label: Text(state.name),
+                        selected: _operatingStateSlugs.contains(state.slug),
+                        onSelected: (_) => _toggleOperatingState(state.slug),
+                        selectedColor: _palette.primary.withValues(alpha: 0.35),
+                        checkmarkColor: _setupTextHigh,
+                        labelStyle: TextStyle(
+                          color: _operatingStateSlugs.contains(state.slug)
+                              ? _setupTextHigh
+                              : _setupTextMedium,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        side: BorderSide(
+                          color: _operatingStateSlugs.contains(state.slug)
+                              ? _palette.primary
+                              : const Color(0xFF3B2F63),
+                        ),
+                        backgroundColor: const Color(0xFF1A1430),
+                        showCheckmark: true,
+                      ),
+                  ],
+                ),
+                if (_operatingStateSlugs.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Elige al menos un estado para continuar.',
+                    style: TextStyle(color: Color(0xFFFFB4A8), fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
         if (!_isVirtualBusiness) ...[
           const SizedBox(height: 10),
           Container(
@@ -10729,30 +11548,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
           value: _allowDelivery,
-          onChanged: _isVirtualBusiness
-              ? null
-              : (value) {
-                  setState(() => _allowDelivery = value);
-                  unawaited(_saveDraft());
-                },
+          onChanged: (value) {
+            setState(() => _allowDelivery = value);
+            unawaited(_saveDraft());
+          },
           activeThumbColor: _palette.primary,
           activeTrackColor: _palette.primary.withValues(alpha: 0.45),
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: Text(
+          title: const Text(
             'Permitir delivery',
             style: TextStyle(
-              color: _isVirtualBusiness ? _setupTextMedium : _setupTextHigh,
+              color: _setupTextHigh,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),
           ),
-          subtitle: Text(
-            _isVirtualBusiness
-                ? 'No disponible para negocios virtuales sin ubicacion fisica.'
-                : 'Activa entregas a domicilio para tus clientes.',
-            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          subtitle: const Text(
+            'Activa entregas a domicilio para tus clientes.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
         const SizedBox(height: 8),
@@ -10784,12 +11599,45 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             style: const TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
-        if (_publicDirectoryUiEnabled) ...[
-          const SizedBox(height: 8),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _effectiveCatalogModeEnabled,
+          onChanged: _whatsappE164.isEmpty
+              ? null
+              : (value) {
+                  setState(() {
+                    _catalogModeEnabled = value;
+                    if (value) {
+                      _showPaymentMethodsOnHome = true;
+                    }
+                  });
+                  unawaited(_saveDraft());
+                },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(
+            'Solo catalogo',
+            style: TextStyle(
+              color: _setupTextHigh,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            _whatsappE164.isEmpty
+                ? 'Activo porque no hay WhatsApp: el cliente ve productos, suma el total y metodos de pago, sin enviar pedido.'
+                : 'El cliente ve los productos, los suma y mira el total y los metodos de pago, sin enviar el mensaje de WhatsApp.',
+            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        if (_effectiveCatalogModeEnabled) ...[
           SwitchListTile.adaptive(
-            value: _showOnPublicDirectory,
+            value: _showPaymentMethodsOnHome,
             onChanged: (value) {
-              setState(() => _showOnPublicDirectory = value);
+              setState(() => _showPaymentMethodsOnHome = value);
               unawaited(_saveDraft());
             },
             activeThumbColor: _palette.primary,
@@ -10797,12 +11645,107 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             inactiveThumbColor: const Color(0xFFE7E0F9),
             inactiveTrackColor: const Color(0xFF3A305A),
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: const Text('Mostrar en elmenuxfa.com'),
+            title: const Text(
+              'Ver metodos de pago',
+              style: TextStyle(
+                color: _setupTextHigh,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             subtitle: const Text(
-              'Aparece en el directorio publico donde los clientes descubren negocios. Tu menu propio sigue en tu enlace.',
+              'Se muestran en la pantalla de inicio del catalogo. Por defecto queda activado.',
               style: TextStyle(color: _setupTextMedium, fontSize: 12),
             ),
           ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'QR / enlace solo catalogo',
+                  style: TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Usa este enlace en el QR de mesa. Debe incluir ?catalogo=1: ahi solo funciona el catalogo. Sin el parametro, el menu normal no muestra "Ver catalogo" y sigue permitiendo pedir por WhatsApp.',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 12, height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                SelectableText(
+                  _publicCatalogMenuUrl,
+                  style: const TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _copyPublicCatalogMenuUrl,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _setupTextHigh,
+                      side: const BorderSide(color: Color(0xFF6B5A9A)),
+                    ),
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: const Text('Copiar enlace con parametro'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (_publicDirectoryUiEnabled) ...[
+          const SizedBox(height: 8),
+          SwitchListTile.adaptive(
+            value: _showOnPublicDirectory,
+            onChanged: (value) {
+              setState(() {
+                _showOnPublicDirectory = value;
+              });
+              unawaited(_saveDraft());
+            },
+            activeThumbColor: _palette.primary,
+            activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+            inactiveThumbColor: const Color(0xFFE7E0F9),
+            inactiveTrackColor: const Color(0xFF3A305A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: const Text('Mostrar en elmenuxfa.com/clientes'),
+            subtitle: const Text(
+              'Aparece en el directorio donde los clientes descubren negocios cerca. Tu menu propio sigue en tu enlace.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+          ),
+          if (_directoryPromoted)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
+              child: Text(
+                'Tu negocio esta marcado como sitio promocionado por el equipo ElMenuxFA.',
+                style: TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
+              child: Text(
+                'La promocion en el directorio se gestiona con el equipo ElMenuxFA (no se activa desde aqui).',
+                style: TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+            ),
         ],
       ],
     );
@@ -11364,6 +12307,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
     required this.category,
     required this.onNameChanged,
     required this.onPickLogo,
+    this.logoRequiredMissing = false,
     required this.selectedLogo,
     required this.selectedLogoUrl,
   });
@@ -11373,6 +12317,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
   final String category;
   final ValueChanged<String> onNameChanged;
   final VoidCallback onPickLogo;
+  final bool logoRequiredMissing;
   final XFile? selectedLogo;
   final String selectedLogoUrl;
 
@@ -11383,7 +12328,11 @@ class _MenuPreviewNavbar extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF17122E),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF3B2F63)),
+        border: Border.all(
+          color: logoRequiredMissing
+              ? const Color(0xFFF87171)
+              : const Color(0xFF3B2F63),
+        ),
       ),
       child: Column(
         children: [
@@ -11395,6 +12344,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
                 child: _LogoPreview(
                   file: selectedLogo,
                   logoUrl: selectedLogoUrl,
+                  emphasizeEmpty: logoRequiredMissing,
                 ),
               ),
               const SizedBox(width: 10),
@@ -11430,11 +12380,15 @@ class _MenuPreviewNavbar extends StatelessWidget {
               ),
               IconButton(
                 onPressed: onPickLogo,
-                icon: const Icon(
-                  Icons.photo_camera_back_rounded,
-                  color: Color(0xFFD8B4FE),
+                icon: Icon(
+                  logoRequiredMissing
+                      ? Icons.add_a_photo_rounded
+                      : Icons.photo_camera_back_rounded,
+                  color: logoRequiredMissing
+                      ? const Color(0xFFFCA5A5)
+                      : const Color(0xFFD8B4FE),
                 ),
-                tooltip: 'Cambiar logo',
+                tooltip: logoRequiredMissing ? 'Subir logo (obligatorio)' : 'Cambiar logo',
               ),
             ],
           ),
@@ -11442,9 +12396,13 @@ class _MenuPreviewNavbar extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              category,
-              style: const TextStyle(
-                color: _setupTextLow,
+              logoRequiredMissing
+                  ? 'Logo obligatorio · toca el círculo para subir tu marca'
+                  : category,
+              style: TextStyle(
+                color: logoRequiredMissing
+                    ? const Color(0xFFFCA5A5)
+                    : _setupTextLow,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -11548,11 +12506,15 @@ class _StepPills extends StatelessWidget {
 }
 
 class _LogoPreview extends StatelessWidget {
-  const _LogoPreview({required this.file, required this.logoUrl});
+  const _LogoPreview({
+    required this.file,
+    required this.logoUrl,
+    this.emphasizeEmpty = false,
+  });
 
   final XFile? file;
   final String logoUrl;
-  static const String _defaultBrandLogoAsset = 'assets/branding/isotipo.png';
+  final bool emphasizeEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -11631,24 +12593,25 @@ class _LogoPreview extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: const Color(0xFF241B42),
-        border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
+        border: Border.all(
+          color: emphasizeEmpty
+              ? const Color(0xFFF87171)
+              : const Color(0xFFD8B4FE),
+          width: 1.5,
+        ),
       ),
       child: ClipOval(
-        child: Image.asset(
-          _defaultBrandLogoAsset,
-          width: 56,
-          height: 56,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) {
-            return const Icon(
-              Icons.storefront_rounded,
-              color: Color(0xFFD8B4FE),
-            );
-          },
+        child: Icon(
+          Icons.add_a_photo_rounded,
+          color: emphasizeEmpty
+              ? const Color(0xFFFCA5A5)
+              : const Color(0xFFD8B4FE),
+          size: 22,
         ),
       ),
     );
   }
+
 }
 
 class _MenuThemeModeSelector extends StatelessWidget {
@@ -12356,8 +13319,8 @@ class _TransferFieldDraft {
 
   static _TransferFieldDraft defaultField() {
     return const _TransferFieldDraft(
-      type: 'numero_cuenta',
-      label: 'Numero de cuenta',
+      type: 'texto',
+      label: '',
       value: '',
     );
   }

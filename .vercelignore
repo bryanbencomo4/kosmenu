@@ -7,3 +7,6 @@ site/node_modules/
 site/.next/
 site/.vercel/
 site/.env.local
+site/scripts/_sushi_imgs/
+site/scripts/_flavor_imgs/
+site/scripts/_sushi_image_catalog.json

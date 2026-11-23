@@ -39,8 +39,9 @@ function buildSecurityHeaders({ allowAppFrame = false } = {}) {
     },
     {
       key: 'Permissions-Policy',
+      // camera=(self) — payment proof capture; microphone=(self) — chatbot voice notes.
       value:
-        'accelerometer=(), autoplay=(), camera=(), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
+        'accelerometer=(), autoplay=(), camera=(self), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()',
     },
     {
       key: 'Content-Security-Policy',

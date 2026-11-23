@@ -11,6 +11,7 @@ class PedidoModel {
   final String? estado;
   final double? total;
   final DateTime? createdAt;
+  final DateTime? archivedAt;
   final bool? creadoPorIa;
   final double? confianzaIa;
   final String? metodoPago;
@@ -27,13 +28,53 @@ class PedidoModel {
   final bool hasParseError;
   final String? parseErrorMessage;
 
-  /// Opaque storage ref (`storage://comprobantes/...`) or legacy URL from detalles.
-  String? get comprobanteRef {
-    final raw = detalles['comprobante_url']?.toString().trim() ?? '';
-    return raw.isEmpty ? null : raw;
+  bool get isArchived => archivedAt != null;
+
+  bool get isDeliveryOrder {
+    final mode = (deliveryMode ?? '').trim().toLowerCase();
+    return mode == 'delivery' || mode == 'envio' || mode == 'envío';
   }
 
-  bool get hasComprobante => comprobanteRef != null;
+  /// Opaque storage ref (`storage://comprobantes/...`) or legacy URL from detalles.
+  String? get comprobanteRef {
+    final refs = comprobanteRefs;
+    return refs.isEmpty ? null : refs.first;
+  }
+
+  /// All payment-proof storage refs (`comprobantes[]`, else `comprobante_url`).
+  List<String> get comprobanteRefs {
+    final out = <String>[];
+    final seen = <String>{};
+    void push(Object? value) {
+      final raw = value?.toString().trim() ?? '';
+      if (raw.isEmpty || seen.contains(raw)) return;
+      seen.add(raw);
+      out.add(raw);
+    }
+
+    final list = detalles['comprobantes'];
+    if (list is List) {
+      for (final item in list) {
+        push(item);
+      }
+    }
+    if (out.isEmpty) {
+      push(detalles['comprobante_url']);
+    }
+    return out;
+  }
+
+  /// Public WhatsApp-style proof page (`/p/{code}`), when stored on the order.
+  String? get comprobantePublicUrl {
+    final raw = detalles['comprobante_public_url']?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) return null;
+    if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+    return raw;
+  }
+
+  bool get hasComprobante => comprobanteRefs.isNotEmpty;
 
   String get managementMode => detalles['management_mode'] == 'whatsapp_manual'
       ? 'whatsapp_manual'
@@ -56,6 +97,9 @@ class PedidoModel {
 
   double? get checkoutDeliverySnapshot =>
       _toDoubleOrNull(detalles['costo_delivery_moneda_checkout']);
+
+  double? get checkoutPackagingSnapshot =>
+      _toDoubleOrNull(detalles['recargo_delivery_productos_moneda_checkout']);
 
   double? get exchangeRateSnapshot =>
       _toDoubleOrNull(detalles['tasa_cambio_snapshot']);
@@ -92,6 +136,37 @@ class PedidoModel {
     return deliveryCost;
   }
 
+  double packagingForDisplay(String currency) {
+    final checkout = checkoutCurrencySnapshot;
+    final checkoutPackaging = checkoutPackagingSnapshot;
+    if (checkout != null &&
+        checkoutPackaging != null &&
+        currency.trim().toUpperCase() == checkout) {
+      return checkoutPackaging;
+    }
+    return _toDoubleOrNull(detalles['recargo_delivery_productos']) ?? 0;
+  }
+
+  String packagingLabelForDisplay() {
+    final amount = packagingForDisplay(currencyForDisplay());
+    if (amount <= 0) return '';
+    final raw = detalles['recargo_delivery_productos_detalle'];
+    if (raw is List) {
+      final labels = <String>{};
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        final label =
+            (entry['label'] ?? entry['surchargeLabel'] ?? '')
+                .toString()
+                .trim();
+        if (label.isNotEmpty) labels.add(label);
+      }
+      if (labels.length == 1) return labels.first;
+      if (labels.length > 1) return 'Recargos de delivery';
+    }
+    return 'Empaque / delivery';
+  }
+
   double subtotalForDisplay(String currency, double displayTotal) {
     final checkout = checkoutCurrencySnapshot;
     final checkoutSubtotal = checkoutSubtotalSnapshot;
@@ -102,7 +177,10 @@ class PedidoModel {
     }
     final stored = _toDoubleOrNull(detalles['subtotal']);
     if (stored != null && stored > 0) return stored;
-    final inferred = displayTotal - deliveryForDisplay(currency);
+    final inferred =
+        displayTotal -
+        deliveryForDisplay(currency) -
+        packagingForDisplay(currency);
     return inferred > 0 ? inferred : displayTotal;
   }
 
@@ -131,6 +209,7 @@ class PedidoModel {
     this.estado,
     this.total,
     this.createdAt,
+    this.archivedAt,
     this.creadoPorIa,
     this.confianzaIa,
     this.metodoPago,
@@ -148,7 +227,11 @@ class PedidoModel {
     this.parseErrorMessage,
   });
 
-  PedidoModel copyWithItems(List<PedidoItemModel> nextItems) {
+  PedidoModel copyWith({
+    DateTime? archivedAt,
+    bool clearArchivedAt = false,
+    List<PedidoItemModel>? items,
+  }) {
     return PedidoModel(
       id: id,
       comercioId: comercioId,
@@ -159,6 +242,7 @@ class PedidoModel {
       estado: estado,
       total: total,
       createdAt: createdAt,
+      archivedAt: clearArchivedAt ? null : (archivedAt ?? this.archivedAt),
       creadoPorIa: creadoPorIa,
       confianzaIa: confianzaIa,
       metodoPago: metodoPago,
@@ -170,11 +254,15 @@ class PedidoModel {
       deliveryLongitude: deliveryLongitude,
       orderNotes: orderNotes,
       costoDelivery: costoDelivery,
-      items: nextItems,
+      items: items ?? this.items,
       detalles: detalles,
       hasParseError: hasParseError,
       parseErrorMessage: parseErrorMessage,
     );
+  }
+
+  PedidoModel copyWithItems(List<PedidoItemModel> nextItems) {
+    return copyWith(items: nextItems);
   }
 
   factory PedidoModel.fromMap(Map<String, dynamic> map) {
@@ -243,6 +331,7 @@ class PedidoModel {
       createdAt: createdAtValue == null || createdAtValue.isEmpty
           ? null
           : DateTime.tryParse(createdAtValue),
+      archivedAt: _tryParseDate(map['archived_at']),
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
@@ -316,6 +405,7 @@ class PedidoModel {
           _toDoubleOrNull(raw['total']) ??
           _toDoubleOrNull(detallesMap['total']),
       createdAt: _tryParseDate(raw['created_at']),
+      archivedAt: _tryParseDate(raw['archived_at']),
       metodoPago: _resolveMetodoPago(detallesMap['metodo_pago']),
       detalles: detallesMap,
       hasParseError: true,
@@ -333,6 +423,7 @@ class PedidoModel {
       'estado': estado,
       'total': total,
       'created_at': createdAt?.toIso8601String(),
+      'archived_at': archivedAt?.toIso8601String(),
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
       'delivery_latitude': deliveryLatitude,

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import { extractComprobanteObjectPath } from '../../app/api/_lib/comprobante-path';
+import { planComprobanteView } from '../../app/api/_lib/comprobante-storage';
 import { resetRateLimitStoreForTests } from '../../app/api/_lib/rate-limit';
 
 describe('comprobante path validation', () => {
@@ -20,6 +21,18 @@ describe('comprobante path validation', () => {
     expect(extractComprobanteObjectPath('https://evil.example/x.jpg')).toBeNull();
     expect(extractComprobanteObjectPath('storage://comprobantes/')).toBeNull();
     expect(extractComprobanteObjectPath('')).toBeNull();
+  });
+});
+
+describe('comprobante view plan', () => {
+  it('previews images and keeps pdfs as the original file', () => {
+    const image = planComprobanteView('comercio/proof.jpg', 'ORD-1');
+    expect(image.preview).toEqual({ width: 800, quality: 66 });
+    expect(image.downloadName).toBe('comprobante-ORD-1.jpg');
+
+    const pdf = planComprobanteView('comercio/proof.pdf', 'pedido 99');
+    expect(pdf.preview).toBeNull();
+    expect(pdf.downloadName).toBe('comprobante-pedido99.pdf');
   });
 });
 
@@ -57,18 +70,6 @@ describe('GET /api/business/orders/[orderId]/comprobante', () => {
     vi.doMock('../../app/api/_lib/supabase-user-auth', () => ({
       getUserFromBearerRequest: async () => (userId ? { id: userId } : null),
     }));
-
-    const signedUrl = 'https://example.supabase.co/storage/v1/object/sign/comprobantes/x?token=test';
-    vi.doMock('../../app/api/_lib/comprobante-storage', async () => {
-      const actual = await vi.importActual<typeof import('../../app/api/_lib/comprobante-storage')>(
-        '../../app/api/_lib/comprobante-storage',
-      );
-      return {
-        ...actual,
-        createComprobanteSignedUrl: async () => signedUrl,
-        COMPROBANTE_SIGNED_URL_TTL_SEC: 300,
-      };
-    });
 
     const rows = [
       {
@@ -155,7 +156,7 @@ describe('GET /api/business/orders/[orderId]/comprobante', () => {
     expect(response.status).toBe(404);
   });
 
-  it('returns short-lived signed url for owner', async () => {
+  it('returns same-origin proxied media urls for owner', async () => {
     const { GET } = await loadRoute({ userId: 'user-owner' });
     const response = await GET(
       new Request('http://localhost/api/business/orders/comercio-a-1710000000000/comprobante', {
@@ -166,8 +167,32 @@ describe('GET /api/business/orders/[orderId]/comprobante', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.expiresInSec).toBeLessThanOrEqual(300);
-    expect(body.data.url).toContain('https://');
+    expect(body.data.url).toContain('/api/business/orders/');
+    expect(body.data.url).toContain('v=file');
+    expect(body.data.url).not.toContain('supabase.co');
+    expect(body.data.previewUrl).toContain('v=preview');
+    expect(body.data.downloadUrl).toContain('v=download');
+    expect(body.data.url).toContain('sig=');
     expect(JSON.stringify(body)).not.toContain(SERVICE_ROLE);
+  });
+
+  it('does not attach an image preview to pdf proofs', async () => {
+    const { GET } = await loadRoute({
+      userId: 'user-owner',
+      storageRef: 'storage://comprobantes/comercio-a/file-proof.pdf',
+    });
+    const response = await GET(
+      new Request('http://localhost/api/business/orders/comercio-a-1710000000000/comprobante', {
+        headers: { Authorization: 'Bearer test-token-abcdefghijklmnopqrstuvwxyz' },
+      }),
+      { params: Promise.resolve({ orderId: 'comercio-a-1710000000000' }) },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.previewUrl).toBeUndefined();
+    expect(body.data.url).toContain('v=file');
+    expect(body.data.downloadUrl).toContain('v=download');
+    expect(body.data.url).not.toContain('supabase.co');
   });
 
   it('allows the merchant app to preflight the signed-url request', async () => {

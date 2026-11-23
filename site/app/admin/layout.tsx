@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 
 import { adminSiteUrl, publicSiteUrl } from '../_lib/public-site-config';
 import { AdminShell } from './_components/AdminShell';
@@ -57,5 +58,15 @@ export default async function AdminLayout({
 
   const admin = await requireAdmin();
 
-  return <AdminShell admin={admin}>{children}</AdminShell>;
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-50 px-4 py-8 text-sm text-slate-500">
+          Cargando panel…
+        </div>
+      }
+    >
+      <AdminShell admin={admin}>{children}</AdminShell>
+    </Suspense>
+  );
 }

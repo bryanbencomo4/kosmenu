@@ -10,10 +10,14 @@ import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
+import 'package:kosmenu_app/services/product_image_variants_client.dart';
+import 'package:kosmenu_app/widgets/soft_media_image.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/media_crop_editor.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProductListScreen extends StatefulWidget {
@@ -349,6 +353,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
           );
     if (!mounted || photo == null) return;
 
+    final cropped = await const MediaImageCropService().cropForUpload(
+      context,
+      source: photo,
+      kind: MediaCropKind.product,
+    );
+    if (!mounted || cropped == null) return;
+
     final comercioId = SupabaseConfig.currentComercioId.trim();
     if (comercioId.isEmpty) {
       if (!mounted) return;
@@ -361,8 +372,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() => _updatingImageProductIds.add(product.id));
 
     try {
-      final bytes = ProductImageOptimizer.compressToJpeg(
-        await photo.readAsBytes(),
+      final bytes = await ProductImageOptimizer.compressToJpegAsync(
+        cropped.bytes,
       );
       final fileName =
           '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
@@ -376,11 +387,18 @@ class _ProductListScreenState extends State<ProductListScreen> {
               upsert: true,
               contentType: 'image/jpeg',
             ),
+          )
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () => throw TimeoutException(
+              'La subida de la imagen tardó demasiado. Reintenta.',
+            ),
           );
 
       final publicUrl = Supabase.instance.client.storage
           .from(_bucketName)
           .getPublicUrl(fileName);
+      const ProductImageVariantsClient().ensureInBackground(publicUrl);
 
       await Supabase.instance.client
           .from('productos')
@@ -1513,22 +1531,18 @@ class _ProductThumb extends StatelessWidget {
     );
 
     Widget networkWithFallback(String url, {String? backupUrl}) {
-      return Image.network(
-        url,
+      return SoftMediaImage(
+        imageUrl: url,
         width: 100,
         height: 100,
+        optimizeWidth: 240,
         fit: BoxFit.cover,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         errorBuilder: (context, error, stackTrace) {
           if (backupUrl != null &&
               backupUrl.trim().isNotEmpty &&
               backupUrl != url) {
-            return Image.network(
-              backupUrl,
-              width: 100,
-              height: 100,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => iconFallback(),
-            );
+            return networkWithFallback(backupUrl);
           }
           return iconFallback();
         },

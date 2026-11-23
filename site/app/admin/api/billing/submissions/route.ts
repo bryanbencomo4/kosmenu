@@ -5,6 +5,7 @@ import { canReviewPayments } from '../../../_lib/admin-billing';
 import { logAdminAction } from '../../../_lib/admin-audit';
 import { requireAdminPermission } from '../../../_lib/admin-auth';
 import { getAdminSupabaseClient } from '../../../_lib/admin-supabase';
+import { notifyBillingPaymentStatus } from '../../../../api/_lib/notify-billing-payment';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,6 +146,17 @@ export async function PATCH(request: Request) {
     newData: data,
     requestHeaders: request.headers,
   });
+
+  // Merchant status + receipt emails (best-effort; never fail the review).
+  try {
+    await notifyBillingPaymentStatus({
+      supabase,
+      submissionId: payload.id,
+      kind: payload.action === 'approve' ? 'approved' : 'rejected',
+    });
+  } catch (emailError) {
+    console.error('[admin submissions] billing email failed', emailError);
+  }
 
   return NextResponse.json({ ok: true, data });
 }

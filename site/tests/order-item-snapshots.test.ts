@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { buildOrderItemSnapshots, type SnapshotProductRow } from '../app/api/_lib/order-item-snapshots';
 import type { CartLineSelection } from '../app/_lib/menu-product-options';
+import { quoteDeliveryFee } from '../app/_lib/delivery-config';
 import { toPublicOrderTrackingResponse } from '../app/api/_lib/public-order';
 
 const hamburguesaRow: SnapshotProductRow = {
   id: 'p1',
+  comercio_id: 'tenant-a',
+  disponible: true,
   categoria_id: 'c1',
   nombre: 'Hamburguesa Clásica',
   imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
@@ -38,6 +41,17 @@ const hamburguesaRow: SnapshotProductRow = {
       },
     ],
   },
+};
+
+const simpleProduct: SnapshotProductRow = {
+  id: 'simple-1',
+  comercio_id: 'tenant-a',
+  disponible: true,
+  categoria_id: 'c1',
+  nombre: 'Agua 600ml',
+  imagen_url: null,
+  precio: 1.5,
+  opciones_menu: null,
 };
 
 function loaders(
@@ -81,7 +95,7 @@ describe('buildOrderItemSnapshots', () => {
     rows[1].nombre = 'Renamed'; rows[1].precio = 90000;
     expect(result.items[0].personalizacion?.componentes[1].nombre).toBe('Producto B');
     expect(result.items[0].precio).toBe(40000);
-    const publicOrder = toPublicOrderTrackingResponse({ id: 'qa', comercio_id: 'tenant', estado: 'pendiente', created_at: '2026-10-04T00:00:00Z', detalles: { items: result.items, moneda_base: 'COP', total: 80000 } }, 'QA', null);
+    const publicOrder = toPublicOrderTrackingResponse({ id: 'qa', estado: 'pendiente', created_at: '2026-10-04T00:00:00Z', detalles: { items: result.items, moneda_base: 'COP', total: 80000 } }, 'QA', null);
     expect(publicOrder.items[0].name).toBe('(Combinación) Producto A + Producto B · Sin: Ingrediente A, Ingrediente C (Producto A), Ingrediente B (Producto B)');
     expect(publicOrder.items[0].name).not.toContain('remove_a');
     expect(publicOrder.items[0].name).not.toContain('Renamed');
@@ -110,6 +124,7 @@ describe('buildOrderItemSnapshots', () => {
     expect(result.ok && result.items[0].precio).toBe(30000);
     expect((await customize(rows, { exclusionesIds: ['forged'] })).ok).toBe(false);
   });
+
   it('stores image/category snapshots for simple lines without options', async () => {
     const deps = loaders();
     const result = await buildOrderItemSnapshots({
@@ -132,16 +147,70 @@ describe('buildOrderItemSnapshots', () => {
     expect(deps.loadCategories).toHaveBeenCalledWith(['c1']);
   });
 
-  it('keeps legacy item payloads when the catalog product is unavailable', async () => {
+  it('rejects missing catalog products instead of trusting a client price', async () => {
     const result = await buildOrderItemSnapshots({
       items: [{ product_id: 'old-product', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
       selections: [null],
+      comercioId: 'tenant-a',
       ...loaders([]),
+    });
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'PRODUCT_UNAVAILABLE' });
+  });
+
+  it('reprices a simple product from the DB when the client forges the unit price', async () => {
+    const result = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [{ product_id: 'simple-1', nombre: 'FORGED NAME', cantidad: 3, precio: 99 }],
+      selections: [null],
+      ...loaders([simpleProduct]),
     });
     expect(result).toEqual({
       ok: true,
-      items: [{ product_id: 'old-product', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
+      items: [{
+        product_id: 'simple-1',
+        nombre: 'Agua 600ml',
+        cantidad: 3,
+        precio: 1.5,
+        imagen_url: null,
+        categoria_nombre: 'Hamburguesas',
+      }],
     });
+  });
+
+  it('accepts a simple product when the client sends the catalog price', async () => {
+    const result = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [{ product_id: 'simple-1', nombre: 'Agua 600ml', cantidad: 2, precio: 1.5 }],
+      selections: [null],
+      ...loaders([simpleProduct]),
+    });
+    expect(result.ok && result.items[0]).toMatchObject({
+      product_id: 'simple-1',
+      precio: 1.5,
+      cantidad: 2,
+    });
+  });
+
+  it('rejects a product that belongs to another restaurant', async () => {
+    const foreign: SnapshotProductRow = { ...simpleProduct, comercio_id: 'other-tenant' };
+    const result = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [{ product_id: 'simple-1', nombre: 'Agua 600ml', cantidad: 1, precio: 1.5 }],
+      selections: [null],
+      ...loaders([foreign]),
+    });
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'PRODUCT_UNAVAILABLE' });
+  });
+
+  it('rejects an unavailable product', async () => {
+    const soldOut: SnapshotProductRow = { ...simpleProduct, disponible: false };
+    const result = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [{ product_id: 'simple-1', nombre: 'Agua 600ml', cantidad: 1, precio: 1.5 }],
+      selections: [null],
+      ...loaders([soldOut]),
+    });
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'PRODUCT_UNAVAILABLE' });
   });
 
   it('freezes the options snapshot with DB names and prices', async () => {
@@ -157,7 +226,7 @@ describe('buildOrderItemSnapshots', () => {
       items: [
         {
           product_id: 'p1',
-          nombre: 'Hamburguesa Clásica · Grande · Tocineta',
+          nombre: 'Hamburguesa Clásica',
           cantidad: 1,
           precio: 8.5,
           imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
@@ -230,9 +299,11 @@ describe('buildOrderItemSnapshots', () => {
     expect(result).toMatchObject({ ok: false, status: 409, code: 'PRODUCT_UNAVAILABLE' });
   });
 
-  it('keeps legacy size lines at the price the customer saw', async () => {
+  it('keeps legacy size lines at the server size price when the client quote matches', async () => {
     const legacy: SnapshotProductRow = {
       id: 'p3',
+      comercio_id: 'tenant-a',
+      disponible: true,
       categoria_id: null,
       nombre: 'Campesina',
       precio: 4.8,
@@ -245,15 +316,37 @@ describe('buildOrderItemSnapshots', () => {
     });
     expect(result.ok && result.items[0]).toMatchObject({
       producto: 'Campesina',
+      precio: 12,
       precio_base: 12,
       selecciones: [{ grupo: 'Tamaño', opcion: 'Grande (G)', precio: 0 }],
       precio_final: 12,
     });
   });
 
+  it('rejects a forged legacy size price', async () => {
+    const legacy: SnapshotProductRow = {
+      id: 'p3',
+      comercio_id: 'tenant-a',
+      disponible: true,
+      categoria_id: null,
+      nombre: 'Campesina',
+      precio: 4.8,
+      opciones_menu: { tamanos: [{ id: 'g', label: 'Grande (G)', precio: 12 }] },
+    };
+    const result = await buildOrderItemSnapshots({
+      items: [{ product_id: 'p3', nombre: 'Campesina · Grande (G)', cantidad: 1, precio: 1 }],
+      selections: [{ tamanoId: 'g', tamanoLabel: 'Grande (G)' }],
+      comercioId: 'tenant-a',
+      ...loaders([legacy]),
+    });
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'PRICE_CHANGED' });
+  });
+
   it('freezes the resolved dependent extra, not the rule definition', async () => {
     const row: SnapshotProductRow = {
       id: 'p_dep',
+      comercio_id: 'tenant-a',
+      disponible: true,
       categoria_id: null,
       nombre: 'Campesina',
       precio: 0,
@@ -301,6 +394,51 @@ describe('buildOrderItemSnapshots', () => {
         { grupo: 'Extras', opcion: 'Extra queso', precio: 5000 },
       ],
       precio_final: 26500,
+    });
+  });
+
+  it('computes order totals with delivery using server line prices', async () => {
+    const snapshot = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [
+        { product_id: 'simple-1', nombre: 'Agua 600ml', cantidad: 2, precio: 99 },
+        { product_id: 'p1', nombre: 'Burger', cantidad: 1, precio: 8.5 },
+      ],
+      selections: [null, { grupos: { g_tamano: ['o_gra'], g_extras: ['o_tocineta'] } }],
+      ...loaders([simpleProduct, hamburguesaRow]),
+    });
+    expect(snapshot.ok).toBe(true);
+    if (!snapshot.ok) return;
+
+    const subtotal = snapshot.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
+    expect(subtotal).toBe(2 * 1.5 + 8.5);
+
+    const delivery = quoteDeliveryFee({
+      config: {
+        enabled: true,
+        pricing_type: 'fixed',
+        fixed_price: 3,
+      },
+      isDelivery: true,
+      subtotal,
+      fallbackFee: 0,
+    });
+    expect(delivery.fee).toBe(3);
+    expect(subtotal + delivery.fee).toBe(14.5);
+  });
+
+  it('preserves Flutter-compatible null opciones by using the DB base price', async () => {
+    // Flutter PublicMenuView omits opciones even when the product has groups.
+    // Phase 0 keeps that contract: no INVALID_OPTIONS, but never trusts client precio.
+    const result = await buildOrderItemSnapshots({
+      comercioId: 'tenant-a',
+      items: [{ product_id: 'p1', nombre: 'Anything', cantidad: 1, precio: 0.01 }],
+      selections: [null],
+      ...loaders(),
+    });
+    expect(result.ok && result.items[0]).toMatchObject({
+      nombre: 'Hamburguesa Clásica',
+      precio: 5,
     });
   });
 });

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:supervision-e2e": "node scripts/chat-supervision-ci-e2e.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "react-phone-number-input": "^3.4.16",
     "resend": "^4.8.0",
     "server-only": "0.0.1",
+    "sharp": "^0.35.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -28,6 +30,7 @@
     "@types/react": "19.2.14",
     "eslint": "^9.26.0",
     "eslint-config-next": "15.5.20",
+    "playwright": "^1.51.1",
     "tailwindcss": "^4.1.12",
     "typescript": "6.0.2",
     "vitest": "^3.2.4"

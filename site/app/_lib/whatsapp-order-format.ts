@@ -13,14 +13,23 @@ export function buildClientOrderSummary(input: {
   totalLabel: string;
   appOrderUrl: string;
   managementMode?: 'platform' | 'whatsapp_manual';
+  /** Overrides deliveryMode wording (e.g. mesa QR → “Comer aquí”). */
+  orderTypeLabel?: string;
 }) {
+  const fulfillmentLabel =
+    input.orderTypeLabel?.trim() ||
+    (input.deliveryMode === 'delivery'
+      ? 'Delivery'
+      : input.deliveryMode === 'dine_in'
+        ? 'Comer aquí'
+        : 'Retiro en tienda');
   return [
     `🆕 *NUEVO PEDIDO #${input.orderId}*`,
     '',
     `👤 Cliente: ${input.customerName}`,
     `📞 ${input.customerWhatsapp}`,
     '',
-    `📦 Entrega: ${input.deliveryMode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}`,
+    `📦 Entrega: ${fulfillmentLabel}`,
     `💳 Pago: ${input.paymentLabel}`,
     '',
     `💰 Total: ${input.totalLabel}`,
@@ -69,8 +78,37 @@ function amount(value: unknown, currency: string) {
   }).format(numeric);
 }
 
+// Avoid \\b after “aquí”: accented letters are non-word in JS regex, so \\b fails.
+const TIPO_NOTE_PATTERN =
+  /^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?:\.\s*|$)/i;
+
 function cleanNotes(value: unknown) {
-  return text(value).replace(/^Tipo:\s*(?:Comer aqui|Para llevar|Delivery)(?:\.\s*|$)/i, '').trim();
+  return text(value).replace(TIPO_NOTE_PATTERN, '').trim();
+}
+
+type OrderTypeLabel = 'Delivery' | 'Retiro' | 'Para llevar' | 'Comer aqui';
+
+function foldTipoLabel(value: string) {
+  return value
+    .toLocaleLowerCase('es')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function resolveOrderTypeLabel(details: Record<string, unknown>, delivery: Record<string, unknown>): OrderTypeLabel {
+  const tipoMatch = text(details.order_notes).match(
+    /^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?=\s|$|\.)/i,
+  );
+  if (tipoMatch) {
+    const raw = foldTipoLabel(tipoMatch[1]);
+    if (raw === 'delivery') return 'Delivery';
+    if (raw === 'para llevar') return 'Para llevar';
+    if (raw === 'comer aqui') return 'Comer aqui';
+  }
+  // Mesa / catalog QR orders are dine-in even when delivery.mode is pickup.
+  if (text(details.order_source) === 'catalog') return 'Comer aqui';
+  if (delivery.mode === 'delivery') return 'Delivery';
+  return 'Retiro';
 }
 
 export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): string {
@@ -87,9 +125,46 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       : null;
   };
   const totalValue = details.total_moneda_checkout ?? convert(details.total);
-  const totalLabel = totalValue == null ? '' : amount(totalValue, currency);
-  const heading = `🧾 *PEDIDO #${input.orderId}*`;
-  const separator = '━━━━━━━━━━━━━━━━━━';
+  const amountLabel = totalValue == null ? '' : amount(totalValue, currency);
+  const delivery = record(details.delivery);
+  const feePending = delivery.mode === 'delivery' && delivery.fee_pending === true;
+  const totalLabel = amountLabel
+    ? feePending
+      ? `${amountLabel} + DELIVERY`
+      : amountLabel
+    : '';
+  const productSurchargeValue =
+    details.recargo_delivery_productos_moneda_checkout ??
+    convert(details.recargo_delivery_productos);
+  const subtotalValue =
+    details.subtotal_moneda_checkout ??
+    convert(details.subtotal) ??
+    (totalValue != null
+      ? (() => {
+          const deliveryGuess =
+            details.costo_delivery_moneda_checkout ?? convert(details.costo_delivery) ?? 0;
+          const surchargeGuess = productSurchargeValue ?? 0;
+          const deliveryNum = Number(deliveryGuess);
+          const surchargeNum = Number(surchargeGuess);
+          const totalNum = Number(totalValue);
+          if (!Number.isFinite(totalNum)) return null;
+          const extras =
+            (Number.isFinite(deliveryNum) && deliveryNum > 0 ? deliveryNum : 0) +
+            (Number.isFinite(surchargeNum) && surchargeNum > 0 ? surchargeNum : 0);
+          return Math.max(0, totalNum - extras);
+        })()
+      : null);
+  const deliveryCostValue =
+    details.costo_delivery_moneda_checkout ?? convert(details.costo_delivery);
+  const orderType = resolveOrderTypeLabel(details, delivery);
+  const headingType =
+    feePending && orderType === 'Delivery'
+      ? 'Delivery a Acordar'
+      : orderType === 'Comer aqui'
+        ? 'Comer aquí'
+        : orderType;
+  const heading = `🧾 *NUEVO PEDIDO #${input.orderId} (${headingType})*`;
+  const separator = '━━━━━━━━━━━━━━━━━━━━';
   const items = Array.isArray(details.items) ? details.items : [];
   const categories = new Map<string, Record<string, unknown>[]>();
   for (const rawItem of items) {
@@ -108,9 +183,28 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       const quantity = Number(item.cantidad);
       const name = text(item.producto) || text(item.nombre) || 'Producto';
       const combined = combinedOrderLineSummary(item);
-      productLines.push(`*${quantity}x ${combined?.title ?? name}*`);
+      const byWeight =
+        item.venta_por_peso === true ||
+        text(item.unidad).toLowerCase() === 'kg' ||
+        (Number.isFinite(quantity) && Math.abs(quantity - Math.round(quantity)) > 1e-9);
+      const qtyLabel = byWeight
+        ? (() => {
+            const grams = Math.round(quantity * 1000);
+            if (grams > 0 && grams < 1000) return `${grams} g`;
+            const label = (Math.round(quantity * 1000) / 1000)
+              .toFixed(3)
+              .replace(/\.?0+$/, '')
+              .replace('.', ',');
+            return `${label} kg`;
+          })()
+        : `${Math.round(quantity)}x`;
+      productLines.push(`*${qtyLabel} ${combined?.title ?? name}*`);
       const price = convert(item.precio_final ?? item.precio);
-      if (price != null) productLines.push(`${amount(price, currency)}${quantity > 1 ? ' c/u' : ''}`);
+      if (price != null) {
+        productLines.push(
+          `${amount(price, currency)}${byWeight ? ' / kg' : quantity > 1 ? ' c/u' : ''}`,
+        );
+      }
       if (combined) {
         productLines.push(...combined.lines.map((line) => `• ${line}`), '');
         continue;
@@ -135,7 +229,6 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     }
   }
 
-  const delivery = record(details.delivery);
   const payment = record(details.metodo_pago);
   const paymentLabel = text(payment.nombre) || text(details.metodo_pago);
   const proofLink = text(details.comprobante_url) &&
@@ -144,32 +237,45 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   const lines = [heading, separator, '', '🍽️ *DETALLE DEL PEDIDO*', '', ...productLines];
   const notes = cleanNotes(details.order_notes);
   if (notes) lines.push('📝 *OBSERVACIONES*', notes, '');
-  lines.push(separator);
-  if (totalLabel) lines.push(`💰 *TOTAL: ${totalLabel}*`);
-  lines.push(separator, '', '👤 *CLIENTE*');
-  if (input.customerName.trim()) lines.push(input.customerName.trim());
-  if (input.customerWhatsapp.trim()) lines.push(`📞 ${input.customerWhatsapp.trim()}`);
-  lines.push('');
+  lines.push(separator, '', '💰 *RESUMEN DE PAGO*', '');
+  const subtotalLabel = subtotalValue == null ? '' : amount(subtotalValue, currency);
+  if (subtotalLabel) lines.push(`🛒 Subtotal productos: ${subtotalLabel}`);
   if (delivery.mode === 'delivery') {
-    lines.push('🛵 *DELIVERY*');
-    if (text(delivery.address)) lines.push(`📍 Dirección: ${text(delivery.address)}`);
-    if (text(delivery.reference)) lines.push(`📌 Referencia: ${text(delivery.reference)}`);
-    if (text(delivery.instructions)) lines.push(`📝 Indicaciones: ${text(delivery.instructions)}`);
-    const coordinates = record(delivery.coordinates);
-    const lat = Number(coordinates.lat);
-    const lng = Number(coordinates.lng);
-    if (
-      coordinates.lat != null && coordinates.lng != null &&
-      Number.isFinite(lat) && Number.isFinite(lng) &&
-      Math.abs(lat) <= 90 && Math.abs(lng) <= 180
-    ) lines.push(`🗺️ Maps: https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
-  } else {
-    lines.push('📦 *RETIRO EN TIENDA*');
+    const surchargeNum = Number(productSurchargeValue);
+    if (Number.isFinite(surchargeNum) && surchargeNum > 0) {
+      const surchargeDetail = Array.isArray(details.recargo_delivery_productos_detalle)
+        ? details.recargo_delivery_productos_detalle
+        : [];
+      const labels = surchargeDetail
+        .map((entry) => {
+          const row = record(entry);
+          return text(row.label) || text(row.surchargeLabel);
+        })
+        .filter(Boolean);
+      const uniqueLabels = [...new Set(labels)];
+      const surchargeTitle =
+        uniqueLabels.length === 1
+          ? uniqueLabels[0]
+          : uniqueLabels.length > 1
+            ? 'Recargos de delivery'
+            : 'Empaque / delivery';
+      lines.push(`📦 ${surchargeTitle}: ${amount(surchargeNum, currency)}`);
+    }
+    const deliveryLabel = feePending
+      ? 'A Acordar'
+      : deliveryCostValue == null
+        ? ''
+        : Number(deliveryCostValue) <= 0
+          ? 'Gratis'
+          : amount(deliveryCostValue, currency);
+    if (deliveryLabel) lines.push(`🛵 Costo de delivery: ${deliveryLabel}`);
   }
-  if (paymentLabel) lines.push(`💳 Pago: ${paymentLabel}`);
-  if (proofLink) lines.push(`📎 Comprobante: ${proofLink}`);
+  if (totalLabel) lines.push('', `💵 *TOTAL A PAGAR: ${totalLabel}*`);
+  if (paymentLabel || proofLink) lines.push('');
+  if (paymentLabel) lines.push(`💳 Método: ${paymentLabel}`);
   const paymentReference = text(details.referencia_pago);
-  if (/^\d{4}$/.test(paymentReference)) lines.push(`Referencia de pago: ****${paymentReference}`);
+  if (/^\d{4}$/.test(paymentReference)) lines.push(`🔢 Referencia: **${paymentReference}`);
+  if (proofLink) lines.push(`📎 Comprobante:\n${proofLink}`);
   if (paymentLabel.toLowerCase().includes('efectivo')) {
     const paidWith = Number(details.pago_con);
     const change = Number(details.cambio_de);
@@ -178,20 +284,58 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       lines.push(`Cambio: ${Number.isFinite(change) && change > 0 ? amount(change, currency) : amount(0, currency)}`);
     }
   }
+  lines.push(separator, '', '👤 *DATOS DEL CLIENTE*', '');
+  if (input.customerName.trim()) lines.push(`👨 Nombre: ${input.customerName.trim()}`);
+  if (input.customerWhatsapp.trim()) lines.push(`📞 Teléfono: ${input.customerWhatsapp.trim()}`);
+  lines.push('');
+  if (orderType === 'Delivery') {
+    lines.push('🛵 *DATOS DE ENTREGA*', '');
+    if (text(delivery.address)) lines.push(`📍 Dirección:\n${text(delivery.address)}`);
+    if (text(delivery.reference)) lines.push(`🏠 Referencia: ${text(delivery.reference)}`);
+    if (text(delivery.instructions)) lines.push(`📝 Indicaciones: ${text(delivery.instructions)}`);
+    const coordinates = record(delivery.coordinates);
+    const lat = Number(coordinates.lat);
+    const lng = Number(coordinates.lng);
+    if (
+      coordinates.lat != null && coordinates.lng != null &&
+      Number.isFinite(lat) && Number.isFinite(lng) &&
+      Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+    ) {
+      lines.push(
+        '',
+        '🗺️ Ubicación en Google Maps:',
+        `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+      );
+    }
+  } else if (orderType === 'Comer aqui') {
+    lines.push('🍽️ *COMER AQUÍ*');
+  } else if (orderType === 'Para llevar') {
+    lines.push('📦 *PARA LLEVAR*');
+  } else {
+    lines.push('📦 *RETIRO EN TIENDA*');
+  }
   lines.push(
-    '', manual ? '📲 Gestión: Por WhatsApp' : '⏳ Estado: Pendiente',
-    '', manual ? '🔗 *Ver pedido*' : '🔗 *Gestionar pedido*', input.appOrderUrl,
+    '',
+    separator,
+    '',
+    '📲 *GESTIÓN DEL PEDIDO*',
+    manual ? 'Canal: WhatsApp' : '⏳ Estado: Pendiente',
+    '',
+    '🔗 *VER PEDIDO COMPLETO*',
+    input.appOrderUrl,
   );
   const message = lines.join('\n');
   if (message.length <= 8000 && encodeURIComponent(message).length <= 18000) return message;
 
   return [
     heading,
-    totalLabel ? `💰 *TOTAL: ${totalLabel}*` : '',
-    ...(proofLink ? [`📎 Comprobante: ${proofLink}`] : []),
+    totalLabel ? `💵 *TOTAL A PAGAR: ${totalLabel}*` : '',
+    ...(proofLink ? [`📎 Comprobante:\n${proofLink}`] : []),
     `⚠️ Pedido extenso (${items.length} productos). La comanda completa supera el límite de este mensaje. Revisa productos, opciones y observaciones en el enlace antes de preparar.`,
-    ...(manual ? ['📲 Gestión: Por WhatsApp'] : []),
-    '', manual ? '🔗 *Ver pedido completo*' : '🔗 *Gestionar pedido completo*', input.appOrderUrl,
+    ...(manual ? ['Canal: WhatsApp'] : []),
+    '',
+    '🔗 *VER PEDIDO COMPLETO*',
+    input.appOrderUrl,
   ].filter((line, index, entries) => line || entries[index + 1]).join('\n');
 }
 

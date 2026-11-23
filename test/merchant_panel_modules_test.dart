@@ -19,6 +19,7 @@ void main() {
     var operationsOpens = 0;
     var kioskHomeOpens = 0;
     var deliveryOpens = 0;
+    var conversationsOpens = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -26,6 +27,7 @@ void main() {
             comercio: const ComercioModel(id: 'shop-1', nombre: 'Mi negocio'),
             planName: 'Menú Digital',
             hoursSubtitle: 'Horario configurado',
+            accountEmail: 'dueño@elmenuxfa.com',
             onOpenBusiness: () => profileOpens++,
             onOpenAppearance: () => appearanceOpens++,
             onOpenPayments: () => paymentsOpen++,
@@ -33,8 +35,10 @@ void main() {
             onOpenHours: () {},
             onOpenPlan: () {},
             onOpenUsers: () {},
+            onOpenAccount: () {},
             onOpenKioskHome: () => kioskHomeOpens++,
             onOpenDelivery: () => deliveryOpens++,
+            onOpenConversations: () => conversationsOpens++,
           ),
         ),
       ),
@@ -56,6 +60,8 @@ void main() {
     expect(kioskHomeOpens, 1);
     await tester.tap(find.text('Delivery'));
     expect(deliveryOpens, 1);
+    await tester.tap(find.text('Conversaciones del asistente'));
+    expect(conversationsOpens, 1);
   });
 
   test('nav title for sales tools is honest', () {
@@ -136,8 +142,18 @@ void main() {
       'metadata': {'product_name': 'hamburguesa'},
       'created_at': '2026-09-17T12:00:00Z',
     });
-    expect(tx.title, 'Generación foto hamburguesa');
+    expect(tx.title, 'Foto con IA · hamburguesa');
     expect(tx.isCredit, isFalse);
+
+    final description = AiCreditTransaction.fromMap({
+      'id': 't2',
+      'type': 'debit',
+      'amount': 1,
+      'reason': 'product_description_generation',
+      'metadata': {'product_name': 'arepa'},
+      'created_at': '2026-09-17T12:00:00Z',
+    });
+    expect(description.title, 'Descripción con IA · arepa');
   });
 
   test('12h labels and split ranges match the public menu contract', () {
@@ -195,7 +211,23 @@ void main() {
     expect(MerchantSession.canManageStaff, isFalse);
     expect(MerchantSession.canOpen(MerchantNavDestination.digitalMenu), isTrue);
 
+    MerchantSession.set(role: MerchantStaffRole.mesero, isOwner: false);
+    expect(MerchantSession.isMesero, isTrue);
+    expect(MerchantSession.canTakeAssistedOrders, isTrue);
+    expect(MerchantSession.canManageCatalog, isFalse);
+    expect(MerchantSession.canManageStaff, isFalse);
+    expect(MerchantSession.canSeeClients, isFalse);
+    expect(MerchantSession.canSeeSalesKpis, isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.home), isTrue);
+    expect(MerchantSession.canOpen(MerchantNavDestination.orders), isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.settings), isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.products), isFalse);
+
+    expect(MerchantStaffRoleUi.fromRaw('mesero'), MerchantStaffRole.mesero);
+    expect(MerchantStaffRoleUi.fromRaw('mesero').hint, contains('asistidos'));
+
     MerchantSession.clear();
     expect(MerchantSession.canManageCatalog, isTrue);
+    expect(MerchantSession.canTakeAssistedOrders, isTrue);
   });
 }

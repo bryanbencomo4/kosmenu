@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppSpacing {
@@ -25,6 +26,17 @@ class AppColors {
 }
 
 class AppTheme {
+  /// Dark status/nav icons for the light merchant chrome.
+  static const SystemUiOverlayStyle lightSystemUi = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+    systemNavigationBarContrastEnforced: false,
+  );
+
   static ThemeData lightTheme({Color accentColor = AppColors.accent}) {
     final base = ThemeData(useMaterial3: true, brightness: Brightness.light);
 
@@ -57,6 +69,7 @@ class AppTheme {
         foregroundColor: AppColors.textStrong,
         centerTitle: false,
         titleTextStyle: textTheme.titleLarge,
+        systemOverlayStyle: lightSystemUi,
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,

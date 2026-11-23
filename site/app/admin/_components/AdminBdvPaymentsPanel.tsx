@@ -183,16 +183,17 @@ export function AdminBdvPaymentsPanel({ admin }: { admin: CurrentAdmin }) {
   const selectedCanAct = canReview && detail && detail.status !== 'CONFIRMED';
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.24),transparent_34%),linear-gradient(180deg,#101226_0%,#171a3d_100%)] px-6 py-7 text-white shadow-[0_30px_80px_-48px_rgba(15,23,42,0.9)] sm:px-8">
+    <div className="space-y-4 sm:space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.24),transparent_34%),linear-gradient(180deg,#101226_0%,#171a3d_100%)] px-4 py-4 text-white shadow-[0_30px_80px_-48px_rgba(15,23,42,0.9)] sm:rounded-[2rem] sm:px-8 sm:py-7">
         <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-violet-200/70">
           <Landmark className="h-4 w-4" />
           Banco de Venezuela
         </p>
-        <h1 className="mt-2 font-[var(--font-display)] text-3xl font-black tracking-[-0.04em] sm:text-4xl">Pagos BDV</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-violet-100/80">
-          Monitorea todos los pagos recibidos por BDV Payment Bridge. El matching y la activacion automatica no cambian
-          aqui: esta vista sirve para revisar, reprocesar y asociar a mano cuando haga falta.
+        <h1 className="mt-1 font-[var(--font-display)] text-2xl font-black tracking-[-0.04em] sm:mt-2 sm:text-3xl lg:text-4xl">
+          Pagos BDV
+        </h1>
+        <p className="mt-2 hidden max-w-2xl text-sm leading-7 text-violet-100/80 sm:block">
+          Revisa, reprocesa y asocia pagos del Bridge cuando haga falta.
         </p>
       </section>
 

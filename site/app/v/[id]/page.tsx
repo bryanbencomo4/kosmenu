@@ -1,9 +1,9 @@
 'use client';
 
 import Head from 'next/head';
-import { ArrowRight, ArrowUp, ChevronDown, Facebook, Flame, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
+import { ArrowRight, ArrowUp, Banknote, Bike, Bitcoin, Building2, Camera, Check, ChevronDown, ChevronLeft, Clock, CreditCard, Facebook, Flame, ImageIcon, Info, Instagram, Layers, Mail, MapPin, Menu, MessageCircle, Music2, Pencil, Phone, Search, Share2, Shield, ShoppingCart, Smartphone, Store, Truck, User, Wallet, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, usePathname, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
@@ -17,6 +17,8 @@ import {
   displayProductImage,
   MENU_IMAGE_WIDTH,
   optimizeMenuImageUrl,
+  optimizeStorageImageUrl,
+  resolveCategoryCover,
   resolveHeroCover,
 } from './_lib/product-image';
 import {
@@ -31,21 +33,67 @@ import {
 import { getOrCreateUpsellSessionId, trackUpsellEvent, type UpsellSurface } from './_lib/upsell-session';
 import { AddToCartUpsellSheet, type AddToCartSuggestion } from './_components/upsell/AddToCartUpsellSheet';
 import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
-import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
+import { ProductImageLightbox } from './_components/ProductImageLightbox';
+import {
+  KioskMenuExperience,
+  type KioskMenuShellHandle,
+} from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
+import {
+  allowMenuShellHistoryLeave,
+  attachMenuShellHistory,
+  detachMenuShellHistory,
+  isMenuShellHistorySyncing,
+  setMenuShellHistoryDepth,
+} from './_lib/menu-shell-history';
+import { DeliveryMapPreview } from './_components/kiosk/DeliveryMapPreview';
+import { DeliveryNoteField } from './_components/kiosk/DeliveryNoteField';
+import { WhatsAppLogo } from './_components/kiosk/WhatsAppLogo';
 import { KioskImage } from './_components/kiosk/KioskImage';
-import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
-import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import {
+  KioskCatalogReady,
+  type CatalogReadyItem,
+  type CatalogWhatsappSubmitInput,
+} from './_components/kiosk/KioskCatalogReady';
+import {
+  CHECKOUT_FULFILLMENT_CHOICE_LABEL,
+  CHECKOUT_FULFILLMENT_SHORT_LABEL,
+  FULFILLMENT_LABEL,
+  type KioskFulfillment,
+  type KioskVoucherData,
+} from './_components/kiosk/kiosk-types';
+import {
+  parseKioskHomeConfig,
+  shouldForceCatalogModeFromQuery,
+} from '../../_lib/kiosk-home-config';
+import {
+  isChatbotUxEnabledForSlug,
+  shouldOpenChatbotFromQuery,
+} from '../../_lib/chatbot-preview';
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
-import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
+import { ChatAssistantLazy } from './_components/chat/ChatAssistantLazy';
+import type { ChatCatalogSnapshot } from './_components/chat/chat-catalog';
+import { buildChatHoursSnapshot } from './_components/chat/chat-hours';
+import { buildBusinessLocation } from './_components/chat/chat-location';
+import { toChatPaymentMethods } from './_components/chat/chat-payments';
+import type {
+  ChatAppliedAddNotice,
+  ChatCartActionData,
+} from './_components/chat/chat-types';
+import { parseDeliveryConfig, pointInPolygon, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   cashTenderValidity,
   currencyAllowsDecimals,
+  currencyPrefix,
   describeCashBills,
+  formatCashAmountDisplay,
+  formatCashAmountInputValue,
   parseCashAmount,
   parseCashAmountInput,
+  snapCashAmountUp,
   suggestCashTenders,
+  toCashAmountCanonical,
 } from '../../_lib/cash-tender';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
@@ -54,7 +102,14 @@ import {
   shouldShowPreCheckoutUpsell,
 } from '../../_lib/pre-checkout-upsell';
 import type { BundleRailItem } from './_components/upsell/BundleRail';
-import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
+import {
+  formatPaymentMethodDetails,
+  isCashPaymentMethodLabel,
+  parsePaymentMethodFields,
+  paymentMethodIconKindFromText,
+  paymentMethodLabelFromRow,
+} from '../../_lib/payment-method-display';
+import { PaymentCopyFields } from './_components/PaymentCopyFields';
 import {
   convertAmountBetweenCurrencies,
   exchangeSourceLabel,
@@ -63,24 +118,38 @@ import {
   resolveCheckoutCurrencySource,
   type ExchangeRateAdjustment,
 } from '../../_lib/checkout-exchange-rate';
+import { venezuelaOperatingStateLabels } from '../../_lib/venezuela-states';
 import {
   buildCartLineKey,
   buildOrderLineLabel,
   formatProductPriceLabel,
+  cartBadgeQuantity,
+  formatWeightLabel,
+  getProductDeliverySurcharge,
+  getProductDeliverySurchargeLabel,
   getProductOptionsSummary,
   getProductMinimumPrice,
+  getWeightSaleConfig,
+  isProductExcludedFromDelivery,
+  productHasOptionDeliverySurcharge,
   isServicioAdicionalName,
+  isSoldByWeight,
+  normalizeWeightKg,
   parseCartLineKey,
   productRequiresConfiguration,
+  productRequiresOptionSheet,
   resolveCombinedUnitPrice,
   parseProductPersonalization,
   validateCustomizationSelection,
   summarizeCartLineSelection,
+  summarizeProductDeliverySurcharges,
   validateOptionGroupSelection,
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
 import { buildClientOrderSummary } from '../../_lib/whatsapp-order-format';
+import { buildWhatsAppHref, handleWhatsAppLinkClick, openWhatsAppChat } from '../../_lib/whatsapp-href';
+import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
@@ -96,12 +165,33 @@ import {
   resolveCheckoutAttempt,
   type CheckoutAttempt,
 } from './_lib/checkout-idempotency';
+import { prepareComprobanteFile } from '../../_lib/prepare-comprobante-file';
+import {
+  readCachedCheckoutCustomer,
+  writeCachedCheckoutCustomer,
+} from '../../_lib/checkout-customer-cache';
+import {
+  DEFAULT_INSTRUCTION_SUGGESTIONS,
+  DEFAULT_REFERENCE_SUGGESTIONS,
+  deliveryNoteSuggestions,
+  readDeliveryNotesCache,
+  rememberDeliveryNote,
+  type DeliveryNotesCache,
+} from '../../_lib/delivery-notes-cache';
+import {
+  clearCachedCheckoutCart,
+  readCachedCheckoutCart,
+  writeCachedCheckoutCart,
+  type CachedCheckoutCart,
+} from '../../_lib/checkout-cart-cache';
+import { AbandonedCartResumeDialog } from './_components/AbandonedCartResumeDialog';
 
 type CategoriaRow = {
   id: string;
   nombre: string;
   orden?: number | null;
   icono?: string | null;
+  imagen_url?: string | null;
   opciones_menu?: unknown;
   rol?: string | null;
   tipo_upselling?: string | null;
@@ -260,6 +350,9 @@ type ComercioRow = {
   delivery_tarifas?: unknown;
   direccion?: string | null;
   ciudad?: string | null;
+  negocio_virtual?: boolean | null;
+  estados_operacion?: string[] | null;
+  zona_operacion?: string | null;
   descripcion?: string | null;
   menu_palette_primary?: number | string | null;
   menu_palette_accent?: number | string | null;
@@ -343,8 +436,6 @@ type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
-const appBaseUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
-const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const kioskVoucherStorageKeyPrefix = 'elmenuxfa:order-success:';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
@@ -377,16 +468,25 @@ type GooglePlaceResult = {
   } | null;
 };
 
+type GoogleMapTypeId = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
+
 type GoogleMapHandle = {
   panTo(point: DeliveryPoint): void;
   setZoom(zoom: number): void;
+  setMapTypeId?(mapTypeId: GoogleMapTypeId | string): void;
+  getMapTypeId?(): string;
   addListener(event: string, listener: () => void): void;
   getCenter(): GoogleLatLngLike | null;
 };
 
 type GoogleGeocoder = {
   geocode(
-    request: { location?: DeliveryPoint; address?: string },
+    request: {
+      location?: DeliveryPoint;
+      address?: string;
+      componentRestrictions?: { country: string };
+      region?: string;
+    },
     callback: (results: GooglePlaceResult[] | null, status: string) => void,
   ): void;
 };
@@ -402,10 +502,19 @@ type GoogleMapsApi = {
     Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapHandle;
     Geocoder: new () => GoogleGeocoder;
     places?: {
-      Autocomplete?: new (input: HTMLInputElement, options: { fields: string[] }) => GoogleAutocomplete;
+      Autocomplete?: new (
+        input: HTMLInputElement,
+        options: {
+          fields: string[];
+          componentRestrictions?: { country: string };
+        },
+      ) => GoogleAutocomplete;
     };
   };
 };
+
+/** Bias/restrict all public-menu map search to Venezuela. */
+const GOOGLE_MAPS_VE_COUNTRY = 've' as const;
 
 type LeafletCenter = {
   lat: number;
@@ -415,17 +524,30 @@ type LeafletCenter = {
 type LeafletMapHandle = {
   setView(coords: [number, number], zoom: number): LeafletMapHandle;
   getCenter(): LeafletCenter | null;
+  fitBounds?(bounds: unknown, options?: Record<string, unknown>): void;
   on(event: string, handler: () => void): void;
   remove(): void;
 };
 
 type LeafletTileLayer = {
+  addTo(map: LeafletMapHandle): LeafletTileLayer;
+  on?(event: string, cb: () => void): void;
+  remove?: () => void;
+  removeFrom?: (map: LeafletMapHandle) => void;
+};
+
+type LeafletPolygon = {
   addTo(map: LeafletMapHandle): void;
 };
 
 type LeafletApi = {
   map(element: HTMLElement, options: Record<string, unknown>): LeafletMapHandle;
   tileLayer(url: string, options: Record<string, unknown>): LeafletTileLayer;
+  polygon?(
+    latlngs: Array<[number, number]>,
+    options?: Record<string, unknown>,
+  ): LeafletPolygon;
+  latLngBounds?(latlngs: Array<[number, number]>): unknown;
 };
 
 type WindowWithExternalMaps = Window & typeof globalThis & Record<string, unknown> & {
@@ -438,7 +560,15 @@ type MapPickerHandle = {
   panTo?: (point: DeliveryPoint) => void;
   setZoom?: (zoom: number) => void;
   setView?: (coords: [number, number], zoom: number) => unknown;
+  setMapTypeId?: (mapTypeId: GoogleMapTypeId | string) => void;
 };
+
+const MAP_PICKER_LAYER_OPTIONS: Array<{ id: GoogleMapTypeId; label: string }> = [
+  { id: 'roadmap', label: 'Mapa' },
+  { id: 'satellite', label: 'Satélite' },
+  { id: 'hybrid', label: 'Híbrido' },
+  { id: 'terrain', label: 'Terreno' },
+];
 
 type ValidationDetail = {
   path?: string;
@@ -621,6 +751,143 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
   } catch {
     return '';
   }
+}
+
+/** Street text is nice-to-have; coordinates already pin the drop-off. */
+function formatDeliveryPointFallbackAddress(point: DeliveryPoint) {
+  return `Punto en el mapa (${point.lat.toFixed(5)}, ${point.lng.toFixed(5)})`;
+}
+
+function resolveDeliveryAddressText(address: string, point: DeliveryPoint | null) {
+  const trimmed = address.trim();
+  if (trimmed.length >= 6) return trimmed;
+  if (point) return formatDeliveryPointFallbackAddress(point);
+  return trimmed;
+}
+
+function parseLatLngPair(raw: string): DeliveryPoint | null {
+  const cleaned = raw.trim().replace(/[()]/g, '');
+  const match = cleaned.match(
+    /^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/,
+  );
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function extractLatLngFromGoogleMapsUrl(rawUrl: string): DeliveryPoint | null {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.toLowerCase();
+    if (
+      !host.includes('google.') &&
+      !host.includes('goo.gl') &&
+      !host.includes('maps.app.goo.gl')
+    ) {
+      return null;
+    }
+
+    const atMatch = url.pathname.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (atMatch) {
+      const point = parseLatLngPair(`${atMatch[1]},${atMatch[2]}`);
+      if (point) return point;
+    }
+
+    const dataMatch = url.pathname.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (dataMatch) {
+      const point = parseLatLngPair(`${dataMatch[1]},${dataMatch[2]}`);
+      if (point) return point;
+    }
+
+    for (const key of ['q', 'query', 'll', 'center', 'destination']) {
+      const value = url.searchParams.get(key);
+      if (!value) continue;
+      const decoded = decodeURIComponent(value.replace(/\+/g, ' '));
+      const point = parseLatLngPair(decoded);
+      if (point) return point;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePlusCode(raw: string) {
+  // Open Location Code / Plus Code, e.g. RQVQ+W83 or 87G8Q2WX+JV
+  return /^[2-9CFGHJMPQRVWX]{4,8}\+[2-9CFGHJMPQRVWX]{2,3}\b/i.test(raw.trim());
+}
+
+function looksLikeMapsUrl(raw: string) {
+  return /(?:https?:\/\/)?(?:maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\.|google\.[^/\s]+\/maps)/i.test(
+    raw.trim(),
+  );
+}
+
+async function resolveMapsShortLink(raw: string): Promise<string | null> {
+  const trimmed = raw.trim();
+  if (!looksLikeMapsUrl(trimmed)) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    // no-cors can't read body; try follow redirects via a lightweight GET when possible
+    const response = await fetch(withProtocol, {
+      method: 'GET',
+      redirect: 'follow',
+      mode: 'cors',
+    });
+    if (response.url) return response.url;
+  } catch {
+    // Short links often block CORS; fall through to geocoding the raw text.
+  }
+  return withProtocol;
+}
+
+async function resolveMapPickerQuery(raw: string): Promise<{
+  point: DeliveryPoint | null;
+  geocodeQuery: string;
+}> {
+  const query = raw.trim();
+  if (!query) return { point: null, geocodeQuery: '' };
+
+  const directCoords = parseLatLngPair(query);
+  if (directCoords) return { point: directCoords, geocodeQuery: query };
+
+  if (looksLikeMapsUrl(query)) {
+    const fromUrl = extractLatLngFromGoogleMapsUrl(
+      /^https?:\/\//i.test(query) ? query : `https://${query}`,
+    );
+    if (fromUrl) return { point: fromUrl, geocodeQuery: query };
+
+    const resolved = await resolveMapsShortLink(query);
+    if (resolved) {
+      const fromResolved = extractLatLngFromGoogleMapsUrl(resolved);
+      if (fromResolved) return { point: fromResolved, geocodeQuery: query };
+      try {
+        const url = new URL(resolved);
+        const q =
+          url.searchParams.get('q') ||
+          url.searchParams.get('query') ||
+          url.searchParams.get('destination');
+        if (q) {
+          const decoded = decodeURIComponent(q.replace(/\+/g, ' '));
+          const coords = parseLatLngPair(decoded);
+          if (coords) return { point: coords, geocodeQuery: decoded };
+          return { point: null, geocodeQuery: decoded };
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  if (looksLikePlusCode(query)) {
+    return { point: null, geocodeQuery: query };
+  }
+
+  return { point: null, geocodeQuery: query };
 }
 
 function normalizePhone(value: string | null | undefined) {
@@ -877,15 +1144,6 @@ function formatCop(value: number | null | undefined) {
   }).format(safeValue);
 }
 
-function normalizeFontName(value: string | null | undefined) {
-  const font = (value ?? '').trim();
-  return font.length > 0 ? font : '';
-}
-
-function fontFamilyCssValue(fontName: string, fallback: string) {
-  return fontName ? `"${fontName.replace(/"/g, '')}", ${fallback}` : fallback;
-}
-
 function borderRadiusByStyle(style: string | null | undefined) {
   if (style === 'pill') return '999px';
   if (style === 'sharp') return '2px';
@@ -903,18 +1161,6 @@ function clampItemsPerRow(value: number | null | undefined, layoutType: 'list' |
   const fallback = layoutType === 'grid' ? 2 : 1;
   const parsed = typeof value === 'number' ? Math.round(value) : fallback;
   return Math.min(3, Math.max(1, parsed));
-}
-
-function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
-  const titleFont = normalizeFontName(branding?.fuente_titulos);
-  const bodyFont = normalizeFontName(branding?.fuente_cuerpo);
-  if (!titleFont && !bodyFont) {
-    return '';
-  }
-
-  const safeTitle = (titleFont || 'Montserrat').replace(/\s+/g, '+');
-  const safeBody = (bodyFont || 'Roboto').replace(/\s+/g, '+');
-  return `https://fonts.googleapis.com/css2?family=${safeTitle}:wght@500;700;800&family=${safeBody}:wght@400;500;600&display=swap`;
 }
 
 function safeImageSrc(
@@ -937,11 +1183,41 @@ function comercioInitial(name: string | null | undefined) {
 }
 
 function paymentMethodLabel(method: MetodoPagoRow) {
-  return method.nombre?.trim() || method.tipo?.trim() || method.banco?.trim() || 'Metodo de pago';
+  return paymentMethodLabelFromRow(method);
+}
+
+function isCashPaymentMethod(method: MetodoPagoRow) {
+  return isCashPaymentMethodLabel(paymentMethodLabel(method));
+}
+
+function PaymentMethodGlyph({
+  method,
+  label,
+}: {
+  method?: MetodoPagoRow | null;
+  label?: string | null;
+}) {
+  const kind = paymentMethodIconKindFromText(
+    label,
+    method?.nombre,
+    method?.tipo,
+    method?.banco,
+  );
+  const className = 'h-4 w-4 shrink-0';
+  if (kind === 'cash') return <Banknote className={className} aria-hidden />;
+  if (kind === 'pago_movil') return <Smartphone className={className} aria-hidden />;
+  if (kind === 'binance') return <Bitcoin className={className} aria-hidden />;
+  if (kind === 'transfer') return <Building2 className={className} aria-hidden />;
+  if (kind === 'card') return <CreditCard className={className} aria-hidden />;
+  return <Wallet className={className} aria-hidden />;
 }
 
 function paymentMethodDetails(method: MetodoPagoRow) {
   return formatPaymentMethodDetails(method);
+}
+
+function paymentMethodCopyModel(method: MetodoPagoRow) {
+  return parsePaymentMethodFields(method);
 }
 
 function currencyCodeFromPaymentMethodTipo(tipo: string) {
@@ -1136,18 +1412,43 @@ function usdToCurrencyRateForSource(source: string, currency: string, marketRate
 
   const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
   if (normalizedCurrency === 'VES') {
-    let liveRate =
+    // BCV EUR is VES per 1 EUR. Do not multiply by USD/EUR — that made
+    // BCV EUR collapse to nearly the same value as BCV USD.
+    const liveRate =
       source === 'p2p_binance'
         ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
         : bcvVesRateForSource(source, marketRates);
-    if (canonicalizeBcvSource(source) === 'bcv_eur') {
-      liveRate *= googleRates.get('USD/EUR') ?? 0;
-    }
     if (liveRate > 0) return liveRate;
     return (googleRates.get('VES/USD') ?? 0) > 0 ? 1 / (googleRates.get('VES/USD') ?? 0) : 0;
   }
   if (normalizedCurrency === 'COP') return googleRates.get('USD/COP') ?? 0;
   if (normalizedCurrency === 'EUR') return googleRates.get('USD/EUR') ?? 0;
+  return 0;
+}
+
+/** Official BCV EUR (VES/EUR) for tracked VES pairs; never cross via USD/EUR. */
+function bcvEurRateForPair(
+  baseCurrency: string,
+  quoteCurrency: string,
+  marketRates: MarketRatesRow | null | undefined,
+) {
+  const eurVes = parseExchangeRate(marketRates?.payload?.bcv_rates?.EUR) ?? 0;
+  if (eurVes <= 0) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  if (base === quote) return 1;
+
+  if (base === 'EUR' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'EUR') return 1 / eurVes;
+  if (base === 'USD' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'USD') return 1 / eurVes;
+
+  const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
+  const usdCop = googleRates.get('USD/COP') ?? 0;
+  if (usdCop <= 0) return 0;
+  if (base === 'COP' && quote === 'VES') return eurVes / usdCop;
+  if (base === 'VES' && quote === 'COP') return usdCop / eurVes;
   return 0;
 }
 
@@ -1170,6 +1471,11 @@ function derivedExchangeRateForCurrency(
   if (source === 'google') {
     const rate = googleRateForPair(base, quote, googleRatesFromPayload(marketRates?.payload ?? null));
     if (rate > 0) return rate;
+  }
+
+  if (canonicalizeBcvSource(source) === 'bcv_eur' && isTrackedVesPair(base, quote)) {
+    const eurDerived = bcvEurRateForPair(base, quote, marketRates);
+    if (eurDerived > 0) return eurDerived;
   }
 
   if (
@@ -1603,6 +1909,9 @@ function getBrowserCurrentPoint() {
   });
 }
 
+/** Survives React Strict Mode remounts so skeleton→color only runs once per menu id. */
+const bootRevealCompletedIds = new Set<string>();
+
 function readOwnerPreviewAccessTokenFromHash() {
   if (typeof window === 'undefined') {
     return '';
@@ -1633,6 +1942,12 @@ export default function PublicMenuPage() {
   const isOwnerPreview = (pathname ?? '').startsWith('/preview/');
 
   const [loading, setLoading] = useState(true);
+  const bootAlreadyRevealed =
+    Boolean(commerceIdentifier) && bootRevealCompletedIds.has(commerceIdentifier);
+  /** Soft grayscale→color handoff: keep skeleton over content, then fade it out (once). */
+  const [bootSkeletonVisible, setBootSkeletonVisible] = useState(!bootAlreadyRevealed);
+  const [bootSkeletonOpaque, setBootSkeletonOpaque] = useState(!bootAlreadyRevealed);
+  const bootRevealDoneRef = useRef(bootAlreadyRevealed);
   const [error, setError] = useState<string | null>(null);
   const [isDraftMode, setIsDraftMode] = useState(false);
   const [ownerPreviewToken, setOwnerPreviewToken] = useState<string | null>(null);
@@ -1647,18 +1962,54 @@ export default function PublicMenuPage() {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
+  const searchParams = useSearchParams();
+  const isAssistedMode = (searchParams.get('mode') ?? '').trim().toLowerCase() === 'assisted';
+  const catalogFromUrl = shouldForceCatalogModeFromQuery({
+    catalogo: searchParams.get('catalogo'),
+    src: searchParams.get('src'),
+    source: searchParams.get('source'),
+    modo: searchParams.get('modo'),
+    qr: searchParams.get('qr'),
+  });
+  const chatbotUxEnabled = isChatbotUxEnabledForSlug(commerceIdentifier);
+  const chatbotDecision = shouldOpenChatbotFromQuery({
+    chatbot: searchParams.get('chatbot'),
+    mode: searchParams.get('mode'),
+    catalogForced: catalogFromUrl,
+    previewEnabled: chatbotUxEnabled,
+  });
+  const isChatbotMode = chatbotDecision.open;
+  const [chatIncomingProposal, setChatIncomingProposal] =
+    useState<ChatCartActionData | null>(null);
+  const [chatAppliedNotice, setChatAppliedNotice] =
+    useState<ChatAppliedAddNotice | null>(null);
+  const chatSheetAddLockRef = useRef(false);
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [wantOrderEmail, setWantOrderEmail] = useState(true);
+  const [clientTable, setClientTable] = useState('');
+  const [payLater, setPayLater] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [isOrderReviewOpen, setIsOrderReviewOpen] = useState(false);
+  const [reviewFulfillmentBaseline, setReviewFulfillmentBaseline] = useState<{
+    fulfillment: KioskFulfillment | null;
+    wasDelivery: boolean;
+    deliveryFeeConverted: number;
+  } | null>(null);
+  const [paymentAdjustmentNotice, setPaymentAdjustmentNotice] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
-  const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
-  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+  const [paymentProofFiles, setPaymentProofFiles] = useState<File[]>([]);
+  const [paymentProofPreviewUrls, setPaymentProofPreviewUrls] = useState<string[]>([]);
+  const [requiredPaymentProofCount, setRequiredPaymentProofCount] = useState(1);
+  const [paymentProofBusy, setPaymentProofBusy] = useState(false);
+  const [paymentProofError, setPaymentProofError] = useState('');
+  const [paymentProofLightboxUrl, setPaymentProofLightboxUrl] = useState<string | null>(null);
   const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryReference, setDeliveryReference] = useState('');
@@ -1666,14 +2017,34 @@ export default function PublicMenuPage() {
   const [deliveryPoint, setDeliveryPoint] = useState<DeliveryPoint | null>(null);
   const [deliveryPointSource, setDeliveryPointSource] = useState<DeliveryPointSelectionSource>('none');
   const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+  const [isMapPickerHelpOpen, setIsMapPickerHelpOpen] = useState(false);
+  const [isMapPickerLayersOpen, setIsMapPickerLayersOpen] = useState(false);
+  const [mapPickerLayer, setMapPickerLayer] = useState<GoogleMapTypeId>('roadmap');
+  const [mapPickerSearchText, setMapPickerSearchText] = useState('');
   const [mapPickerAddress, setMapPickerAddress] = useState('');
   const [isMapPickerLoading, setIsMapPickerLoading] = useState(false);
+  const [isMapCanvasReady, setIsMapCanvasReady] = useState(false);
+  const [mapLoadSlow, setMapLoadSlow] = useState(false);
+  const [mapPickerNonce, setMapPickerNonce] = useState(0);
   const [isMapPickerDragging, setIsMapPickerDragging] = useState(false);
+  const [deliveryNoteMemory, setDeliveryNoteMemory] = useState<DeliveryNotesCache>({
+    reference: '',
+    instructions: '',
+    references: [],
+    instructionsHistory: [],
+  });
   const [mapPickerError, setMapPickerError] = useState('');
   const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
+  const [deliveryPreviewLocating, setDeliveryPreviewLocating] = useState(false);
+  const deliveryAutoLocateKeyRef = useRef<string | null>(null);
   const [orderNotes, setOrderNotes] = useState('');
   const [kioskFulfillment, setKioskFulfillment] = useState<KioskFulfillment | null>(null);
   const [catalogMode, setCatalogMode] = useState(false);
+  const [catalogReady, setCatalogReady] = useState<{
+    items: CatalogReadyItem[];
+    itemCount: number;
+    totalLabel: string;
+  } | null>(null);
   const [kioskAddedPrompt, setKioskAddedPrompt] = useState<{ productName: string } | null>(null);
   const [kioskVoucher, setKioskVoucher] = useState<KioskVoucherData | null>(null);
   const [dismissedUpsellIds, setDismissedUpsellIds] = useState<Set<string>>(() => new Set());
@@ -1690,11 +2061,21 @@ export default function PublicMenuPage() {
   >(new Map());
   const trackedImpressionsRef = useRef<Set<string>>(new Set());
   const repeatOrderConsumedRef = useRef(false);
+  const cartHydratedRef = useRef(false);
+  const leaveGuardArmedRef = useRef(false);
+  const allowLeaveRef = useRef(false);
+  const kioskShellRef = useRef<KioskMenuShellHandle | null>(null);
+  const [kioskHistoryDepth, setKioskHistoryDepth] = useState(0);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [cartCacheReady, setCartCacheReady] = useState(false);
+  const [abandonedCartPrompt, setAbandonedCartPrompt] = useState<CachedCheckoutCart | null>(null);
   const menuReadyRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [expandedProductImage, setExpandedProductImage] = useState<{
     src: string;
+    sourceUrl: string | null;
+    previewSrc: string | null;
     alt: string;
     title: string;
     description: string;
@@ -1711,8 +2092,13 @@ export default function PublicMenuPage() {
   const mapPickerGeocoderRef = useRef<GoogleGeocoder | null>(null);
   const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
+  const leafletBaseLayerRef = useRef<LeafletTileLayer | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const orderSubmitLockRef = useRef(false);
+  /** True once the upsell sheet has seen a non-empty cart (avoids closing on the add→open race). */
+  const preCheckoutHadCartRef = useRef(false);
+  /** Chat “listo para pagar” — survive ?chatbot=1 → menu replace racing checkout open. */
+  const pendingCheckoutFromChatRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -1742,11 +2128,44 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
+    // Waiters skip the home picker and go straight to categories (comer aquí).
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      setCatalogMode(false);
+      window.sessionStorage.setItem(
+        `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+        'dine_in',
+      );
+      return;
+    }
+    // Mesa QR with ?catalogo=1 starts in catalog-only mode (no WhatsApp send).
+    if (catalogFromUrl) {
+      return;
+    }
     const saved = window.sessionStorage.getItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     if (!isKioskFulfillment(saved)) return;
+    // Public web never restores dine-in; that mode is QR/mesa (catalog) or waiter only.
+    if (saved === 'dine_in') {
+      window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+      return;
+    }
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
-  }, [commerceIdentifier]);
+  }, [commerceIdentifier, isAssistedMode, catalogFromUrl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+    if (isAssistedMode || !catalogFromUrl) return;
+    // URL ?catalogo=1 / ?src=qr / ?source=qr always starts catalog mode (no merchant flag required).
+    setCatalogMode(true);
+    setKioskFulfillment(null);
+    setDeliveryMode('pickup');
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setIsPreCheckoutUpsellOpen(false);
+    window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+  }, [commerceIdentifier, isAssistedMode, catalogFromUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
@@ -1805,6 +2224,9 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (!isConfirmOpen) {
       setIsCheckoutFooterExpanded(false);
+      setIsOrderReviewOpen(false);
+      setReviewFulfillmentBaseline(null);
+      setPaymentAdjustmentNotice(null);
     }
   }, [isConfirmOpen]);
 
@@ -2071,31 +2493,68 @@ export default function PublicMenuPage() {
   }, [categoryByProductId, productById]);
 
   useEffect(() => {
-    if (repeatOrderConsumedRef.current || productById.size === 0) return;
-    const payload = consumeRepeatOrder(commerceIdentifier);
-    repeatOrderConsumedRef.current = true;
-    if (!payload) return;
+    if (cartHydratedRef.current || productById.size === 0) return;
+    cartHydratedRef.current = true;
 
-    const nextCart: Record<string, number> = {};
-    for (const item of payload.items) {
-      if (!productById.has(item.productId)) continue;
-      const key = buildCartLineKey(item.productId, item.selection ?? {});
-      nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
-    }
-    if (Object.keys(nextCart).length === 0) return;
+    const applyCartItems = (
+      items: Array<{ productId: string; quantity: number; selection?: CartLineSelection }>,
+      fulfillment?: KioskFulfillment | null,
+    ) => {
+      const nextCart: Record<string, number> = {};
+      for (const item of items) {
+        if (!productById.has(item.productId)) continue;
+        const key = buildCartLineKey(item.productId, item.selection ?? {});
+        nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
+      }
+      if (Object.keys(nextCart).length === 0) return false;
+      setCart(nextCart);
+      if (fulfillment) {
+        setKioskFulfillment(fulfillment);
+        setDeliveryMode(fulfillment === 'delivery' ? 'delivery' : 'pickup');
+        if (typeof window !== 'undefined' && commerceIdentifier) {
+          window.sessionStorage.setItem(
+            `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+            fulfillment,
+          );
+        }
+      }
+      return true;
+    };
 
-    setCart(nextCart);
-    if (payload.fulfillment) {
-      setKioskFulfillment(payload.fulfillment);
-      setDeliveryMode(payload.fulfillment === 'delivery' ? 'delivery' : 'pickup');
-      if (typeof window !== 'undefined' && commerceIdentifier) {
-        window.sessionStorage.setItem(
-          `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
-          payload.fulfillment,
-        );
+    if (!repeatOrderConsumedRef.current) {
+      repeatOrderConsumedRef.current = true;
+      const payload = consumeRepeatOrder(commerceIdentifier);
+      if (payload && applyCartItems(payload.items, payload.fulfillment ?? null)) {
+        setCartCacheReady(true);
+        return;
       }
     }
-  }, [commerceIdentifier, productById]);
+
+    const cachedCart = readCachedCheckoutCart(commerceIdentifier);
+    if (cachedCart) {
+      const hasValidItems = cachedCart.items.some((item) => {
+        if (!productById.has(item.productId)) return false;
+        const product = productById.get(item.productId);
+        if (!product) return false;
+        const selection = item.selection ?? {};
+        if (menuLineInvalid(product, selection, productById)) return false;
+        const unitPrice = menuLinePrice(
+          product,
+          categoryByProductId.get(item.productId) ?? null,
+          selection,
+          productById,
+          categoryByProductId,
+        );
+        return unitPrice > 0;
+      });
+      if (hasValidItems) {
+        setAbandonedCartPrompt(cachedCart);
+      } else {
+        clearCachedCheckoutCart(commerceIdentifier);
+      }
+    }
+    setCartCacheReady(true);
+  }, [categoryByProductId, commerceIdentifier, productById]);
 
   const cartItems = useMemo(() => {
     return Object.entries(cart)
@@ -2118,11 +2577,202 @@ export default function PublicMenuPage() {
     }>;
   }, [cart, categoryByProductId, productById]);
 
-  const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
+  const cartCount = useMemo(
+    () =>
+      cartItems.reduce(
+        (sum, item) => sum + cartBadgeQuantity(item.product, item.quantity),
+        0,
+      ),
+    [cartItems],
+  );
   const cartTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems],
   );
+
+  useEffect(() => {
+    if (!commerceIdentifier || !cartCacheReady || abandonedCartPrompt) return;
+    if (kioskVoucher) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    if (cartItems.length === 0) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    writeCachedCheckoutCart(commerceIdentifier, {
+      items: cartItems.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        selection: item.selection,
+      })),
+      fulfillment: kioskFulfillment,
+    });
+  }, [abandonedCartPrompt, cartCacheReady, cartItems, commerceIdentifier, kioskFulfillment, kioskVoucher]);
+
+  const hasActiveCart = cartCount > 0 && !kioskVoucher;
+
+  const menuOverlayHistoryDepth = useMemo(() => {
+    let depth = 0;
+    if (catalogReady) depth += 1;
+    if (kioskAddedPrompt) depth += 1;
+    if (expandedProductImage) depth += 1;
+    if (isInfoOpen) depth += 1;
+    if (isQuickActionsOpen) depth += 1;
+    if (addToCartSheet.open) depth += 1;
+    if (productOptionsSheet.open) depth += 1;
+    if (isMapPickerOpen) depth += 1;
+    if (isPreCheckoutUpsellOpen) depth += 1;
+    if (paymentProofLightboxUrl) depth += 1;
+    if (isConfirmOpen) {
+      depth += 1 + Math.max(0, checkoutStep);
+    }
+    if (isOrderReviewOpen) depth += 1;
+    if (abandonedCartPrompt) depth += 1;
+    if (leaveConfirmOpen) depth += 1;
+    return depth;
+  }, [
+    abandonedCartPrompt,
+    addToCartSheet.open,
+    catalogReady,
+    checkoutStep,
+    expandedProductImage,
+    isConfirmOpen,
+    isInfoOpen,
+    isMapPickerOpen,
+    isOrderReviewOpen,
+    isPreCheckoutUpsellOpen,
+    isQuickActionsOpen,
+    kioskAddedPrompt,
+    leaveConfirmOpen,
+    paymentProofLightboxUrl,
+    productOptionsSheet.open,
+  ]);
+
+  const menuShellHistoryDepth = useMemo(() => {
+    const kioskDepth = catalogReady ? 0 : kioskHistoryDepth;
+    const overlays = menuOverlayHistoryDepth;
+    const atBrowseRoot = kioskDepth === 0 && overlays === 0;
+    const cartGuard = hasActiveCart && atBrowseRoot ? 1 : 0;
+    return kioskDepth + overlays + cartGuard;
+  }, [catalogReady, hasActiveCart, kioskHistoryDepth, menuOverlayHistoryDepth]);
+
+  const menuBrowserBackRef = useRef<() => void>(() => {});
+  menuBrowserBackRef.current = () => {
+    if (allowLeaveRef.current) {
+      allowLeaveRef.current = false;
+      leaveGuardArmedRef.current = false;
+      return;
+    }
+
+    // Highest UI layers first (same order users expect from in-app back).
+    if (leaveConfirmOpen) {
+      setLeaveConfirmOpen(false);
+      return;
+    }
+    if (abandonedCartPrompt) {
+      setAbandonedCartPrompt(null);
+      return;
+    }
+    if (paymentProofLightboxUrl) {
+      setPaymentProofLightboxUrl(null);
+      return;
+    }
+    if (isOrderReviewOpen) {
+      setIsOrderReviewOpen(false);
+      return;
+    }
+    if (isMapPickerOpen) {
+      setIsMapPickerOpen(false);
+      return;
+    }
+    if (productOptionsSheet.open) {
+      setProductOptionsSheet({ open: false, productId: null });
+      return;
+    }
+    if (addToCartSheet.open) {
+      setAddToCartSheet({ open: false, suggestions: [] });
+      return;
+    }
+    if (isPreCheckoutUpsellOpen) {
+      setIsPreCheckoutUpsellOpen(false);
+      return;
+    }
+    if (isConfirmOpen) {
+      if (checkoutStep > 0) {
+        if (checkoutStep === 3 && deliveryMode !== 'delivery') {
+          setCheckoutStep(1);
+        } else {
+          setCheckoutStep((prev) => Math.max(0, prev - 1));
+        }
+      } else {
+        setIsConfirmOpen(false);
+      }
+      return;
+    }
+    if (expandedProductImage) {
+      setExpandedProductImage(null);
+      return;
+    }
+    if (isInfoOpen) {
+      setIsInfoOpen(false);
+      return;
+    }
+    if (isQuickActionsOpen) {
+      setIsQuickActionsOpen(false);
+      return;
+    }
+    if (kioskAddedPrompt) {
+      setKioskAddedPrompt(null);
+      return;
+    }
+    if (catalogReady) {
+      returnToCatalogMenu();
+      return;
+    }
+    if (kioskShellRef.current?.handleBack()) {
+      return;
+    }
+
+    if (hasActiveCart) {
+      leaveGuardArmedRef.current = true;
+      setLeaveConfirmOpen(true);
+      return;
+    }
+
+    leaveGuardArmedRef.current = false;
+  };
+
+  const hasActiveCartRef = useRef(hasActiveCart);
+  hasActiveCartRef.current = hasActiveCart;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasActiveCartRef.current || allowLeaveRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    attachMenuShellHistory(() => {
+      // Ignore pops that belong to our own history sync (closing a sheet,
+      // finishing a step, etc). Those must never re-enter shell back.
+      if (isMenuShellHistorySyncing()) return;
+      menuBrowserBackRef.current();
+    });
+
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      detachMenuShellHistory();
+    };
+  }, []);
+
+  useEffect(() => {
+    setMenuShellHistoryDepth(menuShellHistoryDepth);
+    leaveGuardArmedRef.current = hasActiveCart;
+  }, [hasActiveCart, menuShellHistoryDepth]);
 
   function getProductCartQuantity(productId: string) {
     return Object.entries(cart).reduce((sum, [cartKey, quantity]) => {
@@ -2248,6 +2898,46 @@ export default function PublicMenuPage() {
       window.cancelAnimationFrame(frameId);
     };
   }, [loading, menuData, prefersReducedMotion]);
+
+  // Grayscale skeleton → color once. Keep enter-motion suppressed forever on this page so
+  // unmounting the overlay does not restart kiosk-enter (that was the “second transition”).
+  useEffect(() => {
+    if (bootRevealDoneRef.current) {
+      setBootSkeletonOpaque(false);
+      setBootSkeletonVisible(false);
+      return;
+    }
+    if (loading) return;
+
+    const markDone = () => {
+      bootRevealDoneRef.current = true;
+      if (commerceIdentifier) bootRevealCompletedIds.add(commerceIdentifier);
+    };
+
+    if (prefersReducedMotion) {
+      markDone();
+      setBootSkeletonOpaque(false);
+      setBootSkeletonVisible(false);
+      return;
+    }
+
+    let cancelled = false;
+    const fadeFrame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      setBootSkeletonOpaque(false);
+    });
+    const hideTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      markDone();
+      setBootSkeletonVisible(false);
+    }, 380);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(fadeFrame);
+      window.clearTimeout(hideTimer);
+    };
+  }, [loading, prefersReducedMotion, commerceIdentifier]);
 
   useEffect(() => {
     if (filteredCategorias.length === 0) {
@@ -2425,28 +3115,17 @@ export default function PublicMenuPage() {
   const itemsPerRow = clampItemsPerRow(undefined, layoutType);
   const showImages = layoutType !== 'compact';
   const borderRadius = borderRadiusByStyle(null);
-  const headingFont = normalizeFontName(menuData?.comercio.menu_font) || 'Poppins';
-
-  const googleFontsUrl = useMemo(
-    () =>
-      getGoogleFontsUrl({
-        fuente_titulos: headingFont,
-        fuente_cuerpo: 'Inter',
-      }),
-    [headingFont],
-  );
-
   const containerStyle = useMemo(
     () =>
       ({
         ...menuThemeCssVars(menuTheme),
         '--border-radius': borderRadius,
-        '--font-title': fontFamilyCssValue(headingFont, 'Poppins, sans-serif'),
-        '--font-body': fontFamilyCssValue('Inter', 'system-ui, sans-serif'),
+        '--font-title': 'var(--font-display), "Poppins", system-ui, sans-serif',
+        '--font-body': 'var(--font-body), "Poppins", system-ui, sans-serif',
         color: 'var(--menu-text)',
         fontFamily: 'var(--font-body)',
       }) as React.CSSProperties,
-    [menuTheme, borderRadius, headingFont],
+    [menuTheme, borderRadius],
   );
 
   const titleFontStyle = useMemo(() => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties, []);
@@ -2468,12 +3147,17 @@ export default function PublicMenuPage() {
     .map(([network, value]) => ({ network, href: normalizeSocialUrl(value) }))
     .filter((item) => item.href);
   const kioskHomeConfig = parseKioskHomeConfig(menuData?.comercio.inicio_menu);
+  const catalogUrlLocked = catalogFromUrl && !isAssistedMode;
+  // Prefer a single flag: URL lock can briefly lead catalogMode during hydration.
+  const inCatalogSession = catalogMode || catalogUrlLocked;
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
   const normalizedDeliveryInstructions = deliveryInstructions.trim();
   const normalizedOrderNotes = orderNotes.trim();
-  const isDeliveryOrder = supportsDelivery && deliveryMode === 'delivery';
+  // Align with home/badge choice; deliveryMode alone can lag while menuData loads.
+  const isDeliveryOrder =
+    supportsDelivery && (kioskFulfillment === 'delivery' || deliveryMode === 'delivery');
   const comercioAddress = [menuData?.comercio.direccion, menuData?.comercio.ciudad]
     .map((item) => (item ?? '').trim())
     .filter(Boolean)
@@ -2485,6 +3169,7 @@ export default function PublicMenuPage() {
     ? `${businessLat},${businessLng}`
     : comercioAddress || `${comercioNombre} ${resolvedSlug}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
+  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}`;
   const mapEmbedUrl = hasBusinessCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${businessLat},${businessLng}`)}&z=16&output=embed`
     : `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=15&output=embed`;
@@ -2500,9 +3185,19 @@ export default function PublicMenuPage() {
     ? (parsePhoneNumber(normalizedClientWhatsapp)?.formatInternational() ?? normalizedClientWhatsapp)
     : '';
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
+  const normalizedClientTable = clientTable.trim();
   const isClientNameValid = normalizedClientName.length >= 3;
-  const isClientWhatsappValid = normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
-  const isClientEmailValid = normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
+  const isClientTableValid = !isAssistedMode || normalizedClientTable.length > 0;
+  const isClientWhatsappValid = isAssistedMode
+    ? normalizedClientWhatsapp.length === 0 ||
+      isValidPhoneNumber(normalizedClientWhatsapp) ||
+      normalizePhone(normalizedClientWhatsapp).length >= 10
+    : normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
+  const isClientEmailValid = isAssistedMode || !wantOrderEmail
+    ? normalizedClientEmail.length === 0 || emailRegex.test(normalizedClientEmail)
+    : normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
+  const clientEmailForOrder =
+    isAssistedMode || wantOrderEmail ? normalizedClientEmail : '';
   const orderSubtotal = cartTotal;
   const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
   const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
@@ -2544,7 +3239,20 @@ export default function PublicMenuPage() {
       }),
   });
   const deliveryCost = deliveryQuote.fee;
-  const orderGrandTotal = orderSubtotal + deliveryCost;
+  const productDeliverySurchargeSummary = useMemo(
+    () =>
+      summarizeProductDeliverySurcharges(
+        cartItems.map((item) => ({
+          product: item.product,
+          quantity: item.quantity,
+          selection: item.selection,
+        })),
+        isDeliveryOrder,
+      ),
+    [cartItems, isDeliveryOrder],
+  );
+  const productDeliverySurcharge = productDeliverySurchargeSummary.total;
+  const orderGrandTotal = orderSubtotal + productDeliverySurcharge + deliveryCost;
   const brandingCheckoutConfig = useMemo(
     () => ({
       currencies: menuData?.checkoutExchange?.currencies ?? [],
@@ -2605,11 +3313,16 @@ export default function PublicMenuPage() {
         .filter((group) => group.methods.length > 0)
         .map((group) => ({
           currency: group.currency,
-          methods: group.methods.map((method) => ({
-            id: method.id,
-            label: paymentMethodLabel(method),
-            details: paymentMethodDetails(method).join(' · '),
-          })),
+          methods: group.methods.map((method) => {
+            const parsed = paymentMethodCopyModel(method);
+            return {
+              id: method.id,
+              label: paymentMethodLabel(method),
+              details: paymentMethodDetails(method).join(' · '),
+              fields: parsed.fields,
+              note: parsed.note,
+            };
+          }),
         })),
     [paymentMethodsByCurrency],
   );
@@ -2716,13 +3429,60 @@ export default function PublicMenuPage() {
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+  const productDeliverySurchargeConverted = convertFromBaseCurrency(
+    productDeliverySurcharge,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
   const orderGrandTotalConverted = convertFromBaseCurrency(
     orderGrandTotal,
     businessBaseCurrency,
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+  const productDeliverySurchargeLineLabel = (() => {
+    if (!isDeliveryOrder || productDeliverySurcharge <= 0) return null;
+    const labels = [
+      ...new Set(
+        productDeliverySurchargeSummary.lines
+          .map((line) => line.label.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (labels.length === 1) return labels[0];
+    if (labels.length > 1) return 'Recargos de delivery';
+    return 'Empaque / delivery';
+  })();
   const showEngineDeliveryLine = isDeliveryOrder && deliveryQuote.applied;
+  const deliveryOutOfZoneAllowed = Boolean(deliveryQuote.outOfZone && !deliveryQuote.blocked);
+  const deliveryAreaZonesForMap = useMemo(() => {
+    if (!isDeliveryOrder) return [];
+    const cfg = parseDeliveryConfig(menuData?.comercio.delivery_tarifas);
+    if (cfg.pricingType !== 'area_zones') return [];
+    return cfg.areaZones.filter((zone) => zone.polygon.length >= 3);
+  }, [isDeliveryOrder, menuData?.comercio.delivery_tarifas]);
+  const matchedDeliveryAreaZone = useMemo(() => {
+    if (!deliveryPoint || deliveryAreaZonesForMap.length === 0) return null;
+    return (
+      deliveryAreaZonesForMap.find((zone) =>
+        pointInPolygon(deliveryPoint, zone.polygon),
+      ) ?? null
+    );
+  }, [deliveryPoint, deliveryAreaZonesForMap]);
+  const mapPickerDeliveryCostLabel =
+    isDeliveryOrder && deliveryPoint && !deliveryQuote.blocked && !deliveryOutOfZoneAllowed
+      ? deliveryQuote.free
+        ? 'Gratis'
+        : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)
+      : null;
+  const mapPickerEtaLabel = (() => {
+    const km = deliveryQuote.distanceKm;
+    if (!mapPickerDeliveryCostLabel || km == null || !Number.isFinite(km)) return null;
+    const low = Math.max(15, Math.round(km * 3.5 + 12));
+    const high = low + 10;
+    return `${low} – ${high} min`;
+  })();
   const deliveryLineLabel = !isDeliveryOrder
     ? null
     : showEngineDeliveryLine
@@ -2730,11 +3490,26 @@ export default function PublicMenuPage() {
       : 'Costo de envio';
   const deliveryLineValue = !isDeliveryOrder
     ? null
-    : showEngineDeliveryLine && deliveryQuote.free
-      ? 'Gratis 🎉'
-      : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+    : deliveryOutOfZoneAllowed
+      ? 'A acordar'
+      : showEngineDeliveryLine && deliveryQuote.free
+        ? 'Gratis 🎉'
+        : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+  const deliveryDistanceLabel = (() => {
+    const km = deliveryQuote.distanceKm;
+    if (!isDeliveryOrder || km == null || !Number.isFinite(km)) return null;
+    const rounded = Math.round(km * 10) / 10;
+    const text = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1).replace('.', ',');
+    return `${text} km`;
+  })();
+  const deliveryPriceWithDistance = deliveryLineValue
+    ? [deliveryLineValue, deliveryDistanceLabel].filter(Boolean).join(' · ')
+    : null;
+  const deliveryOutOfZoneNotice =
+    'Tu ubicación está fuera de las zonas de cobertura. Puedes continuar con el pedido: el costo de envío lo confirmará el negocio y no está incluido en este total.';
   const deliveryEngineNote = showEngineDeliveryLine
     ? [
+        deliveryOutOfZoneAllowed ? deliveryOutOfZoneNotice : '',
         deliveryQuote.blockReason ?? '',
         typeof deliveryQuote.snapshot?.custom_message === 'string'
           ? deliveryQuote.snapshot.custom_message
@@ -2749,6 +3524,113 @@ export default function PublicMenuPage() {
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+
+  const abandonedCartPreview = useMemo(() => {
+    if (!abandonedCartPrompt) {
+      return {
+        items: [] as Array<{
+          id: string;
+          name: string;
+          quantity: number;
+          imageUrl: string | null;
+          lineTotalLabel: string;
+        }>,
+        itemCount: 0,
+        totalLabel: formatAmountByCurrency(0, selectedCurrencyCode),
+        fulfillmentLabel: null as string | null,
+        savedLabel: null as string | null,
+      };
+    }
+
+    let totalBase = 0;
+    let itemCount = 0;
+    const items: Array<{
+      id: string;
+      name: string;
+      quantity: number;
+      imageUrl: string | null;
+      lineTotalLabel: string;
+    }> = [];
+
+    for (const [index, line] of abandonedCartPrompt.items.entries()) {
+      const product = productById.get(line.productId);
+      if (!product) continue;
+      const selection = line.selection ?? {};
+      if (menuLineInvalid(product, selection, productById)) continue;
+      const category = categoryByProductId.get(line.productId) ?? null;
+      const unitPrice = menuLinePrice(product, category, selection, productById, categoryByProductId);
+      if (unitPrice <= 0) continue;
+      const lineTotal = unitPrice * line.quantity;
+      totalBase += lineTotal;
+      itemCount += cartBadgeQuantity(product, line.quantity);
+      const lineTotalConverted = convertFromBaseCurrency(
+        lineTotal,
+        businessBaseCurrency,
+        selectedCurrencyCode,
+        selectedExchangeRate,
+      );
+      items.push({
+        id: `${line.productId}-${index}`,
+        name: menuLineLabel(product, selection, category, productById),
+        quantity: line.quantity,
+        imageUrl: displayProductImage(product.imagen_url) || null,
+        lineTotalLabel: formatAmountByCurrency(lineTotalConverted, selectedCurrencyCode),
+      });
+    }
+
+    const totalConverted = convertFromBaseCurrency(
+      totalBase,
+      businessBaseCurrency,
+      selectedCurrencyCode,
+      selectedExchangeRate,
+    );
+
+    let savedLabel: string | null = null;
+    if (abandonedCartPrompt.savedAt) {
+      const savedAtMs = Date.parse(abandonedCartPrompt.savedAt);
+      if (Number.isFinite(savedAtMs)) {
+        const minutes = Math.max(0, Math.round((Date.now() - savedAtMs) / 60000));
+        if (minutes < 1) savedLabel = 'Guardado hace un momento';
+        else if (minutes < 60) savedLabel = `Guardado hace ${minutes} min`;
+        else if (minutes < 60 * 24) {
+          const hours = Math.round(minutes / 60);
+          savedLabel = hours === 1 ? 'Guardado hace 1 h' : `Guardado hace ${hours} h`;
+        } else {
+          const days = Math.round(minutes / (60 * 24));
+          savedLabel = days === 1 ? 'Guardado ayer' : `Guardado hace ${days} días`;
+        }
+      }
+    }
+
+    return {
+      items,
+      itemCount,
+      totalLabel: formatAmountByCurrency(totalConverted, selectedCurrencyCode),
+      fulfillmentLabel: abandonedCartPrompt.fulfillment
+        ? CHECKOUT_FULFILLMENT_CHOICE_LABEL[
+            !isAssistedMode && abandonedCartPrompt.fulfillment === 'dine_in'
+              ? 'takeaway'
+              : abandonedCartPrompt.fulfillment
+          ]
+        : null,
+      savedLabel,
+    };
+  }, [
+    abandonedCartPrompt,
+    businessBaseCurrency,
+    categoryByProductId,
+    isAssistedMode,
+    productById,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  ]);
+
+  useEffect(() => {
+    if (!abandonedCartPrompt || abandonedCartPreview.itemCount > 0) return;
+    clearCachedCheckoutCart(commerceIdentifier);
+    setAbandonedCartPrompt(null);
+  }, [abandonedCartPreview.itemCount, abandonedCartPrompt, commerceIdentifier]);
+
   const summaryCategoryCount = filteredCategorias.length;
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
   const statsMotionEnabled = isExperienceReady || statsCardsVisible;
@@ -2763,10 +3645,15 @@ export default function PublicMenuPage() {
     prefersReducedMotion ? MOTION_TOKENS.duration.instant : 1250,
   );
   const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl, 1200);
-  const heroLocation = [menuData?.comercio.ciudad, menuData?.comercio.direccion]
-    .map((item) => (item ?? '').trim())
-    .filter(Boolean)
-    .join(', ');
+  const heroLocation = menuData?.comercio.negocio_virtual
+    ? ''
+    : [menuData?.comercio.ciudad, menuData?.comercio.direccion]
+        .map((item) => (item ?? '').trim())
+        .filter(Boolean)
+        .join(', ');
+  const operatingStateLabels = menuData?.comercio.negocio_virtual
+    ? venezuelaOperatingStateLabels(menuData.comercio.estados_operacion)
+    : [];
   const heroSubtitle =
     menuData?.comercio.descripcion?.trim() ||
     (visibleCategorias[0]?.displayName
@@ -3010,25 +3897,63 @@ export default function PublicMenuPage() {
     return active.length ? active : source;
   }, [activeCategoryId, formatUpsellPrice, visibleCategorias]);
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
-  const checkoutFlowSteps = isDeliveryOrder
-    ? [
-        { id: 0, title: 'Pedido' },
-        { id: 1, title: 'Tus datos' },
-        { id: 2, title: 'Direccion' },
-        { id: 3, title: 'Pago' },
-      ]
-    : [
-        { id: 0, title: 'Pedido' },
-        { id: 1, title: 'Tus datos' },
-        { id: 3, title: 'Pago' },
-      ];
+  const clientStepTitle = isAssistedMode ? 'Datos del cliente' : 'Tus datos';
+  // Public web: context picks the mode. QR/catalog = comer aquí (catalog-only, no picker).
+  // Link / share: delivery by default; pickup only via switch on the delivery step.
+  const checkoutFulfillmentOptions: KioskFulfillment[] = [];
+  if (!isAssistedMode && !catalogUrlLocked) {
+    const canDelivery = kioskHomeConfig.delivery && supportsDelivery;
+    if (canDelivery) {
+      checkoutFulfillmentOptions.push('delivery');
+      checkoutFulfillmentOptions.push('takeaway');
+    } else if (kioskHomeConfig.paraLlevar || kioskHomeConfig.comerAqui) {
+      checkoutFulfillmentOptions.push('takeaway');
+    }
+  }
+  const preferredCheckoutFulfillment: KioskFulfillment | null =
+    checkoutFulfillmentOptions.includes('delivery')
+      ? 'delivery'
+      : checkoutFulfillmentOptions[0] ?? null;
+  // Keep the Entrega step in the flow whenever delivery is offered, even if the
+  // customer flips the “paso a buscarlo” switch (so they can flip back).
+  const offersDeliveryAddressStep = checkoutFulfillmentOptions.includes('delivery');
+  const checkoutFlowSteps =
+    isDeliveryOrder || offersDeliveryAddressStep
+      ? [
+          { id: 0, title: 'Pedido' },
+          { id: 1, title: clientStepTitle },
+          { id: 2, title: 'Entrega' },
+          { id: 3, title: 'Pago' },
+        ]
+      : [
+          { id: 0, title: 'Pedido' },
+          { id: 1, title: clientStepTitle },
+          { id: 3, title: 'Pago' },
+        ];
+  const publicFulfillmentIsValid =
+    Boolean(kioskFulfillment) &&
+    (checkoutFulfillmentOptions.length === 0 ||
+      checkoutFulfillmentOptions.includes(kioskFulfillment as KioskFulfillment));
+  // After removing the fulfillment card, Continuar must not wait on a null state
+  // while delivery/pickup is already known from context.
+  // Mesa QR / catalog has no public picker — treat it as dine-in so Continuar works.
+  const effectiveCheckoutFulfillment: KioskFulfillment | null = isAssistedMode
+    ? 'dine_in'
+    : inCatalogSession
+      ? 'dine_in'
+      : publicFulfillmentIsValid
+        ? kioskFulfillment
+        : preferredCheckoutFulfillment;
+  const prefersSelfPickup =
+    offersDeliveryAddressStep &&
+    (kioskFulfillment === 'takeaway' ||
+      (!kioskFulfillment && preferredCheckoutFulfillment === 'takeaway'));
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
   const isDigitalPayment = Boolean(selectedMethod) && !isCashPayment;
-  const paymentReferenceLast4 = normalizePhone(digitalPaymentReference).slice(-4);
-  const isPaymentReferenceValid = !isDigitalPayment || /^\d{4}$/.test(paymentReferenceLast4);
-  const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
+  const hasPaymentProof =
+    !isDigitalPayment || paymentProofFiles.length >= Math.max(1, requiredPaymentProofCount);
   const paymentWithAmount = isCashPayment
     ? parseCashAmount(cashPaymentInput, selectedCurrencyCode)
     : null;
@@ -3039,8 +3964,13 @@ export default function PublicMenuPage() {
     ? suggestCashTenders(orderGrandTotalConverted, selectedCurrencyCode)
     : [];
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
-  const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
-  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
+  // Coords are enough to continue; street text may be missing when reverse-geocode fails.
+  const isDeliveryAddressValid =
+    !isDeliveryOrder ||
+    normalizedDeliveryAddress.length >= 6 ||
+    (deliveryPoint !== null && deliveryPointSource === 'user');
+  const isDeliveryReferenceValid = !isDeliveryOrder || normalizedDeliveryReference.length >= 3;
+  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint && isDeliveryReferenceValid;
   const checkoutStepDescriptions = ['Edita tu pedido', 'Tus datos', 'Entrega', 'Pago'];
   const checkoutProgress = (checkoutStep + 1) / checkoutStepTitles.length;
   const nextStepCtaLabels = ['Continuar', 'Continuar', 'Continuar'];
@@ -3054,13 +3984,19 @@ export default function PublicMenuPage() {
           selectedExchangeRate,
         );
         const optionSummary = menuLineSummary(product, selection, category, productById, categoryByProductId);
+        const soldByWeight = isSoldByWeight(product);
+        const weight = getWeightSaleConfig(product);
         return {
           id: cartKey,
           name: menuLineLabel(product, selection, category, productById),
           description: optionSummary || (selection.combinacion ? '' : (product.descripcion ?? '').trim()),
           imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.thumb),
+          imageSourceUrl: (product.imagen_url ?? '').trim() || null,
           quantity,
-          canIncrease: baseUnitPrice > 0,
+          soldByWeight,
+          canIncrease:
+            baseUnitPrice > 0 &&
+            (!weight || quantity + weight.paso <= weight.maximo + 1e-9),
           unitPrice,
           totalPrice: unitPrice * quantity,
         };
@@ -3074,9 +4010,21 @@ export default function PublicMenuPage() {
       selectedExchangeRate,
     ],
   );
-  const checkoutItemsCount = checkoutSummaryItems.reduce((sum, item) => sum + item.quantity, 0);
-  const canGoNextFromStep0 = checkoutItemsCount > 0;
-  const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
+  const checkoutItemsCount = useMemo(
+    () =>
+      checkoutSummaryItems.reduce(
+        (sum, item) => sum + (item.soldByWeight ? 1 : item.quantity),
+        0,
+      ),
+    [checkoutSummaryItems],
+  );
+  const canGoNextFromStep0 =
+    checkoutSummaryItems.length > 0 &&
+    (isAssistedMode || Boolean(effectiveCheckoutFulfillment));
+  const canGoNextFromStep1 =
+    isClientNameValid &&
+    isClientTableValid &&
+    isClientWhatsappValid;
   const canGoNextFromStep2 = isDeliveryReady && !deliveryQuote.blocked;
   const scheduleStatus = useMemo(
     () => resolveBusinessScheduleStatus(menuData?.comercio?.horarios),
@@ -3095,21 +4043,146 @@ export default function PublicMenuPage() {
   const kioskCategories = useMemo(
     () =>
       categoriasConProductos.map((categoria) => {
-        const cover =
-          categoria.productos
-            .map((producto) =>
-              displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.category),
-            )
-            .find(Boolean) ?? null;
+        const customCover = (categoria.imagen_url ?? '').trim();
+        const firstProductCover =
+          categoria.productos.find((product) => {
+            const url = (product.imagen_url ?? '').trim();
+            return Boolean(url) && url !== (comercioLogoUrl ?? '').trim();
+          })?.imagen_url ?? null;
+        const coverSource = customCover || firstProductCover;
         return {
           id: categoria.id,
           name: formatCategoryDisplayName(categoria.nombre),
           glyph: resolveCategoryVisual(categoria).glyph,
-          coverUrl: cover,
+          coverUrl: resolveCategoryCover(
+            categoria.imagen_url,
+            categoria.productos,
+            comercioLogoUrl,
+            MENU_IMAGE_WIDTH.tile,
+          ),
+          coverSourceUrl: coverSource,
           productCount: categoria.productos.length,
+          role: (categoria.rol ?? '').toString().trim() || null,
         };
       }),
     [categoriasConProductos, comercioLogoUrl],
+  );
+  // Chat snapshots only when assistant mode is active — skip work on normal menu.
+  const chatCatalog = useMemo<ChatCatalogSnapshot | null>(() => {
+    if (!isChatbotMode || categoriasConProductos.length === 0) return null;
+    const currency = businessBaseCurrency;
+    const categories: ChatCatalogSnapshot['categories'] = [];
+    const products: ChatCatalogSnapshot['products'] = [];
+    for (const categoria of categoriasConProductos) {
+      const sorted = categoria.productos
+        .slice()
+        .sort(
+          (left, right) =>
+            (left.orden ?? Number.MAX_SAFE_INTEGER) -
+            (right.orden ?? Number.MAX_SAFE_INTEGER),
+        );
+      {
+        const customCover = (categoria.imagen_url ?? '').trim();
+        const firstProductCover =
+          sorted.find((product) => {
+            const url = (product.imagen_url ?? '').trim();
+            return Boolean(url) && url !== (comercioLogoUrl ?? '').trim();
+          })?.imagen_url ?? null;
+        const coverSource = (customCover || firstProductCover || '').trim() || null;
+        categories.push({
+          id: categoria.id,
+          name: formatCategoryDisplayName(categoria.nombre),
+          // Chat thumbs only (~70–110 CSS px) — keep small so assistant images
+          // do not compete with the normal menu tile/hero cascade.
+          imageUrl:
+            resolveCategoryCover(
+              categoria.imagen_url,
+              sorted,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.thumb,
+            ) || null,
+          imageSourceUrl: coverSource,
+          productCount: sorted.length,
+          availableCount: sorted.filter((p) => p.disponible !== false).length,
+        });
+      }
+      for (const product of sorted) {
+        const price = getProductMinimumPrice(product);
+        const rawImage = (product.imagen_url ?? '').trim() || null;
+        products.push({
+          id: product.id,
+          categoryId: categoria.id,
+          name: product.nombre,
+          description: (product.descripcion ?? '').trim() || null,
+          imageUrl:
+            displayProductImage(
+              product.imagen_url,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.thumb,
+            ) || null,
+          imageSourceUrl: rawImage,
+          price: Number.isFinite(price) && price > 0 ? price : Number(product.precio ?? 0) || 0,
+          currency,
+          available: product.disponible !== false,
+          requiresConfiguration: productRequiresConfiguration(product, categoria),
+        });
+      }
+    }
+    return { currency, categories, products };
+  }, [
+    isChatbotMode,
+    categoriasConProductos,
+    businessBaseCurrency,
+    comercioLogoUrl,
+  ]);
+  const chatPaymentMethods = useMemo(
+    () =>
+      isChatbotMode
+        ? toChatPaymentMethods(menuData?.metodosPago, businessBaseCurrency)
+        : [],
+    [isChatbotMode, menuData?.metodosPago, businessBaseCurrency],
+  );
+  const chatBusinessLocation = useMemo(
+    () =>
+      isChatbotMode
+        ? buildBusinessLocation({
+            lat: businessLat,
+            lng: businessLng,
+            name: comercioNombre,
+            address: comercioAddress || null,
+          })
+        : null,
+    [
+      isChatbotMode,
+      businessLat,
+      businessLng,
+      comercioNombre,
+      comercioAddress,
+    ],
+  );
+  const chatBusinessHours = useMemo(
+    () =>
+      isChatbotMode
+        ? buildChatHoursSnapshot(menuData?.comercio?.horarios)
+        : null,
+    [isChatbotMode, menuData?.comercio?.horarios],
+  );
+  const chatFulfillmentOptions = useMemo(
+    () =>
+      isChatbotMode
+        ? {
+            delivery: supportsDelivery && kioskHomeConfig.delivery !== false,
+            pickup: kioskHomeConfig.paraLlevar !== false,
+            dineIn: kioskHomeConfig.comerAqui !== false,
+          }
+        : null,
+    [
+      isChatbotMode,
+      supportsDelivery,
+      kioskHomeConfig.delivery,
+      kioskHomeConfig.paraLlevar,
+      kioskHomeConfig.comerAqui,
+    ],
   );
   const kioskProductsByCategory = useMemo(() => {
     const map: Record<string, Array<{
@@ -3118,34 +4191,108 @@ export default function PublicMenuPage() {
       description: string;
       priceLabel: string;
       imageUrl: string | null;
+      imageSourceUrl: string | null;
       available: boolean;
+      unavailableLabel: string | null;
       optionsSummary: string | null;
     }>> = {};
     for (const categoria of categoriasConProductos) {
-      map[categoria.id] = categoria.productos.map((producto) => ({
-        id: producto.id,
-        name: producto.nombre,
-        description: (producto.descripcion ?? '').trim(),
-        priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
-        imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
-        available: producto.disponible !== false,
-        optionsSummary: getProductOptionsSummary(producto),
-      }));
+      map[categoria.id] = categoria.productos.map((producto) => {
+        const excludedFromDelivery =
+          isDeliveryOrder && isProductExcludedFromDelivery(producto);
+        const deliverySurcharge = getProductDeliverySurcharge(producto, isDeliveryOrder);
+        const surchargeLabel = getProductDeliverySurchargeLabel(producto);
+        const basePriceLabel = formatProductPriceLabel(producto, formatUpsellPrice);
+        const priceLabel = excludedFromDelivery
+          ? basePriceLabel
+          : productHasOptionDeliverySurcharge(producto) && isDeliveryOrder
+            ? `${basePriceLabel} · +${surchargeLabel || 'empaque'} según opción`
+            : deliverySurcharge > 0
+              ? `${basePriceLabel} + ${formatUpsellPrice(deliverySurcharge)}${
+                  surchargeLabel ? ` (${surchargeLabel})` : ''
+                }`
+              : basePriceLabel;
+        return {
+          id: producto.id,
+          name: producto.nombre,
+          description: (producto.descripcion ?? '').trim(),
+          priceLabel,
+          // List tiles ~124 CSS px @2–3x → cold card WebP (360w) for sharpness.
+          imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
+          imageSourceUrl: (producto.imagen_url ?? '').trim() || null,
+          available: producto.disponible !== false && !excludedFromDelivery,
+          unavailableLabel: excludedFromDelivery ? 'No delivery' : null,
+          optionsSummary: getProductOptionsSummary(producto),
+        };
+      });
     }
     return map;
-  }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice]);
+  }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice, isDeliveryOrder]);
 
-  function selectKioskFulfillment(next: KioskFulfillment) {
-    if (scheduleClosed) return;
-    setKioskFulfillment(next);
-    setDeliveryMode(next === 'delivery' ? 'delivery' : 'pickup');
+  function selectKioskFulfillment(next: KioskFulfillment): KioskFulfillment | null {
+    if (scheduleClosed) return null;
+    // Mesa QR (?catalogo=1) stays catalog-only; do not open WhatsApp checkout paths.
+    if (catalogUrlLocked) return null;
+    // Waiters only serve dine-in at the table. Public web never uses dine-in.
+    const resolved: KioskFulfillment = isAssistedMode
+      ? 'dine_in'
+      : next === 'dine_in'
+        ? 'takeaway'
+        : next;
+    setKioskFulfillment(resolved);
+    setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
     setSearchQuery('');
-    if (typeof window !== 'undefined' && commerceIdentifier) {
-      window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, next);
+    if (resolved === 'delivery') {
+      setCart((prev) => {
+        let changed = false;
+        const nextCart = { ...prev };
+        for (const cartKey of Object.keys(nextCart)) {
+          const { productId } = parseCartLineKey(cartKey);
+          const product = productById.get(productId);
+          if (product && isProductExcludedFromDelivery(product)) {
+            delete nextCart[cartKey];
+            changed = true;
+          }
+        }
+        return changed ? nextCart : prev;
+      });
     }
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, resolved);
+    }
+    return resolved;
+  }
+
+  /** Public checkout no longer asks for mode on step 0 — seed delivery/pickup from context. */
+  function ensurePublicCheckoutFulfillment(): KioskFulfillment | null {
+    if (isAssistedMode) {
+      selectKioskFulfillment('dine_in');
+      return 'dine_in';
+    }
+    // QR/catalog checkout is always “Comer aquí”; do not require delivery/pickup seed.
+    if (inCatalogSession) return 'dine_in';
+    if (publicFulfillmentIsValid) return kioskFulfillment;
+    if (preferredCheckoutFulfillment) {
+      return selectKioskFulfillment(preferredCheckoutFulfillment);
+    }
+    // Chat can reach pay without a home-mode pick; never block with a silent no-op.
+    return selectKioskFulfillment('takeaway');
   }
 
   function resetKioskFulfillment() {
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      setSearchQuery('');
+      return;
+    }
+    if (catalogUrlLocked) {
+      setCatalogMode(true);
+      setKioskFulfillment(null);
+      setDeliveryMode('pickup');
+      setSearchQuery('');
+      return;
+    }
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
     setSearchQuery('');
@@ -3156,20 +4303,25 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (!scheduleClosed) return;
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      return;
+    }
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
     setKioskAddedPrompt(null);
     setIsConfirmOpen(false);
-    if (!catalogMode) {
-      setProductOptionsSheet({ open: false, productId: null });
-    }
+    // Keep product detail open for browse-only viewing while closed.
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     }
-  }, [scheduleClosed, commerceIdentifier, catalogMode]);
+  }, [scheduleClosed, commerceIdentifier, isAssistedMode]);
 
   function enterCatalogMode() {
-    if (!kioskHomeConfig.catalogo) return;
+    // Manual entry from home, or mesa QR without waiting for merchant "solo catálogo".
+    if (!kioskHomeConfig.catalogo && !catalogUrlLocked) return;
+    if (isAssistedMode) return;
     setCatalogMode(true);
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
@@ -3182,31 +4334,165 @@ export default function PublicMenuPage() {
   }
 
   function leaveCatalogMode() {
+    // Mesa QR catalog links must not fall back into WhatsApp checkout.
+    if (catalogUrlLocked) {
+      setIsPreCheckoutUpsellOpen(false);
+      setKioskAddedPrompt(null);
+      setCatalogMode(true);
+      return;
+    }
     setCatalogMode(false);
     setIsPreCheckoutUpsellOpen(false);
     setKioskAddedPrompt(null);
   }
 
-  function openCatalogSummary() {
-    if (!catalogMode || cartCount <= 0) return;
+  function openCatalogSummary(options?: { knownCartCount?: number }) {
+    const count = options?.knownCartCount ?? cartCount;
+    if (!inCatalogSession || count <= 0) return;
+    if (!catalogMode) setCatalogMode(true);
     setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setIsOrderReviewOpen(false);
+    // Already on the suggested-sales sheet → advance to the WhatsApp summary.
+    if (isPreCheckoutUpsellOpen) {
+      finishCatalogOrder();
+      return;
+    }
+    setCatalogReady(null);
     setIsPreCheckoutUpsellOpen(true);
   }
 
-  function handleKioskAddProduct(productId: string) {
-    if (catalogMode) {
-      if (!kioskHomeConfig.catalogo) return;
-      setProductOptionsSheet({ open: true, productId });
+  function finishCatalogOrder() {
+    if (!inCatalogSession || cartCount <= 0) return;
+    if (!catalogMode) setCatalogMode(true);
+    setCatalogReady({
+      items: cartItems.map((item) => ({
+        name: menuLineLabel(item.product, item.selection, item.category, productById),
+        quantity: item.quantity,
+        priceLabel: formatUpsellPrice(item.unitPrice * item.quantity),
+      })),
+      itemCount: cartCount,
+      totalLabel: formatUpsellPrice(cartTotal),
+    });
+    setIsPreCheckoutUpsellOpen(false);
+    setIsConfirmOpen(false);
+    setIsOrderReviewOpen(false);
+    setKioskAddedPrompt(null);
+  }
+
+  function returnToCatalogMenu() {
+    setCatalogReady(null);
+    setIsPreCheckoutUpsellOpen(false);
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+  }
+
+  async function submitCatalogWhatsappOrder(input: CatalogWhatsappSubmitInput) {
+    if (!inCatalogSession || cartCount <= 0) {
+      throw new Error('No hay productos en el pedido.');
+    }
+    if (!catalogMode) setCatalogMode(true);
+    if (!whatsappNumber) {
+      throw new Error('Este comercio no tiene WhatsApp configurado.');
+    }
+
+    const paymentMethod =
+      input.paymentMethodId && menuData?.metodosPago
+        ? (menuData.metodosPago.find((method) => method.id === input.paymentMethodId) ?? null)
+        : null;
+    if ((menuData?.metodosPago.length ?? 0) > 0 && !paymentMethod) {
+      throw new Error('Selecciona un método de pago.');
+    }
+
+    const currency = normalizeCurrencyCode(input.currency || selectedCurrencyCode);
+    if (currency !== selectedCurrencyCode) {
+      selectMenuCurrency(currency);
+    }
+    const paymentGroupForCurrency = paymentMethodsByCurrency.find(
+      (group) => group.currency === currency,
+    );
+    const exchangeRate =
+      currency === businessBaseCurrency
+        ? 1
+        : resolveTickerExchangeRate(currency, {
+            baseCurrency: businessBaseCurrency,
+            paymentExchangeRate: paymentGroupForCurrency?.exchangeRate,
+            checkoutExchange: checkoutExchangeConfig,
+            businessExchangeRate,
+            businessQuoteCurrency,
+            businessExchangeSource,
+            businessExchangeMode,
+            marketRates: menuData?.marketRates,
+          });
+    const exchangeRateSource = resolveCheckoutCurrencySource(currency, {
+      checkoutExchange: checkoutExchangeConfig,
+      businessExchangeSource,
+    });
+
+    // Same WhatsApp payload as “Comer aquí” checkout: merchant summary / comanda
+    // from persistOrderRequired (not the short customer intro).
+    const persisted = await persistOrderRequired(
+      '',
+      input.customerName.trim(),
+      input.customerWhatsapp.replace(/\D/g, ''),
+      paymentMethod,
+      {
+        currency,
+        exchangeRate,
+        exchangeRateSource,
+        referenceLast4: '',
+        proofFiles: input.proofFiles,
+      },
+      {
+        mode: 'pickup',
+        address: '',
+        reference: '',
+        instructions: '',
+        coordinates: null,
+      },
+    );
+
+    if (typeof window === 'undefined') return;
+
+    // Prevent double-submit if the guest returns to the menu after sending.
+    setCart({});
+    clearCachedCheckoutCart(commerceIdentifier);
+
+    if (persisted.waUrl) {
+      if (!handleWhatsAppLinkClick(persisted.waUrl)) {
+        window.location.assign(persisted.waUrl);
+      }
       return;
     }
-    if (scheduleClosed || !kioskFulfillment) return;
+
+    // Fallback if WhatsApp number was missing when the order URL was built.
+    const orderLink = merchantOrderShareHref(persisted.orderId, persisted.orderUrl);
+    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
+    const message = buildClientOrderSummary({
+      orderId: persisted.orderId,
+      customerName: input.customerName.trim(),
+      customerWhatsapp: input.customerWhatsapp.replace(/\D/g, ''),
+      deliveryMode: 'dine_in',
+      orderTypeLabel: 'Comer aquí',
+      paymentLabel,
+      totalLabel: formatUpsellPrice(cartTotal),
+      appOrderUrl: orderLink,
+      managementMode: persisted.managementMode,
+    });
+    openWhatsAppChat(whatsappNumber, message);
+  }
+
+  function handleKioskAddProduct(productId: string) {
+    // Always allow opening product details (including when closed / browse-only).
+    // Ordering is gated by ProductOptionsSheet `canAdd`.
     setProductOptionsSheet({ open: true, productId });
   }
 
   const canSubmitStep3 =
-    ((menuData?.metodosPago.length ?? 0) === 0 ||
-      (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof)) &&
-    isCashTenderValid;
+    (isAssistedMode && payLater) ||
+    (((menuData?.metodosPago.length ?? 0) === 0 ||
+      (selectedPaymentMethodId !== null && hasPaymentProof)) &&
+      isCashTenderValid);
   const canAdvanceCurrentStep =
     checkoutStep === 0
       ? canGoNextFromStep0
@@ -3215,12 +4501,40 @@ export default function PublicMenuPage() {
         : checkoutStep === 2
           ? canGoNextFromStep2
           : canSubmitStep3;
-  const canSubmitCheckout =
+  const canReadyForReview =
     canGoNextFromStep0 &&
     canGoNextFromStep1 &&
     canGoNextFromStep2 &&
     canSubmitStep3 &&
     !scheduleClosed;
+  const canSubmitCheckout = canReadyForReview && isClientEmailValid;
+  const reviewFulfillmentHint = (() => {
+    if (!isOrderReviewOpen || !reviewFulfillmentBaseline) return null;
+    if (kioskFulfillment === reviewFulfillmentBaseline.fulfillment) return null;
+
+    if (isDeliveryOrder && !reviewFulfillmentBaseline.wasDelivery) {
+      if (deliveryOutOfZoneAllowed) {
+        return `El envío se acuerda aparte · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      if (deliveryQuote.free) {
+        return `Envío gratis · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      if (deliveryCostConverted > 0) {
+        return `Envío +${formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)} · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      return 'Se sumará el costo de envío según tu dirección.';
+    }
+
+    if (!isDeliveryOrder && reviewFulfillmentBaseline.wasDelivery) {
+      const removed = reviewFulfillmentBaseline.deliveryFeeConverted;
+      if (removed > 0) {
+        return `Sin envío −${formatAmountByCurrency(removed, selectedCurrencyCode)} · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      return `Sin costo de envío · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+    }
+
+    return null;
+  })();
   const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
   const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
   const selectedPaymentSummary = selectedPaymentLabel || 'Por seleccionar';
@@ -3229,7 +4543,9 @@ export default function PublicMenuPage() {
   const contactSummaryLine = formattedClientWhatsapp || 'Agrega tu WhatsApp';
   const deliverySummary = isDeliveryOrder
     ? normalizedDeliveryAddress || 'Aun no has definido la direccion de entrega.'
-    : 'Retiro en tienda';
+    : kioskFulfillment === 'takeaway'
+      ? 'Yo paso a buscarlo'
+      : 'Retiro en tienda';
   const compactCheckoutSummary = checkoutStep > 0;
   const renderCheckoutSummary = (variant: 'mobile' | 'desktop') => {
     const isDesktop = variant === 'desktop';
@@ -3282,7 +4598,9 @@ export default function PublicMenuPage() {
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Resumen</p>
-                <p className="text-[11px] font-semibold text-slate-500">{checkoutItemsCount} uds</p>
+                <p className="text-[11px] font-semibold text-slate-500">
+                  {checkoutItemsCount} {checkoutItemsCount === 1 ? 'ítem' : 'ítems'}
+                </p>
               </div>
               <div className={isDesktop ? 'max-h-[320px] space-y-2 overflow-y-auto pr-1' : 'space-y-2'}>
                 {checkoutSummaryItems.map((item) => (
@@ -3303,11 +4621,17 @@ export default function PublicMenuPage() {
                           ) : null}
                         </div>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">
-                          x{item.quantity}
+                          {item.soldByWeight
+                            ? formatWeightLabel(item.quantity)
+                            : `x${item.quantity}`}
                         </span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
-                        <span>{formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} c/u</span>
+                        <span>
+                          {item.soldByWeight
+                            ? `${formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} / kg`
+                            : `${formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} c/u`}
+                        </span>
                         <span className="text-sm font-black text-slate-900">
                           {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
                         </span>
@@ -3323,7 +4647,11 @@ export default function PublicMenuPage() {
                           >
                             −
                           </button>
-                          <span className="min-w-8 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
+                          <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">
+                            {item.soldByWeight
+                              ? formatWeightLabel(item.quantity)
+                              : item.quantity}
+                          </span>
                           <button
                             type="button"
                             onClick={() => incrementCartLine(item.id)}
@@ -3360,10 +4688,18 @@ export default function PublicMenuPage() {
                   <span>Subtotal</span>
                   <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                 </div>
+                {productDeliverySurchargeLineLabel ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{productDeliverySurchargeLineLabel}</span>
+                    <span className="font-semibold">
+                      {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                    </span>
+                  </div>
+                ) : null}
                 {isDeliveryOrder && deliveryLineLabel ? (
                   <div className="flex items-center justify-between gap-3">
                     <span>{deliveryLineLabel}</span>
-                    <span className="font-semibold">{deliveryLineValue}</span>
+                    <span className="font-semibold">{deliveryPriceWithDistance}</span>
                   </div>
                 ) : null}
                 {deliveryEngineNote ? (
@@ -3390,42 +4726,92 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const cached = readCachedCheckoutCustomer();
+    if (!cached) return;
 
-    try {
-      const raw = window.localStorage.getItem(checkoutDraftStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        clientName?: string;
-        clientWhatsapp?: string;
-        clientEmail?: string;
-        selectedCurrency?: string;
-      };
+    if (cached.clientName.length >= 3) setClientName(cached.clientName);
+    if (cached.clientEmail) setClientEmail(cached.clientEmail);
+    setWantOrderEmail(cached.wantOrderEmail);
 
-      const savedName = (parsed.clientName ?? '').trim();
-      const savedEmail = (parsed.clientEmail ?? '').trim();
-      const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
-
-      if (savedName && /\s/.test(savedName)) setClientName(savedName);
-      if (savedEmail) setClientEmail(savedEmail);
-
-      if (savedWhatsapp) {
-        const parsedPhone = parsePhoneNumber(savedWhatsapp);
-        if (parsedPhone?.country) {
-          setClientWhatsappCountry(parsedPhone.country as Country);
-        }
-        setClientWhatsapp(savedWhatsapp);
+    if (cached.clientWhatsapp) {
+      const parsedPhone = parsePhoneNumber(cached.clientWhatsapp);
+      if (parsedPhone?.country) {
+        setClientWhatsappCountry(parsedPhone.country as Country);
       }
-    } catch {
-      // Ignore malformed stored checkout draft.
+      setClientWhatsapp(cached.clientWhatsapp);
     }
   }, []);
 
   useEffect(() => {
+    const cached = readDeliveryNotesCache();
+    setDeliveryNoteMemory(cached);
+    if (cached.reference) setDeliveryReference(cached.reference);
+    if (cached.instructions) setDeliveryInstructions(cached.instructions);
+  }, []);
+
+  useEffect(() => {
+    if (!isMapPickerOpen || isMapCanvasReady || mapPickerError) {
+      setMapLoadSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setMapLoadSlow(true), 6000);
+    return () => window.clearTimeout(timer);
+  }, [isMapPickerOpen, isMapCanvasReady, mapPickerError, mapPickerNonce]);
+
+  useEffect(() => {
     if (!isDigitalPayment) {
-      setDigitalPaymentReference('');
-      setPaymentProofFile(null);
+      setPaymentProofFiles([]);
+      setRequiredPaymentProofCount(1);
+      setPaymentProofError('');
+      setPaymentProofBusy(false);
+      setPaymentProofLightboxUrl(null);
     }
   }, [isDigitalPayment]);
+
+  useEffect(() => {
+    const urls = paymentProofFiles.map((file) => URL.createObjectURL(file));
+    setPaymentProofPreviewUrls(urls);
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [paymentProofFiles]);
+
+  useEffect(() => {
+    if (!hasDeliveryPoint || !checkoutError) return;
+    if (
+      /dirección de entrega|direccion de entrega|Marca el punto|marca el punto/i.test(
+        checkoutError,
+      )
+    ) {
+      setCheckoutError(null);
+    }
+  }, [hasDeliveryPoint, checkoutError]);
+
+  async function handlePaymentProofSelected(file: File | null) {
+    setPaymentProofError('');
+    if (!file) return;
+    if (paymentProofFiles.length >= 3) {
+      setPaymentProofError('Puedes adjuntar hasta 3 comprobantes.');
+      return;
+    }
+    setPaymentProofBusy(true);
+    try {
+      const prepared = await prepareComprobanteFile(file);
+      setPaymentProofFiles((prev) => [...prev, prepared]);
+    } catch (error) {
+      setPaymentProofError(
+        error instanceof Error
+          ? error.message
+          : 'Ese comprobante no se pudo cargar. Prueba otra foto en JPEG o PNG.',
+      );
+    } finally {
+      setPaymentProofBusy(false);
+    }
+  }
+
+  function removePaymentProofAt(index: number) {
+    setPaymentProofFiles((prev) => prev.filter((_, i) => i !== index));
+  }
 
   useEffect(() => {
     if (paymentMethodsByCurrency.length === 0 && kioskCurrencyOptions.length === 0) {
@@ -3458,7 +4844,12 @@ export default function PublicMenuPage() {
   }
 
   useLockBodyScroll(Boolean(
-    isInfoOpen || expandedProductImage || isMapPickerOpen || isQuickActionsOpen,
+    isInfoOpen ||
+      expandedProductImage ||
+      isMapPickerOpen ||
+      isQuickActionsOpen ||
+      Boolean(abandonedCartPrompt) ||
+      leaveConfirmOpen,
   ));
 
   useEffect(() => {
@@ -3468,8 +4859,19 @@ export default function PublicMenuPage() {
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
-    if (!isPreCheckoutUpsellOpen || cartCount > 0) return;
-    setIsPreCheckoutUpsellOpen(false);
+    if (!isPreCheckoutUpsellOpen) {
+      preCheckoutHadCartRef.current = false;
+      return;
+    }
+    if (cartCount > 0) {
+      preCheckoutHadCartRef.current = true;
+      return;
+    }
+    // Only auto-close after the sheet actually had items — not on the brief
+    // frame where we open right after add and React hasn't committed cart yet.
+    if (preCheckoutHadCartRef.current) {
+      setIsPreCheckoutUpsellOpen(false);
+    }
   }, [cartCount, isPreCheckoutUpsellOpen]);
 
   useEffect(() => {
@@ -3540,22 +4942,16 @@ export default function PublicMenuPage() {
     };
   }, []);
 
+  // Keep payment methods collapsed until the customer picks one, so the full
+  // list is visible at first glance. Only clear a selection that no longer
+  // exists for the active currency.
   useEffect(() => {
-    if (!menuData) return;
-    if (!selectedPaymentMethodId && menuData.metodosPago.length > 0) {
-      setSelectedPaymentMethodId(menuData.metodosPago[0].id);
-    }
-  }, [menuData, selectedPaymentMethodId]);
-
-  useEffect(() => {
-    if (!selectedCurrencyGroup || selectedCurrencyGroup.methods.length === 0) return;
-    if (!selectedPaymentMethodId) {
-      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
-      return;
-    }
-    const stillAvailable = selectedCurrencyGroup.methods.some((method) => method.id === selectedPaymentMethodId);
+    if (!selectedCurrencyGroup || !selectedPaymentMethodId) return;
+    const stillAvailable = selectedCurrencyGroup.methods.some(
+      (method) => method.id === selectedPaymentMethodId,
+    );
     if (!stillAvailable) {
-      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
+      setSelectedPaymentMethodId(null);
     }
   }, [selectedCurrencyGroup, selectedPaymentMethodId]);
 
@@ -3564,14 +4960,133 @@ export default function PublicMenuPage() {
   }, [selectedPaymentMethodId, selectedCurrencyCode]);
 
   useEffect(() => {
-    if (supportsDelivery) return;
-    setDeliveryMode('pickup');
-  }, [supportsDelivery]);
+    if (!supportsDelivery) {
+      setDeliveryMode('pickup');
+      return;
+    }
+    // Keep mode in sync when menu finishes loading after a Delivery home choice.
+    setDeliveryMode(kioskFulfillment === 'delivery' ? 'delivery' : 'pickup');
+  }, [supportsDelivery, kioskFulfillment]);
+
+  // Checkout sheet open without the old mode card: always seed delivery/pickup.
+  // Mesa QR keeps dine-in (no address step) via effectiveCheckoutFulfillment.
+  useEffect(() => {
+    if (!isConfirmOpen || scheduleClosed) return;
+    if (isAssistedMode) {
+      if (kioskFulfillment !== 'dine_in') selectKioskFulfillment('dine_in');
+      return;
+    }
+    if (catalogUrlLocked || inCatalogSession) return;
+    if (publicFulfillmentIsValid) return;
+    if (!preferredCheckoutFulfillment) return;
+    selectKioskFulfillment(preferredCheckoutFulfillment);
+    // selectKioskFulfillment is stable enough for this seed; avoid listing it to prevent loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    catalogUrlLocked,
+    inCatalogSession,
+    isAssistedMode,
+    isConfirmOpen,
+    kioskFulfillment,
+    preferredCheckoutFulfillment,
+    publicFulfillmentIsValid,
+    scheduleClosed,
+  ]);
+
+  // Entrega step: resolve GPS once and seed the preview map + address by default.
+  useEffect(() => {
+    if (!isConfirmOpen || checkoutStep !== 2 || !isDeliveryOrder || prefersSelfPickup) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+    if (deliveryPointSource === 'user' && deliveryPoint) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+
+    const attemptKey = `${commerceIdentifier || 'menu'}:delivery-preview`;
+    if (deliveryAutoLocateKeyRef.current === attemptKey) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+
+    let cancelled = false;
+    setDeliveryPreviewLocating(true);
+
+    void (async () => {
+      const gpsPoint = await getBrowserCurrentPoint();
+      if (cancelled) return;
+
+      if (gpsPoint) {
+        setDeliveryPoint(gpsPoint);
+        setDeliveryPointSource('user');
+        const address = await reverseGeocodeWithNominatim(gpsPoint);
+        if (cancelled) return;
+        const resolved = resolveDeliveryAddressText(address, gpsPoint);
+        setDeliveryAddress(resolved);
+        setMapPickerAddress(resolved);
+      } else if (hasBusinessCoords && businessLat != null && businessLng != null) {
+        setDeliveryPoint({ lat: businessLat, lng: businessLng });
+        setDeliveryPointSource('business-default');
+      }
+
+      if (cancelled) return;
+      deliveryAutoLocateKeyRef.current = attemptKey;
+      setDeliveryPreviewLocating(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    businessLat,
+    businessLng,
+    checkoutStep,
+    commerceIdentifier,
+    deliveryPoint,
+    deliveryPointSource,
+    hasBusinessCoords,
+    isConfirmOpen,
+    isDeliveryOrder,
+    prefersSelfPickup,
+  ]);
+
+  useEffect(() => {
+    if (isConfirmOpen) return;
+    deliveryAutoLocateKeyRef.current = null;
+  }, [isConfirmOpen]);
+
+  // If chat pay handed off but router.replace cleared checkout state, reopen once on menu.
+  useEffect(() => {
+    if (isChatbotMode) return;
+    if (!pendingCheckoutFromChatRef.current) return;
+    if (isConfirmOpen) {
+      pendingCheckoutFromChatRef.current = false;
+      return;
+    }
+    pendingCheckoutFromChatRef.current = false;
+    openCheckoutSheet({ skipUpsell: true });
+    // openCheckoutSheet reads latest render closures; only re-run when leaving chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional leave-chat handoff
+  }, [isChatbotMode, isConfirmOpen]);
+
+  // If GPS/map pin exists but reverse-geocode left address empty, keep a usable label.
+  useEffect(() => {
+    if (!isDeliveryOrder || deliveryPointSource !== 'user' || !deliveryPoint) return;
+    if (normalizedDeliveryAddress.length >= 6) return;
+    setDeliveryAddress(formatDeliveryPointFallbackAddress(deliveryPoint));
+  }, [
+    deliveryPoint,
+    deliveryPointSource,
+    isDeliveryOrder,
+    normalizedDeliveryAddress.length,
+  ]);
 
   useEffect(() => {
     if (!isMapPickerOpen) return;
 
     let disposed = false;
+    setIsMapCanvasReady(false);
     let lastResolvedPoint: DeliveryPoint | null = null;
 
     const shouldResolvePoint = (point: DeliveryPoint) => {
@@ -3594,17 +5109,23 @@ export default function PublicMenuPage() {
       mapPickerGeocoderRef.current = null;
       mapPickerAutocompleteRef.current = null;
       mapPickerResolveAddressRef.current = null;
+      leafletBaseLayerRef.current = null;
     };
 
-    const resolveInitialPoint = async () => {
-      if (deliveryPoint) return deliveryPoint;
+    const resolveInitialPoint = async (): Promise<{
+      point: DeliveryPoint;
+      fromGps: boolean;
+    }> => {
+      if (deliveryPoint) return { point: deliveryPoint, fromGps: false };
       const browserPoint = await getBrowserCurrentPoint();
-      if (browserPoint) return browserPoint;
-      if (hasBusinessCoords) return { lat: businessLat, lng: businessLng };
-      return { lat: 10.4806, lng: -66.9036 };
+      if (browserPoint) return { point: browserPoint, fromGps: true };
+      if (hasBusinessCoords && businessLat != null && businessLng != null) {
+        return { point: { lat: businessLat, lng: businessLng }, fromGps: false };
+      }
+      return { point: { lat: 10.4806, lng: -66.9036 }, fromGps: false };
     };
 
-    const attachLeaflet = async (initialPoint: DeliveryPoint) => {
+    const attachLeaflet = async (initialPoint: DeliveryPoint, fromGps: boolean) => {
       try {
         const L = await loadLeafletAssets();
         if (disposed) return;
@@ -3621,16 +5142,47 @@ export default function PublicMenuPage() {
         const map = L.map(mapPickerContainerRef.current, {
           zoomControl: false,
           attributionControl: true,
-        }).setView([initialPoint.lat, initialPoint.lng], 16);
+        }).setView([initialPoint.lat, initialPoint.lng], fromGps ? 15 : 16);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap',
         }).addTo(map);
+        leafletBaseLayerRef.current = tiles;
+        tiles.on?.('load', () => {
+          if (!disposed) setIsMapCanvasReady(true);
+        });
+
+        const coverageBounds: Array<[number, number]> = [];
+        if (L.polygon) {
+          for (const zone of deliveryAreaZonesForMap) {
+            const ring = zone.polygon.map(
+              ([lat, lng]) => [lat, lng] as [number, number],
+            );
+            for (const point of ring) coverageBounds.push(point);
+            L.polygon(ring, {
+              color: '#059669',
+              weight: 1,
+              fillColor: '#10B981',
+              fillOpacity: 0.18,
+            }).addTo(map);
+          }
+        }
+        // Keep GPS/user pin in view; only fit all zones when we don't have a location yet.
+        if (!fromGps && coverageBounds.length >= 2 && L.latLngBounds && map.fitBounds) {
+          try {
+            map.fitBounds(L.latLngBounds(coverageBounds), { padding: [28, 28], maxZoom: 13 });
+          } catch {
+            // Keep initial view if bounds fail.
+          }
+        } else {
+          map.setView([initialPoint.lat, initialPoint.lng], fromGps ? 15 : 16);
+        }
 
         mapPickerMapRef.current = map;
         mapPickerMarkerRef.current = null;
         setDeliveryPoint(initialPoint);
+        if (fromGps) setDeliveryPointSource('user');
 
         const resolveAddress = async (point: DeliveryPoint) => {
           if (!shouldResolvePoint(point)) {
@@ -3684,11 +5236,11 @@ export default function PublicMenuPage() {
       setIsMapPickerLoading(true);
       setMapPickerError('');
 
-      const initialPoint = await resolveInitialPoint();
+      const { point: initialPoint, fromGps } = await resolveInitialPoint();
       if (disposed) return;
 
       if (preferLeafletMapPicker) {
-        await attachLeaflet(initialPoint);
+        await attachLeaflet(initialPoint, fromGps);
         return;
       }
 
@@ -3698,7 +5250,7 @@ export default function PublicMenuPage() {
 
         if (!google?.maps || !mapPickerContainerRef.current) {
           setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
-          await attachLeaflet(initialPoint);
+          await attachLeaflet(initialPoint, fromGps);
           return;
         }
 
@@ -3706,20 +5258,83 @@ export default function PublicMenuPage() {
 
         const map = new google.maps.Map(mapPickerContainerRef.current, {
           center: initialPoint,
-          zoom: 16,
+          zoom: fromGps ? 15 : 16,
+          mapTypeId: mapPickerLayer,
+          disableDefaultUI: true,
+          zoomControl: false,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
+          rotateControl: false,
+          scaleControl: false,
+          clickableIcons: false,
           gestureHandling: 'greedy',
         });
 
         const geocoder = new google.maps.Geocoder();
+        let skipNextIdle = false;
+        let loadingWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+        const clearLoadingSoon = () => {
+          if (loadingWatchdog) clearTimeout(loadingWatchdog);
+          loadingWatchdog = setTimeout(() => {
+            if (!disposed) setIsMapPickerLoading(false);
+          }, 2500);
+        };
+
+        // Area-zone polygons only (interval circles were reverted — too buggy).
+        try {
+          const mapsApi = google.maps as typeof google.maps & {
+            LatLngBounds: new () => { extend: (point: DeliveryPoint) => void };
+            Polygon: new (opts: Record<string, unknown>) => unknown;
+          };
+          const coverageBounds = new mapsApi.LatLngBounds();
+          let drewCoverage = false;
+          for (const zone of deliveryAreaZonesForMap) {
+            const path = zone.polygon.map(([lat, lng]) => ({ lat, lng }));
+            if (path.length < 3) continue;
+            new mapsApi.Polygon({
+              paths: path,
+              strokeColor: '#059669',
+              strokeOpacity: 0.9,
+              strokeWeight: 1.5,
+              fillColor: '#10B981',
+              fillOpacity: 0.16,
+              map,
+              clickable: false,
+            });
+            for (const point of path) coverageBounds.extend(point);
+            drewCoverage = true;
+          }
+          if (drewCoverage && typeof map.fitBounds === 'function' && !fromGps) {
+            // No GPS yet: show all zones. With GPS, stay on the user pin.
+            skipNextIdle = true;
+            map.fitBounds(coverageBounds, 36);
+          } else if (fromGps) {
+            skipNextIdle = true;
+            map.setCenter(initialPoint);
+            map.setZoom(15);
+          }
+        } catch (coverageError) {
+          console.warn('[delivery-map] coverage overlay failed', coverageError);
+        }
+
+        try {
+          const mapsEvent = (google.maps as { event?: { trigger?: (t: unknown, e: string) => void } }).event;
+          mapsEvent?.trigger?.(map, 'resize');
+        } catch {
+          // ignore
+        }
 
         mapPickerMapRef.current = map;
         mapPickerMarkerRef.current = null;
         mapPickerGeocoderRef.current = geocoder;
+        map.addListener('tilesloaded', () => {
+          if (!disposed) setIsMapCanvasReady(true);
+        });
 
         const moveToPoint = (point: DeliveryPoint, knownAddress?: string) => {
+          skipNextIdle = true;
           setDeliveryPoint(point);
           map.panTo(point);
           map.setZoom(17);
@@ -3736,20 +5351,30 @@ export default function PublicMenuPage() {
             setIsMapPickerLoading(false);
             return;
           }
-          geocoder.geocode({ location: point }, (results: GooglePlaceResult[] | null, status: string) => {
-            if (disposed) return;
+          setIsMapPickerLoading(true);
+          clearLoadingSoon();
+          let settled = false;
+          const finish = (address: string) => {
+            if (settled || disposed) return;
+            settled = true;
             markResolvedPoint(point);
-            if (status === 'OK' && results?.[0]?.formatted_address) {
-              setMapPickerAddress(results[0].formatted_address);
-            } else {
-              setMapPickerAddress('');
-            }
+            setMapPickerAddress(address);
             setIsMapPickerLoading(false);
-          });
+          };
+          try {
+            geocoder.geocode({ location: point }, (results: GooglePlaceResult[] | null, status: string) => {
+              finish(
+                status === 'OK' && results?.[0]?.formatted_address
+                  ? results[0].formatted_address
+                  : '',
+              );
+            });
+          } catch {
+            finish('');
+          }
         };
 
         mapPickerResolveAddressRef.current = (point: DeliveryPoint) => {
-          setIsMapPickerLoading(true);
           resolveAddress(point);
         };
 
@@ -3763,16 +5388,20 @@ export default function PublicMenuPage() {
 
         map.addListener('dragstart', () => {
           setIsMapPickerDragging(true);
-          setIsMapPickerLoading(true);
         });
         map.addListener('idle', () => {
           setIsMapPickerDragging(false);
+          if (skipNextIdle) {
+            skipNextIdle = false;
+            return;
+          }
           updateFromCenter();
         });
 
         if (mapPickerSearchInputRef.current && google.maps.places?.Autocomplete) {
           const autocomplete = new google.maps.places.Autocomplete(mapPickerSearchInputRef.current, {
             fields: ['geometry', 'formatted_address', 'name'],
+            componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
           });
           autocomplete.bindTo('bounds', map);
           autocomplete.addListener('place_changed', () => {
@@ -3781,13 +5410,14 @@ export default function PublicMenuPage() {
             if (!geometryLocation) return;
             const point = { lat: geometryLocation.lat(), lng: geometryLocation.lng() };
             const bestAddress = (place.formatted_address ?? place.name ?? '').trim();
-            setIsMapPickerLoading(true);
+            if (bestAddress) setMapPickerSearchText(bestAddress);
             moveToPoint(point, bestAddress);
           });
           mapPickerAutocompleteRef.current = autocomplete;
         }
 
         setDeliveryPoint(initialPoint);
+        if (fromGps) setDeliveryPointSource('user');
         if (!normalizedDeliveryAddress) {
           mapPickerResolveAddressRef.current(initialPoint);
         } else {
@@ -3797,7 +5427,7 @@ export default function PublicMenuPage() {
       } catch {
         if (disposed) return;
         setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
-        await attachLeaflet(initialPoint);
+        await attachLeaflet(initialPoint, fromGps);
       }
     }
 
@@ -3813,6 +5443,8 @@ export default function PublicMenuPage() {
     businessLat,
     businessLng,
     normalizedDeliveryAddress,
+    deliveryAreaZonesForMap,
+    mapPickerNonce,
   ]);
 
   function selectedPaymentMethod() {
@@ -3831,6 +5463,10 @@ export default function PublicMenuPage() {
     }
     const product = productById.get(productId);
     if (!product) return;
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
 
     const category = categoryByProductId.get(productId) ?? null;
     if (menuLineInvalid(product, selection, productById)) return;
@@ -3854,6 +5490,10 @@ export default function PublicMenuPage() {
     const product = productById.get(productId);
     const category = categoryByProductId.get(productId) ?? null;
     if (!product) return;
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
 
     if (productRequiresConfiguration(product, category)) {
       setProductOptionsSheet({ open: true, productId });
@@ -3879,7 +5519,17 @@ export default function PublicMenuPage() {
     const category = categoryByProductId.get(productId) ?? null;
     if (!product) return;
 
-    if (productRequiresConfiguration(product, category)) {
+    const weight = getWeightSaleConfig(product);
+    if (weight) {
+      setCart((prev) => {
+        const current = prev[cartKey] ?? 0;
+        const nextQty = normalizeWeightKg(current + weight.paso, weight);
+        return { ...prev, [cartKey]: nextQty };
+      });
+      return;
+    }
+
+    if (productRequiresOptionSheet(product, category)) {
       setProductOptionsSheet({ open: true, productId });
       return;
     }
@@ -3891,9 +5541,14 @@ export default function PublicMenuPage() {
   }
 
   function decrementProduct(cartKey: string) {
+    const { productId } = parseCartLineKey(cartKey);
+    const product = productById.get(productId);
+    const weight = product ? getWeightSaleConfig(product) : null;
+
     setCart((prev) => {
       const current = prev[cartKey] ?? 0;
-      if (current <= 1) {
+      const removeThreshold = weight ? weight.minimo + 1e-9 : 1;
+      if (current <= removeThreshold) {
         if (isConfirmOpen && Object.keys(prev).length === 1) {
           shouldReturnToMenuOnEmptyCartRef.current = true;
         }
@@ -3902,9 +5557,13 @@ export default function PublicMenuPage() {
         return next;
       }
 
+      const nextQty = weight
+        ? normalizeWeightKg(current - weight.paso, weight)
+        : current - 1;
+
       return {
         ...prev,
-        [cartKey]: current - 1,
+        [cartKey]: nextQty,
       };
     });
   }
@@ -3956,6 +5615,78 @@ export default function PublicMenuPage() {
       });
     }
     setAddToCartSheet({ open: true, suggestions });
+  }
+
+  /**
+   * Chat carousel / sheet “Agregar” for products without options.
+   * Must notify the assistant so the pay CTA always appears (menu grid path does not).
+   */
+  function handleAddSimpleProductFromChat(productId: string) {
+    const product = productById.get(productId);
+    const category = categoryByProductId.get(productId) ?? null;
+    if (!product) return;
+    if (productRequiresConfiguration(product, category)) {
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
+    if (scheduleClosed && !catalogMode) {
+      window.alert('El restaurante está cerrado actualmente');
+      return;
+    }
+    if (isDeliveryOrder && isProductExcludedFromDelivery(product)) {
+      window.alert('Este producto no está disponible para delivery.');
+      return;
+    }
+    if (getProductMinimumPrice(product) <= 0) return;
+
+    const selection: CartLineSelection = {};
+    const unitPrice = menuLinePrice(
+      product,
+      category,
+      selection,
+      productById,
+      categoryByProductId,
+    );
+    if (!(unitPrice > 0) || product.disponible === false) {
+      setChatAppliedNotice({
+        label: 'No se pudo agregar: precio o disponibilidad no válidos.',
+      });
+      return;
+    }
+
+    const cartKey = buildCartLineKey(productId, selection);
+    setCart((prev) => ({
+      ...prev,
+      [cartKey]: (prev[cartKey] ?? 0) + 1,
+    }));
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'add_to_cart', { product_id: productId });
+
+    const currency =
+      (menuData?.comercio as { moneda?: string } | undefined)?.moneda ||
+      selectedCurrencyCode ||
+      'USD';
+    setChatAppliedNotice({
+      label: `1× ${menuLineLabel(product, selection, category, productById)}`,
+      productCard: {
+        product_id: productId,
+        name: product.nombre || '',
+        description: (product.descripcion || '').slice(0, 160) || null,
+        image_url:
+          displayProductImage(product.imagen_url, comercioLogoUrl, 160) || null,
+        currency,
+        price_base: Number(product.precio) || null,
+        price_unit: unitPrice,
+        price_label: formatUpsellPrice(unitPrice),
+        line_total: unitPrice,
+        line_total_label: formatUpsellPrice(unitPrice),
+        available: true,
+        requires_configuration: false,
+        option_hints: [],
+        selected_options: [],
+        quantity: 1,
+      },
+    });
   }
 
   function handleAcceptAddToCartSuggestion(suggestion: AddToCartSuggestion) {
@@ -4095,13 +5826,14 @@ export default function PublicMenuPage() {
       exchangeRate: number;
       exchangeRateSource: string;
       referenceLast4: string;
-      proofFile: File | null;
+      proofFiles: File[];
     },
     delivery: {
       mode: OrderDeliveryMode;
       address: string;
       reference: string;
       instructions: string;
+      fee_pending?: true;
       coordinates: DeliveryPoint | null;
     },
   ) {
@@ -4109,10 +5841,14 @@ export default function PublicMenuPage() {
       throw new Error('Faltan variables de entorno para guardar tu pedido.');
     }
 
-    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : 'No especificado';
-    let paymentProofUrl = '';
+    const paymentLabel = paymentMethod
+      ? paymentMethodLabel(paymentMethod)
+      : isAssistedMode && payLater
+        ? 'Pagar despues'
+        : 'No especificado';
+    const paymentProofUrls: string[] = [];
 
-    if (paymentMeta.proofFile) {
+    if (paymentMeta.proofFiles.length > 0) {
       const permitResponse = await fetch('/api/orders/comprobantes/permit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4127,31 +5863,39 @@ export default function PublicMenuPage() {
         throw new Error('No se pudo subir el comprobante de pago.');
       }
 
-      const form = new FormData();
-      form.append('comercioId', resolvedComercioId);
-      form.append('permit', permit);
-      form.append('file', paymentMeta.proofFile);
-      const uploadResponse = await fetch('/api/orders/comprobantes', {
-        method: 'POST',
-        body: form,
-      });
-      const uploadPayload = await uploadResponse.json().catch(() => ({}));
-      if (!uploadResponse.ok) {
-        const code = (uploadPayload?.error ?? '').toString();
-        throw new Error(
-          code === 'File too large.'
-            ? 'El comprobante supera el tamano maximo (5 MB).'
-            : 'No se pudo subir el comprobante de pago.',
-        );
-      }
-      // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
-      paymentProofUrl = (uploadPayload?.data?.storageRef ?? uploadPayload?.data?.paymentProofUrl ?? '')
-        .toString()
-        .trim();
-      if (!paymentProofUrl) {
-        throw new Error('No se pudo subir el comprobante de pago.');
+      for (const proofFile of paymentMeta.proofFiles) {
+        const form = new FormData();
+        form.append('comercioId', resolvedComercioId);
+        form.append('permit', permit);
+        form.append('file', proofFile);
+        const uploadResponse = await fetch('/api/orders/comprobantes', {
+          method: 'POST',
+          body: form,
+        });
+        const uploadPayload = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok) {
+          const code = (uploadPayload?.error ?? '').toString();
+          throw new Error(
+            code === 'File too large.'
+              ? 'El comprobante supera el tamano maximo (5 MB).'
+              : code === 'MIME type not allowed.'
+                ? 'Ese comprobante no se pudo cargar. Usa una foto JPEG o PNG.'
+                : 'Ese comprobante no se pudo cargar. Intentalo de nuevo.',
+          );
+        }
+        // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
+        const paymentProofUrl = (
+          uploadPayload?.data?.storageRef ?? uploadPayload?.data?.paymentProofUrl ?? ''
+        )
+          .toString()
+          .trim();
+        if (!paymentProofUrl) {
+          throw new Error('No se pudo subir el comprobante de pago.');
+        }
+        paymentProofUrls.push(paymentProofUrl);
       }
     }
+    const paymentProofUrl = paymentProofUrls[0] || '';
 
     const subtotalConverted = convertFromBaseCurrency(
       orderSubtotal,
@@ -4165,24 +5909,50 @@ export default function PublicMenuPage() {
       paymentMeta.currency,
       paymentMeta.exchangeRate,
     );
+    const productDeliverySurchargeCheckoutConverted = convertFromBaseCurrency(
+      productDeliverySurcharge,
+      businessBaseCurrency,
+      paymentMeta.currency,
+      paymentMeta.exchangeRate,
+    );
     const totalConverted = convertFromBaseCurrency(
       orderGrandTotal,
       businessBaseCurrency,
       paymentMeta.currency,
       paymentMeta.exchangeRate,
     );
-    const orderItems = cartItems.map((item) => ({
-      product_id: item.product.id,
-      nombre: menuLineLabel(item.product, item.selection, item.category, productById),
-      cantidad: item.quantity,
-      precio: item.unitPrice,
-      opciones: item.selection,
-    }));
+    const orderItems = cartItems.map((item) => {
+      const byWeight = isSoldByWeight(item.product);
+      return {
+        product_id: item.product.id,
+        nombre: menuLineLabel(item.product, item.selection, item.category, productById),
+        cantidad: item.quantity,
+        precio: item.unitPrice,
+        opciones: item.selection,
+        ...(byWeight ? { unidad: 'kg' as const, venta_por_peso: true as const } : {}),
+      };
+    });
+
+    const isCatalogOrder = inCatalogSession;
+    const assistedOrderNotes = [
+      isCatalogOrder
+        ? 'Tipo: Comer aquí'
+        : kioskFulfillment
+          ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}`
+          : '',
+      isAssistedMode && normalizedClientTable ? `Mesa: ${normalizedClientTable}` : '',
+      isAssistedMode && payLater ? 'Pago: despues' : '',
+      normalizedOrderNotes,
+    ]
+      .filter(Boolean)
+      .join('. ');
 
     const detalles = {
       cliente_nombre: customerName,
       cliente_email: email || null,
       telefono_cliente: customerWhatsapp,
+      mesa: isAssistedMode ? normalizedClientTable || null : null,
+      order_source: isAssistedMode ? 'assisted_waiter' : isCatalogOrder ? 'catalog' : null,
       moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
       tasa_cambio_snapshot: paymentMeta.exchangeRate,
       exchange_rate_source: paymentMeta.exchangeRateSource,
@@ -4192,22 +5962,27 @@ export default function PublicMenuPage() {
             nombre: paymentLabel,
             datos: paymentMethodDetails(paymentMethod),
           }
-        : null,
+        : isAssistedMode && payLater
+          ? { nombre: 'Pagar despues', datos: [] as string[] }
+          : null,
       referencia_pago: paymentMeta.referenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
+      ...(paymentProofUrls.length > 0 ? { comprobantes: paymentProofUrls } : {}),
       delivery,
-      order_notes: [
-        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
-        normalizedOrderNotes,
-      ]
-        .filter(Boolean)
-        .join('. '),
+      order_notes: assistedOrderNotes,
       pago_con: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
       cambio_de: isCashPayment && isCashTenderValid ? changeAmount : 0,
       subtotal: orderSubtotal,
       subtotal_moneda_checkout: subtotalConverted,
       costo_delivery: deliveryCost,
       costo_delivery_moneda_checkout: deliveryConverted,
+      ...(productDeliverySurcharge > 0
+        ? {
+            recargo_delivery_productos: productDeliverySurcharge,
+            recargo_delivery_productos_moneda_checkout: productDeliverySurchargeCheckoutConverted,
+            recargo_delivery_productos_detalle: productDeliverySurchargeSummary.lines,
+          }
+        : {}),
       total: orderGrandTotal,
       total_moneda_checkout: totalConverted,
       items: orderItems,
@@ -4219,6 +5994,8 @@ export default function PublicMenuPage() {
       clientName: customerName,
       clientWhatsapp: customerWhatsapp,
       clientEmail: email,
+      mesa: isAssistedMode ? normalizedClientTable : undefined,
+      assisted: isAssistedMode || undefined,
       currency: normalizeCurrencyCode(paymentMeta.currency),
       exchangeRate: paymentMeta.exchangeRate,
       costoDelivery: deliveryCost,
@@ -4230,17 +6007,15 @@ export default function PublicMenuPage() {
             nombre: paymentLabel,
             datos: paymentMethodDetails(paymentMethod),
           }
-        : null,
+        : isAssistedMode && payLater
+          ? { nombre: 'Pagar despues', datos: [] as string[] }
+          : null,
       paymentReferenceLast4: paymentMeta.referenceLast4 || null,
       paymentProofUrl: paymentProofUrl || null,
+      paymentProofUrls: paymentProofUrls.length > 0 ? paymentProofUrls : undefined,
       cashPaymentAmount: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
       cashChangeAmount: isCashPayment && isCashTenderValid ? changeAmount : 0,
-      orderNotes: [
-        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
-        normalizedOrderNotes,
-      ]
-        .filter(Boolean)
-        .join('. '),
+      orderNotes: assistedOrderNotes,
       detalles,
     };
 
@@ -4326,16 +6101,7 @@ export default function PublicMenuPage() {
       (responsePayload?.data?.trackingUrl ?? `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`)
         .toString()
         .trim();
-    let smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(orderUrl)}`;
-    try {
-      const parsedOrderUrl = new URL(orderUrl);
-      const shortCodeMatch = parsedOrderUrl.pathname.match(/^\/o\/([A-Za-z0-9_-]{10})$/);
-      if (shortCodeMatch) {
-        smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(shortCodeMatch[1])}`;
-      }
-    } catch {
-      // Keep the full fallback URL when the tracking URL is not absolute.
-    }
+    const smartOrderUrl = merchantOrderShareHref(orderId, orderUrl);
 
     const detailedMessage = responsePayload?.data?.merchantWhatsappText;
     const customizationTotalCheckout = typeof responsePayload?.data?.customizationTotalCheckout === 'number' &&
@@ -4359,24 +6125,108 @@ export default function PublicMenuPage() {
       orderUrl,
       managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
       customizationTotalCheckout,
-      waUrl: whatsappNumber
-        ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
-        : '',
+      waUrl: whatsappNumber ? buildWhatsAppHref(whatsappNumber, message) : '',
     };
   }
 
   function proceedToCheckoutSheet() {
-    if (catalogMode || cartCount <= 0) return;
+    if (cartCount <= 0) return;
+    // Mesa QR uses the same checkout as “Comer aquí” (Pedido → Datos → Pago, no address).
+    ensurePublicCheckoutFulfillment();
+    if (!catalogMode && inCatalogSession) setCatalogMode(true);
     const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
     void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
     setCheckoutStep(0);
+    setCatalogReady(null);
     setIsPreCheckoutUpsellOpen(false);
     setIsConfirmOpen(true);
   }
 
-  function openCheckoutSheet() {
-    if (catalogMode) return;
+  /** Toggle assistant via ?chatbot=1 without dropping other query params. */
+  function setChatbotMode(enabled: boolean) {
+    if (enabled && !chatbotUxEnabled) return;
+    if (enabled && (isAssistedMode || catalogFromUrl)) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (enabled) {
+      params.set('chatbot', '1');
+    } else {
+      params.delete('chatbot');
+    }
+    const query = params.toString();
+    const href = `${pathname}${query ? `?${query}` : ''}`;
+    router.replace(href, { scroll: false });
+  }
+
+  function openChatbotFromMenu() {
+    setChatbotMode(true);
+  }
+
+  function openTraditionalMenuFromChat() {
+    setChatbotMode(false);
+  }
+
+  /**
+   * Open shared checkout from the assistant.
+   * Open the sheet first (z-60 over chat), then clear ?chatbot=1 on the next
+   * tick so Next.js searchParams replace cannot drop isConfirmOpen.
+   */
+  function openCheckoutFromChat() {
+    pendingCheckoutFromChatRef.current = true;
+    openCheckoutSheet({ skipUpsell: true });
+    if (typeof window === 'undefined') {
+      openTraditionalMenuFromChat();
+      return;
+    }
+    window.setTimeout(() => {
+      openTraditionalMenuFromChat();
+    }, 0);
+  }
+
+  function openSharedCartFromChat() {
+    if (cartCount <= 0) {
+      openTraditionalMenuFromChat();
+      return;
+    }
+    // Cart chip in chat: same handoff as “listo para pagar”.
+    openCheckoutFromChat();
+  }
+
+  function cartLinesForPreCheckoutUpsell(
+    extra?: { productId: string; categoryId?: string | null },
+  ) {
+    const lines = cartItems.map((item) => ({
+      productId: item.product.id,
+      categoryId: item.product.categoria_id,
+    }));
+    if (!extra?.productId) return lines;
+    if (lines.some((line) => line.productId === extra.productId)) return lines;
+    return [
+      ...lines,
+      { productId: extra.productId, categoryId: extra.categoryId ?? null },
+    ];
+  }
+
+  function tryOpenPreCheckoutUpsellAfterAdd(productId: string) {
+    if (scheduleClosed || kioskVoucher) return false;
+    if (!preCheckoutUpsellActive) return false;
+    const product = productById.get(productId);
+    const shouldShow = shouldShowPreCheckoutUpsell({
+      config: menuData?.preCheckoutUpsell ?? { upselling: false },
+      categories: menuData?.categorias ?? [],
+      products: menuData?.productos ?? [],
+      cart: cartLinesForPreCheckoutUpsell({
+        productId,
+        categoryId: product?.categoria_id,
+      }),
+    });
+    if (!shouldShow) return false;
+    setKioskAddedPrompt(null);
+    setIsPreCheckoutUpsellOpen(true);
+    return true;
+  }
+
+  function openCheckoutSheet(opts?: { skipUpsell?: boolean }) {
     if (kioskVoucher) return;
     if (isOwnerPreview) {
       window.alert(
@@ -4388,18 +6238,17 @@ export default function PublicMenuPage() {
       window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
-    if (!kioskFulfillment) {
+    if (!ensurePublicCheckoutFulfillment() && !isAssistedMode) {
+      // No delivery/pickup available for this menu — don't open a stuck checkout.
       return;
     }
     if (
+      !opts?.skipUpsell &&
       shouldShowPreCheckoutUpsell({
         config: menuData?.preCheckoutUpsell ?? { upselling: false },
         categories: menuData?.categorias ?? [],
         products: menuData?.productos ?? [],
-        cart: cartItems.map((item) => ({
-          productId: item.product.id,
-          categoryId: item.product.categoria_id,
-        })),
+        cart: cartLinesForPreCheckoutUpsell(),
       })
     ) {
       setIsPreCheckoutUpsellOpen(true);
@@ -4408,8 +6257,94 @@ export default function PublicMenuPage() {
     proceedToCheckoutSheet();
   }
 
+  function openOrderReview() {
+    if (scheduleClosed) {
+      setCheckoutError(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
+    if (!canReadyForReview) {
+      setCheckoutError('Completa el pago para revisar tu pedido.');
+      return;
+    }
+    setCheckoutError(null);
+    setPaymentAdjustmentNotice(null);
+    setReviewFulfillmentBaseline({
+      fulfillment: kioskFulfillment,
+      wasDelivery: isDeliveryOrder,
+      deliveryFeeConverted: isDeliveryOrder ? deliveryCostConverted : 0,
+    });
+    setIsOrderReviewOpen(true);
+  }
+
+  function editDeliveryFromReview() {
+    if (isSubmittingOrder) return;
+    setIsOrderReviewOpen(false);
+    setCheckoutStep(2);
+    setCheckoutError(null);
+  }
+
+  function requestAdditionalPaymentProof() {
+    setPaymentProofError('');
+    setPaymentProofBusy(false);
+    setCashPaymentInput('');
+    setRequiredPaymentProofCount((prev) =>
+      Math.min(3, Math.max(prev, paymentProofFiles.length + 1, 1)),
+    );
+  }
+
+  function scrollCheckoutSheetToTop() {
+    if (typeof document === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      document.querySelector('[data-sheet-scroll]')?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  function changeReviewFulfillment(next: KioskFulfillment) {
+    if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked || isSubmittingOrder) {
+      return;
+    }
+    const enteringDelivery = !isDeliveryOrder && next === 'delivery';
+    const addressReady =
+      deliveryPoint !== null &&
+      deliveryPointSource === 'user' &&
+      normalizedDeliveryReference.length >= 3;
+    const hadPaidCoverage =
+      paymentProofFiles.length > 0 ||
+      (isCashPayment && cashTender.valid) ||
+      Boolean(selectedPaymentMethodId);
+    const repayMessage =
+      paymentProofFiles.length > 0
+        ? 'Al pasar a delivery el total sube. Adjunta un comprobante adicional por la diferencia de envío.'
+        : 'Al pasar a delivery el total sube. Completa el pago con el nuevo monto (incluye envío).';
+
+    selectKioskFulfillment(next);
+    setCheckoutError(null);
+
+    if (enteringDelivery) {
+      // El pago previo cubría un total sin envío: pedir comprobante adicional (sin borrar los anteriores).
+      if (hadPaidCoverage) {
+        requestAdditionalPaymentProof();
+        setPaymentAdjustmentNotice(repayMessage);
+      } else {
+        setPaymentAdjustmentNotice(null);
+      }
+      setIsOrderReviewOpen(false);
+      if (!addressReady) {
+        setCheckoutStep(2);
+        setCheckoutError('Indica la dirección de entrega para continuar.');
+        scrollCheckoutSheetToTop();
+        return;
+      }
+      setCheckoutStep(3);
+      if (hadPaidCoverage) {
+        setCheckoutError(repayMessage);
+        scrollCheckoutSheetToTop();
+      }
+    }
+    // Pickup from review: stay put — totals update via isDeliveryOrder.
+  }
+
   async function confirmOrder() {
-    if (catalogMode) return;
     if (isOwnerPreview) {
       setCheckoutError(
         'Vista previa. Los pedidos no se pueden confirmar aqui.',
@@ -4427,25 +6362,47 @@ export default function PublicMenuPage() {
       orderSubmitLockRef.current ||
       kioskVoucher !== null ||
       !isClientNameValid ||
+      !isClientTableValid ||
       !isClientWhatsappValid ||
-      !isClientEmailValid ||
       !isDeliveryReady ||
       !canSubmitStep3
     ) {
       return;
     }
+    if (!isClientEmailValid) {
+      setCheckoutError(
+        wantOrderEmail
+          ? 'Escribe un correo válido para el resumen, o desactiva esa opción.'
+          : 'Revisa tus datos para confirmar el pedido.',
+      );
+      return;
+    }
 
+    const outOfZoneInstruction =
+      'Delivery fuera de zona de cobertura: el costo de envío queda pendiente de confirmación con el cliente y no está incluido en el total del checkout.';
+    const deliveryInstructionsForOrder = isDeliveryOrder
+      ? [
+          normalizedDeliveryInstructions,
+          deliveryOutOfZoneAllowed ? outOfZoneInstruction : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : '';
     const deliveryPayload = {
       mode: isDeliveryOrder ? 'delivery' : 'pickup',
-      address: isDeliveryOrder ? normalizedDeliveryAddress : '',
+      address: isDeliveryOrder
+        ? resolveDeliveryAddressText(normalizedDeliveryAddress, deliveryPoint)
+        : '',
       reference: isDeliveryOrder ? normalizedDeliveryReference : '',
-      instructions: isDeliveryOrder ? normalizedDeliveryInstructions : '',
+      instructions: deliveryInstructionsForOrder,
+      ...(isDeliveryOrder && deliveryOutOfZoneAllowed ? { fee_pending: true as const } : {}),
       coordinates: isDeliveryOrder ? deliveryPoint : null,
     } satisfies {
       mode: OrderDeliveryMode;
       address: string;
       reference: string;
       instructions: string;
+      fee_pending?: true;
       coordinates: DeliveryPoint | null;
     };
 
@@ -4454,16 +6411,17 @@ export default function PublicMenuPage() {
     setCheckoutError(null);
     try {
       const persisted = await persistOrderRequired(
-        normalizedClientEmail,
+        clientEmailForOrder,
         normalizedClientName,
         normalizedClientWhatsapp,
-        selectedMethod,
+        isAssistedMode && payLater ? null : selectedMethod,
         {
           currency: selectedCurrencyCode,
           exchangeRate: selectedExchangeRate,
           exchangeRateSource: selectedExchangeSource,
-          referenceLast4: paymentReferenceLast4,
-          proofFile: paymentProofFile,
+          // Referencia opcional: se envía vacía; el comprobante es lo que valida el pago.
+          referenceLast4: '',
+          proofFiles: isAssistedMode && payLater ? [] : paymentProofFiles,
         },
         deliveryPayload,
       );
@@ -4492,19 +6450,13 @@ export default function PublicMenuPage() {
         } catch {
           // The submitted voucher is kept in memory even if browser storage is blocked.
         }
-        try {
-          window.localStorage.setItem(
-            checkoutDraftStorageKey,
-            JSON.stringify({
-              clientName: normalizedClientName,
-              clientWhatsapp: normalizedClientWhatsapp,
-              clientEmail: normalizedClientEmail,
-              selectedCurrency: selectedCurrencyCode,
-            }),
-          );
-        } catch {
-          // Draft recovery is optional after an order has been submitted.
-        }
+        writeCachedCheckoutCustomer({
+          clientName: normalizedClientName,
+          clientWhatsapp: normalizedClientWhatsapp,
+          clientEmail: normalizedClientEmail,
+          wantOrderEmail,
+          selectedCurrency: selectedCurrencyCode,
+        });
       }
 
       const voucherItems = cartItems.map((item) => ({
@@ -4525,7 +6477,7 @@ export default function PublicMenuPage() {
         orderId: persisted.orderId,
         orderUrl: persisted.orderUrl,
         whatsappUrl: persisted.waUrl,
-        fulfillment: kioskFulfillment ?? 'takeaway',
+        fulfillment: kioskFulfillment ?? (inCatalogSession ? 'dine_in' : 'takeaway'),
         totalLabel: formatAmountByCurrency(persisted.customizationTotalCheckout ?? orderGrandTotalConverted, selectedCurrencyCode),
         items: voucherItems,
       };
@@ -4540,13 +6492,21 @@ export default function PublicMenuPage() {
         }
       }
       setCart({});
+      clearCachedCheckoutCart(commerceIdentifier);
       const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
       void trackMenuFunnelEvent(comercioKey, 'order_completed', {}, persisted.orderId);
       setClientName('');
       setClientWhatsapp('');
       setClientEmail('');
-      setDigitalPaymentReference('');
-      setPaymentProofFile(null);
+      setClientTable('');
+      setPayLater(false);
+      setPaymentProofFiles([]);
+      setRequiredPaymentProofCount(1);
+      setPaymentProofError('');
+      setPaymentProofBusy(false);
+      setPaymentProofLightboxUrl(null);
+      if (normalizedDeliveryReference) rememberDeliveryNote('reference', normalizedDeliveryReference);
+      if (normalizedDeliveryInstructions) rememberDeliveryNote('instructions', normalizedDeliveryInstructions);
       setDeliveryAddress('');
       setDeliveryReference('');
       setDeliveryInstructions('');
@@ -4555,6 +6515,7 @@ export default function PublicMenuPage() {
       setOrderNotes('');
       setDeliveryMode('pickup');
       setCheckoutStep(0);
+      setIsOrderReviewOpen(false);
       setIsConfirmOpen(false);
       setKioskAddedPrompt(null);
       setKioskVoucher(voucher);
@@ -4571,30 +6532,380 @@ export default function PublicMenuPage() {
     }
   }
 
-  function goToNextStep() {
-    if (checkoutStep === 0 && !canGoNextFromStep0) {
-      setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
+  function applyRestoredCart(
+    items: Array<{ productId: string; quantity: number; selection?: CartLineSelection }>,
+    fulfillment?: KioskFulfillment | null,
+  ) {
+    const nextCart: Record<string, number> = {};
+    for (const item of items) {
+      if (!productById.has(item.productId)) continue;
+      const product = productById.get(item.productId);
+      if (!product) continue;
+      const selection = item.selection ?? {};
+      if (menuLineInvalid(product, selection, productById)) continue;
+      const unitPrice = menuLinePrice(
+        product,
+        categoryByProductId.get(item.productId) ?? null,
+        selection,
+        productById,
+        categoryByProductId,
+      );
+      if (unitPrice <= 0) continue;
+      const key = buildCartLineKey(item.productId, selection);
+      nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
+    }
+    if (Object.keys(nextCart).length === 0) return false;
+    setCart(nextCart);
+    if (fulfillment) {
+      // Public sessions never keep dine-in from an old cart; pickup is the coherent fallback.
+      const resolved: KioskFulfillment =
+        !isAssistedMode && !catalogUrlLocked && fulfillment === 'dine_in'
+          ? 'takeaway'
+          : fulfillment;
+      setKioskFulfillment(resolved);
+      setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
+      if (typeof window !== 'undefined' && commerceIdentifier) {
+        window.sessionStorage.setItem(
+          `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+          resolved,
+        );
+      }
+    }
+    return true;
+  }
+
+  function resumeAbandonedCart() {
+    if (scheduleClosed) {
+      window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
+    const pending = abandonedCartPrompt;
+    if (!pending) return;
+    let nextFulfillment = pending.fulfillment ?? null;
+    if (!isAssistedMode && !catalogUrlLocked) {
+      if (
+        !nextFulfillment ||
+        nextFulfillment === 'dine_in' ||
+        (checkoutFulfillmentOptions.length > 0 &&
+          !checkoutFulfillmentOptions.includes(nextFulfillment))
+      ) {
+        nextFulfillment = preferredCheckoutFulfillment;
+      }
+    }
+    const restored = applyRestoredCart(pending.items, nextFulfillment);
+    setAbandonedCartPrompt(null);
+    if (!restored) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    if (inCatalogSession) {
+      setCatalogMode(true);
+      setKioskFulfillment(null);
+      setDeliveryMode('pickup');
+      setIsPreCheckoutUpsellOpen(false);
+      setCatalogReady(null);
+      setKioskAddedPrompt(null);
+      kioskShellRef.current?.openCategories();
+    }
+    // Same checkout resume as the public link (Pedido → Datos → Pago for mesa QR).
+    setCheckoutStep(0);
+    setIsConfirmOpen(true);
+  }
+
+  function startFreshAfterAbandonedCart() {
+    setAbandonedCartPrompt(null);
+    setCart({});
+    clearCachedCheckoutCart(commerceIdentifier);
+    setCheckoutStep(0);
+    setIsConfirmOpen(false);
+  }
+
+  function cancelLeavePurchase() {
+    setLeaveConfirmOpen(false);
+  }
+
+  function confirmLeavePurchase() {
+    allowLeaveRef.current = true;
+    leaveGuardArmedRef.current = false;
+    allowMenuShellHistoryLeave();
+    setLeaveConfirmOpen(false);
+    setIsConfirmOpen(false);
+    if (typeof window === 'undefined') return;
+    // Pop remaining synthetic entries, then leave the menu page.
+    window.history.back();
+    window.setTimeout(() => {
+      allowLeaveRef.current = true;
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.assign(publicBaseUrl);
+      }
+    }, 0);
+  }
+
+  function goToNextStep() {
+    if (scheduleClosed) {
+      setCheckoutError(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
+    if (checkoutStep === 0) {
+      const ensured = ensurePublicCheckoutFulfillment();
+      if (checkoutSummaryItems.length === 0) {
+        setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
+        return;
+      }
+      if (!isAssistedMode && !ensured) {
+        setCheckoutError('No hay un modo de pedido disponible en este momento.');
+        return;
+      }
+    }
     if (checkoutStep === 1 && !canGoNextFromStep1) {
-      setCheckoutError('Completa nombre, WhatsApp y correo valido para continuar.');
+      setCheckoutError(
+        isAssistedMode
+          ? 'Completa nombre y mesa para continuar.'
+          : 'Completa tu nombre y WhatsApp para continuar.',
+      );
       return;
     }
     if (checkoutStep === 2 && !canGoNextFromStep2) {
-      setCheckoutError('Completa la direccion y el punto en el mapa para continuar con delivery.');
+      if (!hasDeliveryPoint || !isDeliveryAddressValid) {
+        setCheckoutError('Marca el punto en el mapa para continuar con delivery.');
+      } else if (!isDeliveryReferenceValid) {
+        setCheckoutError('Indica el punto de referencia (por ejemplo: al frente de, torre o piso).');
+      } else {
+        setCheckoutError('Revisa la dirección de entrega para continuar.');
+      }
       return;
     }
-    setCheckoutError(null);
-    if (checkoutStep === 1 && !isDeliveryOrder) {
+    if (checkoutStep === 2) {
+      if (normalizedDeliveryReference) {
+        setDeliveryNoteMemory(rememberDeliveryNote('reference', normalizedDeliveryReference));
+      }
+      if (normalizedDeliveryInstructions) {
+        setDeliveryNoteMemory(rememberDeliveryNote('instructions', normalizedDeliveryInstructions));
+      }
+    }
+    if (checkoutStep === 2 && paymentAdjustmentNotice) {
+      setCheckoutError(paymentAdjustmentNotice);
+      setPaymentAdjustmentNotice(null);
+      scrollCheckoutSheetToTop();
+    } else {
+      setCheckoutError(null);
+    }
+    if (checkoutStep === 1 && canGoNextFromStep1) {
+      // Cache as soon as "Tus datos" is completed so the next visit is prefilled
+      // even if payment is abandoned; last successful order overwrites this later.
+      writeCachedCheckoutCustomer({
+        clientName: normalizedClientName,
+        clientWhatsapp: normalizedClientWhatsapp,
+        clientEmail: normalizedClientEmail,
+        wantOrderEmail,
+        selectedCurrency: selectedCurrencyCode,
+      });
+    }
+    if (checkoutStep === 1 && !isDeliveryOrder && !offersDeliveryAddressStep) {
       setCheckoutStep(3);
       return;
     }
     setCheckoutStep((prev) => Math.min(3, prev + 1));
   }
 
+  function persistDeliveryNote(field: 'reference' | 'instructions', value: string) {
+    setDeliveryNoteMemory(rememberDeliveryNote(field, value));
+  }
+
+  function changeCheckoutFulfillment(next: KioskFulfillment) {
+    if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked) return;
+    const enteringDelivery = !isDeliveryOrder && next === 'delivery';
+    const addressReady =
+      deliveryPoint !== null &&
+      deliveryPointSource === 'user' &&
+      normalizedDeliveryReference.length >= 3;
+    selectKioskFulfillment(next);
+    setCheckoutError(null);
+    // Stay on Entrega when switching to pickup so the switch + retiro copy remain visible.
+    if (enteringDelivery && checkoutStep === 3 && !addressReady) {
+      setIsOrderReviewOpen(false);
+      setCheckoutStep(2);
+    }
+  }
+
+  function retryMapPicker() {
+    setMapPickerError('');
+    setIsMapCanvasReady(false);
+    setMapLoadSlow(false);
+    setMapPickerNonce((current) => current + 1);
+  }
+
+  function openDeliveryMapPicker() {
+    setIsMapCanvasReady(false);
+    setMapLoadSlow(false);
+    setMapPickerError('');
+    setIsMapPickerHelpOpen(false);
+    setIsMapPickerLayersOpen(false);
+    setMapPickerSearchText(deliveryAddress || mapPickerAddress || '');
+    setIsMapPickerOpen(true);
+  }
+
+  function applyMapPickerLayer(next: GoogleMapTypeId) {
+    setMapPickerLayer(next);
+    setIsMapPickerLayersOpen(false);
+    const map = mapPickerMapRef.current;
+    if (mapPickerProvider === 'google') {
+      map?.setMapTypeId?.(next);
+      return;
+    }
+    // Leaflet fallback: swap base tiles (roadmap / satellite-ish imagery).
+    const L = getWindowWithExternalMaps().L;
+    const leafletMap = map as (LeafletMapHandle & { eachLayer?: (cb: (layer: unknown) => void) => void }) | null;
+    if (!L || !leafletMap) return;
+    const url =
+      next === 'satellite' || next === 'hybrid'
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        : next === 'terrain'
+          ? 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    try {
+      if (leafletBaseLayerRef.current?.remove) {
+        leafletBaseLayerRef.current.remove();
+      } else if (leafletBaseLayerRef.current?.removeFrom) {
+        leafletBaseLayerRef.current.removeFrom(leafletMap);
+      }
+      const tiles = L.tileLayer(url, { maxZoom: 19, attribution: 'Map data' });
+      tiles.addTo(leafletMap);
+      leafletBaseLayerRef.current = tiles;
+    } catch {
+      // Keep current tiles if swap fails.
+    }
+  }
+
+  function applyMapPickerPoint(point: DeliveryPoint, addressLabel?: string) {
+    const map = mapPickerMapRef.current;
+    setDeliveryPoint(point);
+    setDeliveryPointSource('user');
+    if (mapPickerProvider === 'google') {
+      if (map?.panTo) map.panTo(point);
+      if (map?.setZoom) map.setZoom(17);
+    } else if (map?.setView) {
+      map.setView([point.lat, point.lng], 17);
+    }
+    if (addressLabel?.trim()) {
+      setMapPickerAddress(addressLabel.trim());
+      setMapPickerError('');
+      setIsMapPickerLoading(false);
+      return;
+    }
+    mapPickerResolveAddressRef.current?.(point);
+  }
+
+  async function runMapPickerAddressSearch() {
+    const query =
+      mapPickerSearchText.trim() || mapPickerSearchInputRef.current?.value?.trim() || '';
+    if (!query) return;
+    setMapPickerError('');
+    setIsMapPickerLoading(true);
+
+    try {
+      const resolved = await resolveMapPickerQuery(query);
+      if (resolved.point) {
+        applyMapPickerPoint(resolved.point);
+        // Prefer a readable reverse-geocoded label when the input was coords/link.
+        mapPickerResolveAddressRef.current?.(resolved.point);
+        return;
+      }
+
+      if (mapPickerProvider !== 'google') {
+        setIsMapPickerLoading(false);
+        setMapPickerError('La búsqueda de texto está disponible con Google Maps.');
+        return;
+      }
+
+      const geocoder = mapPickerGeocoderRef.current;
+      const map = mapPickerMapRef.current;
+      if (!geocoder || !map) {
+        setIsMapPickerLoading(false);
+        setMapPickerError('El mapa aún se está cargando. Inténtalo de nuevo.');
+        return;
+      }
+
+      const geocodeQuery = resolved.geocodeQuery || query;
+      geocoder.geocode(
+        {
+          address: geocodeQuery,
+          componentRestrictions: looksLikePlusCode(geocodeQuery)
+            ? undefined
+            : { country: GOOGLE_MAPS_VE_COUNTRY },
+          region: GOOGLE_MAPS_VE_COUNTRY,
+        },
+        (results: GooglePlaceResult[] | null, status: string) => {
+          if (status !== 'OK' || !results?.[0]?.geometry?.location) {
+            // Retry without country bias for plus codes / odd references.
+            geocoder.geocode({ address: geocodeQuery }, (retryResults, retryStatus) => {
+              if (retryStatus !== 'OK' || !retryResults?.[0]?.geometry?.location) {
+                setIsMapPickerLoading(false);
+                setMapPickerError(
+                  'No encontramos esa ubicación. Prueba una dirección, coordenadas, Plus Code o un enlace de Google Maps.',
+                );
+                return;
+              }
+              const location = retryResults[0].geometry.location;
+              applyMapPickerPoint(
+                { lat: location.lat(), lng: location.lng() },
+                retryResults[0].formatted_address ?? geocodeQuery,
+              );
+            });
+            return;
+          }
+          const location = results[0].geometry.location;
+          applyMapPickerPoint(
+            { lat: location.lat(), lng: location.lng() },
+            results[0].formatted_address ?? geocodeQuery,
+          );
+        },
+      );
+    } catch {
+      setIsMapPickerLoading(false);
+      setMapPickerError('No pudimos interpretar esa búsqueda. Inténtalo de nuevo.');
+    }
+  }
+
+  function goToMapPickerMyLocation() {
+    if (!navigator.geolocation) {
+      setMapPickerError('Tu navegador no permite usar la ubicación GPS.');
+      return;
+    }
+    setMapPickerError('');
+    setIsMapPickerLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const point = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setDeliveryPoint(point);
+        setDeliveryPointSource('user');
+        const map = mapPickerMapRef.current;
+        if (mapPickerProvider === 'google') {
+          if (map?.panTo) map.panTo(point);
+          if (map?.setZoom) map.setZoom(15);
+        } else if (map?.setView) {
+          map.setView([point.lat, point.lng], 15);
+        }
+        mapPickerResolveAddressRef.current?.(point);
+      },
+      () => {
+        setIsMapPickerLoading(false);
+        setMapPickerError(
+          'No pudimos obtener tu GPS. Activa la ubicación del navegador e inténtalo de nuevo.',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+    );
+  }
+
   function goToPreviousStep() {
     setCheckoutError(null);
-    if (checkoutStep === 3 && !isDeliveryOrder) {
+    if (checkoutStep === 3 && !isDeliveryOrder && !offersDeliveryAddressStep) {
       setCheckoutStep(1);
       return;
     }
@@ -4698,13 +7009,10 @@ export default function PublicMenuPage() {
   return (
     <>
       <Head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {googleFontsUrl ? (
+        {supabaseUrl ? (
           <>
-            <link rel="preconnect" href="https://fonts.googleapis.com" />
-            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-            <link rel="stylesheet" href={googleFontsUrl} />
+            <link rel="preconnect" href={supabaseUrl} crossOrigin="" />
+            <link rel="dns-prefetch" href={supabaseUrl} />
           </>
         ) : null}
       </Head>
@@ -4984,6 +7292,20 @@ export default function PublicMenuPage() {
           }
         }
 
+        /* Skeleton → color: suppress staggered entrances while the grayscale overlay fades */
+        main[data-kiosk-boot-reveal] .kos-motion-enter,
+        main[data-kiosk-boot-reveal] .kos-motion-enter[data-motion-in='true'],
+        main[data-kiosk-boot-reveal] .kos-float-subtle,
+        main[data-kiosk-boot-reveal] .kos-loader-aura,
+        main[data-kiosk-boot-reveal] .kos-loader-orbit,
+        main[data-kiosk-boot-reveal] .kos-loader-orbit-reverse,
+        main[data-kiosk-boot-reveal] .kos-loader-dot {
+          animation: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+          transition-duration: 1ms !important;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .kos-motion-enter,
           .kos-motion-enter[data-motion-in='true'],
@@ -5022,6 +7344,7 @@ export default function PublicMenuPage() {
       <main
         className={`min-h-[100svh] min-h-[100dvh] ${isOwnerPreview ? 'pt-12' : ''}`}
         data-menu-theme={themeMode}
+        data-kiosk-boot-reveal="1"
         style={{
           ...containerStyle,
           background: 'var(--menu-background)',
@@ -5035,26 +7358,207 @@ export default function PublicMenuPage() {
             Vista previa. Este menú aún no está publicado.
           </div>
         ) : null}
+        {isChatbotMode ? (
+          <ChatAssistantLazy
+            comercioId={resolvedComercioId || String(menuData.comercio.slug || commerceIdentifier)}
+            businessName={comercioNombre}
+            logoUrl={comercioLogoUrl || null}
+            initialLetter={comercioInitialLetter}
+            catalog={chatCatalog}
+            paymentMethods={chatPaymentMethods}
+            businessLocation={chatBusinessLocation}
+            businessHours={chatBusinessHours}
+            fulfillmentOptions={chatFulfillmentOptions}
+            cartCount={cartCount}
+            cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
+            cartSnapshot={cartItems.map((item) => ({
+              productId: item.product.id,
+              quantity: item.quantity,
+              selection: item.selection,
+            }))}
+            // UI may probe /api/chat/:id; server authorization is independent of NEXT_PUBLIC_*.
+            chatRuntimeEnabled={false}
+            probeServerAuth
+            whatsappUrl={
+              whatsappNumber ? buildWhatsAppHref(whatsappNumber) : null
+            }
+            whatsappDisplay={
+              whatsappNumber
+                ? parsePhoneNumber(`+${whatsappNumber}`)?.formatInternational() ||
+                  `+${whatsappNumber}`
+                : null
+            }
+            onOpenMenu={openTraditionalMenuFromChat}
+            onOpenCart={openSharedCartFromChat}
+            onOpenCheckout={openCheckoutFromChat}
+            onQuoteDeliveryAt={(location) => {
+              const quote = quoteDeliveryFee({
+                config: menuData?.comercio.delivery_tarifas,
+                isDelivery: true,
+                subtotal: cartTotal,
+                origin:
+                  hasBusinessCoords && businessLat != null && businessLng != null
+                    ? { lat: businessLat, lng: businessLng }
+                    : null,
+                destination: { lat: location.lat, lng: location.lng },
+                fallbackFee: toNumberOrNull(menuData?.comercio.costo_envio) ?? 0,
+                convertToBase: (amount) =>
+                  convertAmountBetweenCurrencies(
+                    amount,
+                    deliveryTariffCurrency,
+                    businessBaseCurrency,
+                    {
+                      baseCurrency: businessBaseCurrency,
+                      checkoutExchange: checkoutExchangeConfig,
+                      businessExchangeRate,
+                      businessQuoteCurrency,
+                      businessExchangeSource,
+                      businessExchangeMode,
+                      marketRates: menuData?.marketRates,
+                    },
+                  ),
+              });
+              const feeConverted = convertFromBaseCurrency(
+                quote.fee,
+                businessBaseCurrency,
+                selectedCurrencyCode,
+                selectedExchangeRate,
+              );
+              return {
+                supportsDelivery,
+                pickupAvailable: kioskHomeConfig.paraLlevar !== false,
+                quote,
+                feeLabel: formatAmountByCurrency(
+                  feeConverted,
+                  selectedCurrencyCode,
+                ),
+                currency: selectedCurrencyCode,
+              };
+            }}
+            onShareLocationForDelivery={(location) => {
+              if (supportsDelivery) {
+                setDeliveryMode('delivery');
+                setKioskFulfillment('delivery');
+                try {
+                  window.sessionStorage.setItem(
+                    `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+                    'delivery',
+                  );
+                } catch {
+                  /* ignore */
+                }
+                setDeliveryPoint({ lat: location.lat, lng: location.lng });
+                setDeliveryPointSource('user');
+                setDeliveryAddress(
+                  location.label?.trim() ||
+                    `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
+                );
+              }
+              openCheckoutFromChat();
+            }}
+            incomingProposal={chatIncomingProposal}
+            onIncomingProposalConsumed={() => setChatIncomingProposal(null)}
+            incomingAppliedNotice={chatAppliedNotice}
+            onIncomingAppliedNoticeConsumed={() => setChatAppliedNotice(null)}
+            onConfigureProduct={(productId) => {
+              // Stay in chat — ProductOptionsSheet overlays the conversation.
+              setProductOptionsSheet({ open: true, productId });
+            }}
+            onAddSimpleProduct={(productId) => {
+              handleAddSimpleProductFromChat(productId);
+            }}
+            onApplyCartAction={(action) => {
+              if (action.type === 'propose_add') {
+                const product = productById.get(action.product_id);
+                if (!product || product.disponible === false) return false;
+                if (validateOptionGroupSelection(product, action.selection).length) {
+                  return 'stale';
+                }
+                const category = categoryByProductId.get(action.product_id) ?? null;
+                const unitPrice = menuLinePrice(
+                  product,
+                  category,
+                  action.selection,
+                  productById,
+                  categoryByProductId,
+                );
+                if (!(unitPrice > 0)) return false;
+                // Fase 0: never trust client/model unit_price — cart uses catalog calc.
+                addConfiguredProductToCart(
+                  action.product_id,
+                  action.selection,
+                  action.quantity,
+                );
+                return true;
+              }
+              if (action.type === 'propose_update_qty') {
+                const product = productById.get(action.product_id);
+                if (!product) return false;
+                setCart((prev) => {
+                  const next = { ...prev };
+                  if (action.quantity <= 0) {
+                    delete next[action.cart_key];
+                  } else {
+                    next[action.cart_key] = action.quantity;
+                  }
+                  return next;
+                });
+                return true;
+              }
+              if (action.type === 'propose_remove') {
+                removeProductFromCart(action.cart_key);
+                return true;
+              }
+              if (action.type === 'open_checkout') {
+                openCheckoutFromChat();
+                return true;
+              }
+              return false;
+            }}
+          />
+        ) : catalogReady ? (
+          <KioskCatalogReady
+            businessName={comercioNombre}
+            logoUrl={comercioLogoUrl || null}
+            initialLetter={comercioInitialLetter}
+            items={catalogReady.items}
+            itemCount={catalogReady.itemCount}
+            totalLabel={catalogReady.totalLabel}
+            paymentGroups={publicPaymentGroups}
+            selectedPaymentCurrency={selectedCurrencyCode}
+            onSelectPaymentCurrency={selectMenuCurrency}
+            whatsappNumber={whatsappNumber || null}
+            onBackToMenu={returnToCatalogMenu}
+            onSubmitWhatsapp={submitCatalogWhatsappOrder}
+          />
+        ) : (
         <KioskMenuExperience
+          ref={kioskShellRef}
           businessName={comercioNombre}
           logoUrl={comercioLogoUrl || null}
           ratingAverage={toNumberOrNull(menuData.comercio.rating_average) ?? 0}
           ratingCount={toNumberOrNull(menuData.comercio.rating_count) ?? 0}
           initialLetter={comercioInitialLetter}
           locationLabel={heroLocation || null}
+          operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}
+          whatsappNumber={whatsappNumber || null}
           tagline={menuData?.comercio.descripcion?.trim() || null}
           isOpen={!scheduleClosed}
           openCaption={kioskOpenCaption}
           closedCaption={kioskClosedCaption}
+          businessHours={menuData?.comercio?.horarios ?? null}
           supportsDelivery={supportsDelivery}
           homeConfig={kioskHomeConfig}
           paymentGroups={publicPaymentGroups}
           fulfillment={kioskFulfillment}
-          catalogMode={catalogMode}
+          catalogMode={inCatalogSession}
+          catalogOnlySession={catalogUrlLocked}
+          assistedMode={isAssistedMode}
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
           onEnterCatalog={enterCatalogMode}
+          directionsUrl={directionsUrl}
           onLeaveCatalog={leaveCatalogMode}
           categories={kioskCategories}
           productsByCategory={kioskProductsByCategory}
@@ -5063,23 +7567,15 @@ export default function PublicMenuPage() {
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
           onAddProduct={handleKioskAddProduct}
-          payCtaLabel={catalogMode ? 'Ver pedido' : preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
+          payCtaLabel={preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
           onPay={() => {
             setKioskAddedPrompt(null);
-            if (catalogMode) {
-              openCatalogSummary();
-              return;
-            }
             openCheckoutSheet();
           }}
-          addedPrompt={scheduleClosed || preCheckoutUpsellActive || catalogMode ? null : kioskAddedPrompt}
+          addedPrompt={scheduleClosed || preCheckoutUpsellActive ? null : kioskAddedPrompt}
           onContinueAdding={() => setKioskAddedPrompt(null)}
           onPayFromPrompt={() => {
             setKioskAddedPrompt(null);
-            if (catalogMode) {
-              openCatalogSummary();
-              return;
-            }
             openCheckoutSheet();
           }}
           voucher={kioskVoucher}
@@ -5108,7 +7604,11 @@ export default function PublicMenuPage() {
           themeMode={themeMode}
           onToggleTheme={toggleKioskTheme}
           stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
+          onHistoryDepthChange={setKioskHistoryDepth}
+          chatbotUxEnabled={chatbotUxEnabled}
+          onOpenAssistant={openChatbotFromMenu}
         />
+        )}
 
         <PreCheckoutUpsellSheet
           open={isPreCheckoutUpsellOpen}
@@ -5129,14 +7629,13 @@ export default function PublicMenuPage() {
           onRemove={removeProductFromCart}
           onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
           onContinue={() => {
-            if (catalogMode) {
-              setIsPreCheckoutUpsellOpen(false);
-              return;
-            }
             proceedToCheckoutSheet();
           }}
-          canConfigure={catalogMode || !scheduleClosed}
-          catalogMode={catalogMode}
+          onCatalogReady={() => {
+            proceedToCheckoutSheet();
+          }}
+          canConfigure={inCatalogSession || !scheduleClosed}
+          catalogMode={false}
           paymentGroups={publicPaymentGroups}
           selectedPaymentCurrency={selectedCurrencyCode}
           onSelectPaymentCurrency={selectMenuCurrency}
@@ -5178,8 +7677,15 @@ export default function PublicMenuPage() {
             : []}
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
-            (catalogMode || (!scheduleClosed && Boolean(kioskFulfillment))) &&
-            productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
+            !scheduleClosed &&
+            (inCatalogSession || isAssistedMode || checkoutFulfillmentOptions.length > 0) &&
+            productById.get(productOptionsSheet.productId ?? '')?.disponible !== false &&
+            !(
+              isDeliveryOrder &&
+              isProductExcludedFromDelivery(
+                productById.get(productOptionsSheet.productId ?? '') ?? {},
+              )
+            )
           }
           product={
             productOptionsSheet.productId
@@ -5195,6 +7701,20 @@ export default function PublicMenuPage() {
                 )
               : null
           }
+          imageSourceUrl={
+            productOptionsSheet.productId
+              ? productById.get(productOptionsSheet.productId)?.imagen_url?.trim() || null
+              : null
+          }
+          imagePreviewUrl={
+            productOptionsSheet.productId
+              ? displayProductImage(
+                  productById.get(productOptionsSheet.productId)?.imagen_url,
+                  comercioLogoUrl,
+                  MENU_IMAGE_WIDTH.tile,
+                )
+              : null
+          }
           category={
             productOptionsSheet.productId
               ? categoryByProductId.get(productOptionsSheet.productId) ?? null
@@ -5202,12 +7722,131 @@ export default function PublicMenuPage() {
           }
           formatPrice={formatUpsellPrice}
           onClose={() => setProductOptionsSheet({ open: false, productId: null })}
+          onExpandImage={() => {
+            const productId = productOptionsSheet.productId;
+            if (!productId) return;
+            const product = productById.get(productId);
+            if (!product) return;
+            const original = (product.imagen_url ?? '').trim();
+            const previewSrc = displayProductImage(
+              original,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.sheet,
+            );
+            // Prefer hot transform for the lightbox — cold WebP may 404 until
+            // variants are generated after a fresh upload.
+            const src =
+              optimizeStorageImageUrl(original, MENU_IMAGE_WIDTH.lightbox, 82) ||
+              original ||
+              displayProductImage(original, comercioLogoUrl, MENU_IMAGE_WIDTH.lightbox);
+            if (!src) return;
+            setExpandedProductImage({
+              src,
+              sourceUrl: original || null,
+              previewSrc,
+              alt: product.nombre,
+              title: product.nombre,
+              description: (product.descripcion ?? '').trim(),
+            });
+          }}
           onConfirm={(selection, quantity) => {
             if (!productOptionsSheet.productId) return;
-            const addedProduct = productById.get(productOptionsSheet.productId);
-            addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
+            const productId = productOptionsSheet.productId;
+            const addedProduct = productById.get(productId);
+            const category = categoryByProductId.get(productId) ?? null;
+
+            // Chat mode: "Agregar al pedido" is enough — no second confirm card.
+            // Gemini proposals still use Confirmar on ChatCartActionCard.
+            if (isChatbotMode && addedProduct) {
+              if (chatSheetAddLockRef.current) return;
+              chatSheetAddLockRef.current = true;
+              try {
+                if (validateOptionGroupSelection(addedProduct, selection).length) {
+                  setProductOptionsSheet({ open: false, productId: null });
+                  setChatAppliedNotice({
+                    label:
+                      'No se pudo agregar: revisa las opciones obligatorias.',
+                  });
+                  return;
+                }
+                const unitPrice = menuLinePrice(
+                  addedProduct,
+                  category,
+                  selection,
+                  productById,
+                  categoryByProductId,
+                );
+                const sheetAvailable = addedProduct.disponible !== false;
+                if (!(unitPrice > 0) || !sheetAvailable) {
+                  setProductOptionsSheet({ open: false, productId: null });
+                  setChatAppliedNotice({
+                    label:
+                      'No se pudo agregar: precio o disponibilidad no válidos.',
+                  });
+                  return;
+                }
+                addConfiguredProductToCart(productId, selection, quantity);
+                const lineTotal = Math.round(unitPrice * quantity * 100) / 100;
+                const currency =
+                  (menuData?.comercio as { moneda?: string } | undefined)
+                    ?.moneda ||
+                  selectedCurrencyCode ||
+                  'USD';
+                const label = `${quantity}× ${menuLineLabel(addedProduct, selection, category, productById)}`;
+                const optionSummary =
+                  menuLineSummary(
+                    addedProduct,
+                    selection,
+                    category,
+                    productById,
+                    categoryByProductId,
+                  ) || '';
+                setChatAppliedNotice({
+                  label,
+                  productCard: {
+                    product_id: productId,
+                    name: addedProduct.nombre || '',
+                    description:
+                      (addedProduct.descripcion || '').slice(0, 160) || null,
+                    image_url:
+                      displayProductImage(
+                        addedProduct.imagen_url,
+                        comercioLogoUrl,
+                        160,
+                      ) || null,
+                    currency,
+                    price_base: Number(addedProduct.precio) || null,
+                    price_unit: unitPrice,
+                    price_label: formatUpsellPrice(unitPrice),
+                    line_total: lineTotal,
+                    line_total_label: formatUpsellPrice(lineTotal),
+                    available: sheetAvailable,
+                    requires_configuration: false,
+                    option_hints: [],
+                    selected_options: optionSummary
+                      ? optionSummary
+                          .split('·')
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                      : [],
+                    quantity,
+                  },
+                });
+                setProductOptionsSheet({ open: false, productId: null });
+              } finally {
+                window.setTimeout(() => {
+                  chatSheetAddLockRef.current = false;
+                }, 400);
+              }
+              return;
+            }
+
+            addConfiguredProductToCart(productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
-            if (!preCheckoutUpsellActive && !catalogMode) {
+            if (tryOpenPreCheckoutUpsellAfterAdd(productId)) {
+              return;
+            }
+            if (!catalogMode && !scheduleClosed) {
               setKioskAddedPrompt({
                 productName: addedProduct?.nombre ?? 'Producto',
               });
@@ -5216,38 +7855,16 @@ export default function PublicMenuPage() {
         />
 
         {expandedProductImage ? (
-          <section
-            className="kos-modal-backdrop fixed inset-0 z-[57] bg-black/85 p-4"
-            onClick={() => setExpandedProductImage(null)}
-          >
-            <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
-              <div
-                className="kos-image-modal-panel w-full max-w-4xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <img
-                  src={expandedProductImage.src}
-                  alt={expandedProductImage.alt}
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-[72vh] w-full rounded-2xl object-contain"
-                />
-                <div className="mt-3 rounded-2xl bg-black/55 px-4 py-3 text-white">
-                  <h3 className="text-base font-black md:text-lg" style={titleFontStyle}>
-                    {expandedProductImage.title}
-                  </h3>
-                  <p className="mt-1 text-sm text-white/90">{expandedProductImage.description}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setExpandedProductImage(null)}
-                className="kos-surface-motion kos-pressable absolute right-5 top-5 rounded-full border border-white/30 bg-black/40 px-3 py-1 text-xs font-semibold text-white"
-              >
-                Cerrar
-              </button>
-            </div>
-          </section>
+          <ProductImageLightbox
+            src={expandedProductImage.src}
+            sourceUrl={expandedProductImage.sourceUrl}
+            previewSrc={expandedProductImage.previewSrc}
+            alt={expandedProductImage.alt}
+            title={expandedProductImage.title}
+            description={expandedProductImage.description}
+            titleFontStyle={titleFontStyle}
+            onClose={() => setExpandedProductImage(null)}
+          />
         ) : null}
 
         {isInfoOpen ? (
@@ -5338,9 +7955,10 @@ export default function PublicMenuPage() {
                         ) : null}
                         {whatsappNumber ? (
                           <a
-                            href={`https://wa.me/${whatsappNumber}`}
+                            href={buildWhatsAppHref(whatsappNumber)}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(event) => handleWhatsAppLinkClick(buildWhatsAppHref(whatsappNumber), event)}
                             className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-black shadow-sm"
                             style={
                               receivesOrdersOnWhatsapp
@@ -5429,19 +8047,26 @@ export default function PublicMenuPage() {
                                 {group.methods.map((method) => (
                                   <div key={`info-${method.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                                     <p className="text-sm font-bold text-slate-800">{paymentMethodLabel(method)}</p>
-                                    <div className="mt-1 space-y-1 text-xs text-slate-600">
-                                      {method.nota || method.descripcion ? (
-                                        <p>Nota: {method.nota ?? method.descripcion}</p>
-                                      ) : null}
+                                    <div className="mt-1 text-xs text-slate-600">
                                       {method.moneda || method.currency ? (
                                         <p>Moneda: {method.moneda ?? method.currency}</p>
                                       ) : null}
                                       {method.tasa_cambio || method.exchange_rate ? (
                                         <p>Tasa de cambio: {method.tasa_cambio ?? method.exchange_rate}</p>
                                       ) : null}
-                                      {paymentMethodDetails(method).map((detail, index) => (
-                                        <p key={`${method.id}-detail-${index}`}>{detail}</p>
-                                      ))}
+                                      {(() => {
+                                        const parsed = paymentMethodCopyModel(method);
+                                        return (
+                                          <>
+                                            <PaymentCopyFields
+                                              fields={parsed.fields}
+                                              note={parsed.note}
+                                              dense
+                                              mode={isCashPaymentMethod(method) ? 'info' : 'copy'}
+                                            />
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                 ))}
@@ -5469,9 +8094,10 @@ export default function PublicMenuPage() {
                   ) : null}
                   {whatsappNumber ? (
                     <a
-                      href={`https://wa.me/${whatsappNumber}`}
+                      href={buildWhatsAppHref(whatsappNumber)}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(event) => handleWhatsAppLinkClick(buildWhatsAppHref(whatsappNumber), event)}
                       className="flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2.5 text-center text-xs font-black uppercase tracking-[0.08em]"
                       style={
                         receivesOrdersOnWhatsapp
@@ -5497,90 +8123,178 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isMapPickerOpen ? (
-          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-[var(--menu-background)] text-[var(--menu-text)]">
-            <div className="kos-sheet-panel mx-auto flex h-full max-w-2xl flex-col bg-[var(--menu-background)]">
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--menu-border)] bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] px-4 py-3 backdrop-blur-sm sm:px-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--menu-text-muted)]">Mapa</p>
-                  <h3 className="text-xl font-black text-[var(--menu-text)]" style={titleFontStyle}>Punto de entrega</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsMapPickerOpen(false)}
-                  className="rounded-full border border-[var(--menu-border)] px-3 py-1 text-xs font-semibold text-[var(--menu-text-muted)]"
-                >
-                  Cerrar
-                </button>
-              </div>
-
-              <div className="relative flex-1">
-                <div className="absolute left-3 right-3 top-3 z-10 flex gap-2 sm:left-6 sm:right-6">
-                  <input
-                    ref={mapPickerSearchInputRef}
-                    type="text"
-                    placeholder="Buscar direccion o lugar"
-                    defaultValue={deliveryAddress}
-                    className="h-10 w-full rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                    disabled={mapPickerProvider !== 'google'}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter') return;
-                      event.preventDefault();
-                      if (mapPickerProvider !== 'google') return;
-                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
-                      if (!query) return;
-                      const geocoder = mapPickerGeocoderRef.current;
-                      const map = mapPickerMapRef.current;
-                      if (!geocoder || !map) return;
-                      setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
-                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
-                          setIsMapPickerLoading(false);
-                          return;
-                        }
-                        const location = results[0].geometry.location;
-                        const point = { lat: location.lat(), lng: location.lng() };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        map.panTo(point);
-                        map.setZoom(17);
-                        setMapPickerAddress(results[0].formatted_address ?? query);
-                        setIsMapPickerLoading(false);
-                      });
-                    }}
-                  />
+          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-white text-[var(--menu-text)]">
+            <div className="kos-sheet-panel relative mx-auto flex h-full max-w-2xl flex-col bg-white">
+              <div className="shrink-0 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
+                <div className="flex items-start gap-3">
                   <button
                     type="button"
-                    disabled={mapPickerProvider !== 'google'}
                     onClick={() => {
-                      if (mapPickerProvider !== 'google') return;
-                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
-                      if (!query) return;
-                      const geocoder = mapPickerGeocoderRef.current;
-                      const map = mapPickerMapRef.current;
-                      if (!geocoder || !map) return;
-                      setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
-                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
-                          setIsMapPickerLoading(false);
-                          return;
-                        }
-                        const location = results[0].geometry.location;
-                        const point = { lat: location.lat(), lng: location.lng() };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        map.panTo(point);
-                        map.setZoom(17);
-                        setMapPickerAddress(results[0].formatted_address ?? query);
-                        setIsMapPickerLoading(false);
-                      });
+                      setIsMapPickerHelpOpen(false);
+                      setIsMapPickerOpen(false);
                     }}
-                    className="rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)] disabled:opacity-50"
+                    className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--menu-border)] bg-white text-[var(--menu-text)] shadow-sm"
+                    aria-label="Volver"
+                  >
+                    <ChevronLeft className="h-5 w-5" strokeWidth={2.4} />
+                  </button>
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                      Mapa
+                    </p>
+                    <h3
+                      className="text-[1.35rem] font-black leading-tight tracking-[-0.03em] text-[var(--menu-text)]"
+                      style={titleFontStyle}
+                    >
+                      Punto de entrega
+                    </h3>
+                    <p className="mt-1 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                      Selecciona en el mapa dónde quieres recibir tu pedido.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMapPickerHelpOpen(true)}
+                    className="mt-0.5 shrink-0 rounded-full border border-[var(--menu-border)] px-3 py-1.5 text-[12px] font-bold text-[var(--menu-text-muted)]"
+                  >
+                    Ayuda
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <label className="relative min-w-0 flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--menu-text-muted)]"
+                      strokeWidth={2.4}
+                    />
+                    <input
+                      ref={mapPickerSearchInputRef}
+                      type="text"
+                      value={mapPickerSearchText}
+                      placeholder="Dirección, coordenadas, Plus Code o link de Maps"
+                      className="h-11 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] py-2 pl-10 pr-10 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                      onChange={(event) => setMapPickerSearchText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        void runMapPickerAddressSearch();
+                      }}
+                    />
+                    {mapPickerSearchText.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMapPickerSearchText('');
+                          if (mapPickerSearchInputRef.current) {
+                            mapPickerSearchInputRef.current.value = '';
+                            mapPickerSearchInputRef.current.focus();
+                          }
+                        }}
+                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)] hover:bg-[var(--menu-surface)]"
+                        aria-label="Borrar búsqueda"
+                      >
+                        <X className="h-4 w-4" strokeWidth={2.4} />
+                      </button>
+                    ) : null}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void runMapPickerAddressSearch()}
+                    className="h-11 shrink-0 rounded-2xl px-4 text-sm font-black"
+                    style={{
+                      backgroundColor: 'var(--menu-primary)',
+                      color: 'var(--menu-on-primary)',
+                    }}
                   >
                     Buscar
                   </button>
                 </div>
-                <div ref={mapPickerContainerRef} className="h-full w-full bg-slate-100" />
-                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
+              </div>
+
+              {isMapPickerHelpOpen ? (
+                <div
+                  className="absolute inset-0 z-30 flex items-end bg-black/45 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-10 sm:items-center sm:justify-center"
+                  onClick={() => setIsMapPickerHelpOpen(false)}
+                >
+                  <div
+                    className="w-full max-w-md rounded-[28px] bg-white p-5 shadow-[0_24px_64px_rgba(15,23,42,0.28)]"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                          Ayuda
+                        </p>
+                        <h4 className="mt-1 text-lg font-black text-[var(--menu-text)]">
+                          Cómo marcar tu punto
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsMapPickerHelpOpen(false)}
+                        className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
+                        aria-label="Cerrar ayuda"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <ol className="mt-4 space-y-3 text-[13px] font-medium leading-snug text-[var(--menu-text)]">
+                      <li>1️⃣ Mueve el mapa hasta dejar el pin 📍 exactamente donde te entregan.</li>
+                      <li>2️⃣ O toca <span className="font-black">Mi ubicación</span> para usar tu GPS 📡.</li>
+                      <li>
+                        3️⃣ En el buscador puedes pegar:
+                        <ul className="mt-1.5 space-y-1 pl-1 text-[12px] text-[var(--menu-text-muted)]">
+                          <li>🏠 Una dirección o lugar (“Campo Deportivo…”)</li>
+                          <li>📌 Coordenadas (ej. 10.48, -66.90)</li>
+                          <li>#️⃣ Un Plus Code (ej. RQVQ+W83)</li>
+                          <li>🔗 Un enlace de Google Maps</li>
+                        </ul>
+                      </li>
+                      <li>4️⃣ Revisa el costo de delivery y toca <span className="font-black">Confirmar punto</span> ✅.</li>
+                    </ol>
+                    <button
+                      type="button"
+                      onClick={() => setIsMapPickerHelpOpen(false)}
+                      className="mt-5 flex h-11 w-full items-center justify-center rounded-2xl text-sm font-black"
+                      style={{
+                        backgroundColor: 'var(--menu-primary)',
+                        color: 'var(--menu-on-primary)',
+                      }}
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="relative min-h-0 flex-1">
+                <div ref={mapPickerContainerRef} className="h-full w-full bg-[#e7e5e4]" />
+                {!isMapCanvasReady ? (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#e7e5e4] px-6 text-center">
+                    {mapPickerError ? (
+                      <p className="max-w-xs text-sm font-bold text-slate-800">{mapPickerError}</p>
+                    ) : (
+                      <>
+                        <span className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" />
+                        <p className="max-w-xs text-sm font-bold leading-5 text-slate-900">
+                          Ten paciencia, esto puede demorar un momento
+                        </p>
+                      </>
+                    )}
+                    {mapPickerError || mapLoadSlow ? (
+                      <button
+                        type="button"
+                        onClick={retryMapPicker}
+                        className="rounded-full bg-slate-900 px-4 py-2 text-xs font-bold uppercase tracking-[0.08em] text-white"
+                      >
+                        Reintentar
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div
+                  className={`pointer-events-none absolute inset-0 z-[5] flex items-center justify-center ${isMapCanvasReady ? '' : 'hidden'}`}
+                >
                   <div
                     className={`-mt-6 text-4xl leading-none transition-[transform] duration-200 ease-out ${
                       isMapPickerDragging
@@ -5592,62 +8306,159 @@ export default function PublicMenuPage() {
                     📍
                   </div>
                 </div>
-                {isMapPickerLoading ? (
-                  <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
-                    Buscando direccion...
+                {isMapCanvasReady && isMapPickerLoading ? (
+                  <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-white px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
+                    Buscando dirección...
+                  </div>
+                ) : null}
+                {isMapCanvasReady ? (
+                  <div className="absolute bottom-5 right-3 z-20 flex flex-col items-end gap-2">
+                    {isMapPickerLayersOpen ? (
+                      <div className="overflow-hidden rounded-2xl border border-[var(--menu-border)] bg-white shadow-lg">
+                        {MAP_PICKER_LAYER_OPTIONS.map((option) => {
+                          const selected = mapPickerLayer === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => applyMapPickerLayer(option.id)}
+                              className="flex w-full min-w-[9.5rem] items-center justify-between gap-3 px-3.5 py-2.5 text-left text-[13px] font-bold"
+                              style={{
+                                backgroundColor: selected
+                                  ? 'color-mix(in srgb, var(--menu-primary) 12%, white)'
+                                  : 'white',
+                                color: 'var(--menu-text)',
+                              }}
+                            >
+                              <span>{option.label}</span>
+                              {selected ? (
+                                <Check
+                                  className="h-4 w-4"
+                                  style={{ color: 'var(--menu-primary)' }}
+                                  strokeWidth={2.6}
+                                />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setIsMapPickerLayersOpen((open) => !open)}
+                      className="grid h-11 w-11 place-items-center rounded-full border border-[var(--menu-border)] bg-white text-[var(--menu-text)] shadow-md"
+                      aria-label="Capas del mapa"
+                      aria-expanded={isMapPickerLayersOpen}
+                    >
+                      <Layers className="h-5 w-5" strokeWidth={2.2} />
+                    </button>
+                  </div>
+                ) : null}
+                {deliveryAreaZonesForMap.length > 0 ? (
+                  <div className="pointer-events-none absolute bottom-4 left-3 z-10 rounded-full bg-[color-mix(in_srgb,#10B981_18%,white)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[color-mix(in_srgb,#047857_80%,var(--menu-text))] shadow-sm">
+                    Zonas de entrega
                   </div>
                 ) : null}
               </div>
 
-              <div className="space-y-2 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 py-3 sm:px-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Direccion detectada</p>
-                <p className="text-sm font-semibold text-[var(--menu-text)]">
-                  {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
-                </p>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                  Mapa: {mapPickerProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'}
-                </p>
-                {mapPickerError ? (
-                  <p className="text-xs font-semibold text-rose-500">{mapPickerError}</p>
-                ) : null}
-                <div className="flex items-center gap-2">
+              <div className="shrink-0 rounded-t-[28px] bg-white px-4 pb-[max(0.9rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] sm:px-5">
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[color-mix(in_srgb,var(--menu-text)_14%,transparent)]" />
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                      Dirección seleccionada
+                    </p>
+                    <p className="mt-1 text-[15px] font-black leading-snug tracking-[-0.01em] text-[var(--menu-text)]">
+                      {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
-                      if (!navigator.geolocation) return;
-                      navigator.geolocation.getCurrentPosition((position) => {
-                        const point = {
-                          lat: position.coords.latitude,
-                          lng: position.coords.longitude,
-                        };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        const map = mapPickerMapRef.current;
-                        if (mapPickerProvider === 'google') {
-                          if (map?.panTo) map.panTo(point);
-                        } else {
-                          if (map?.setView) map.setView([point.lat, point.lng], 16);
-                        }
-                        mapPickerResolveAddressRef.current?.(point);
-                      });
+                      mapPickerSearchInputRef.current?.focus();
+                      mapPickerSearchInputRef.current?.select();
                     }}
-                    className="rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)]"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--menu-border)] px-3 py-1.5 text-[12px] font-bold text-[var(--menu-text)]"
                   >
-                    Mi ubicacion
+                    <Pencil className="h-3.5 w-3.5" strokeWidth={2.4} />
+                    Editar
+                  </button>
+                </div>
+
+                {mapPickerDeliveryCostLabel ? (
+                  <div className="mt-3 flex items-center gap-3 rounded-[22px] border border-emerald-200/90 bg-emerald-50 px-3.5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800/80">
+                        Costo de delivery
+                      </p>
+                      <p className="mt-0.5 text-[1.15rem] font-black tracking-tight text-[var(--menu-text)]">
+                        {[mapPickerDeliveryCostLabel, deliveryDistanceLabel]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                      {matchedDeliveryAreaZone?.name ? (
+                        <p className="mt-0.5 text-[11px] font-medium text-emerald-900/70">
+                          Zona: {matchedDeliveryAreaZone.name}
+                        </p>
+                      ) : null}
+                    </div>
+                    {mapPickerEtaLabel ? (
+                      <>
+                        <div className="h-10 w-px shrink-0 bg-emerald-200/90" />
+                        <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-100/90 px-3 py-2 text-[12px] font-black text-[var(--menu-text)]">
+                          <Clock className="h-3.5 w-3.5 text-emerald-700" strokeWidth={2.4} />
+                          {mapPickerEtaLabel}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                ) : deliveryOutOfZoneAllowed ? (
+                  <div className="mt-3 rounded-[22px] border border-amber-200/80 bg-amber-50 px-3.5 py-3 text-[12px] font-medium leading-snug text-amber-950">
+                    {deliveryOutOfZoneNotice}
+                  </div>
+                ) : deliveryQuote.blocked ? (
+                  <div className="mt-3 rounded-[22px] border border-rose-200/80 bg-rose-50 px-3.5 py-3 text-[12px] font-medium leading-snug text-rose-900">
+                    {deliveryQuote.blockReason ||
+                      'Esta ubicación está fuera de las zonas de entrega. Elige un punto dentro del área sombreada para continuar.'}
+                  </div>
+                ) : deliveryAreaZonesForMap.length > 0 ? (
+                  <p className="mt-3 text-[12px] font-medium text-[var(--menu-text-muted)]">
+                    Las áreas en verde son las zonas donde este negocio hace delivery.
+                  </p>
+                ) : null}
+
+                {mapPickerError ? (
+                  <p className="mt-2 text-xs font-semibold text-rose-500">{mapPickerError}</p>
+                ) : null}
+
+                <div className="mt-3 flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={goToMapPickerMyLocation}
+                    className="inline-flex h-12 items-center gap-1.5 rounded-2xl border border-[var(--menu-border)] bg-white px-3.5 text-[13px] font-bold text-[var(--menu-text)]"
+                  >
+                    <MapPin className="h-4 w-4" strokeWidth={2.4} />
+                    Mi ubicación
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       if (deliveryPoint) {
                         setDeliveryPointSource('user');
-                      }
-                      if (mapPickerAddress.trim().length > 0) {
+                        setDeliveryAddress(
+                          resolveDeliveryAddressText(mapPickerAddress, deliveryPoint),
+                        );
+                      } else if (mapPickerAddress.trim().length > 0) {
                         setDeliveryAddress(mapPickerAddress.trim());
                       }
                       setIsMapPickerOpen(false);
                     }}
-                    className="ml-auto rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.08em]"
-                    style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                    className="h-12 min-w-0 flex-1 rounded-2xl px-4 text-[14px] font-black"
+                    style={{
+                      backgroundColor: 'var(--menu-primary)',
+                      color: 'var(--menu-on-primary)',
+                    }}
                   >
                     Confirmar punto
                   </button>
@@ -5660,25 +8471,37 @@ export default function PublicMenuPage() {
         {isConfirmOpen && !kioskVoucher ? (
           <KioskCheckout
             fulfillment={kioskFulfillment}
+            fulfillmentOptions={checkoutFulfillmentOptions}
+            onFulfillmentChange={changeCheckoutFulfillment}
             steps={checkoutFlowSteps}
             currentStepId={checkoutStep}
             title={
               checkoutStep === 0
-                ? 'Tu pedido'
+                ? isAssistedMode
+                  ? 'Pedido en mesa'
+                  : 'Tu pedido'
                 : checkoutStep === 1
-                  ? 'Tus datos'
+                  ? clientStepTitle
                   : checkoutStep === 2
                     ? 'Direccion'
                     : 'Pago'
             }
             subtitle={
               checkoutStep === 0
-                ? 'Revisa cantidades. El tipo de pedido ya esta elegido.'
+                ? isAssistedMode
+                  ? 'Revisa el pedido antes de enviarlo a cocina.'
+                  : 'Revisa cantidades antes de continuar.'
                 : checkoutStep === 1
-                  ? 'Te avisamos cuando el pedido este listo.'
+                  ? isAssistedMode
+                    ? 'Nombre, mesa y contacto opcional para el resumen.'
+                    : 'Te avisamos por WhatsApp cuando esté listo tu pedido.'
                   : checkoutStep === 2
-                    ? 'Indica a donde enviamos tu pedido.'
-                    : 'Elige como vas a pagar.'
+                    ? prefersSelfPickup
+                      ? 'Confirma si retiras o deja la dirección de envío.'
+                      : 'Indica dónde enviamos el pedido.'
+                    : isAssistedMode
+                      ? 'Pagar ahora o dejar el pago para después.'
+                      : 'Elige como vas a pagar.'
             }
             totalLabel={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
             itemsLabel={`${checkoutItemsCount} unid. · ${selectedCurrencyCode}`}
@@ -5688,8 +8511,8 @@ export default function PublicMenuPage() {
               isSubmittingOrder
                 ? 'Guardando pedido...'
                 : checkoutStep === 3
-                  ? 'Confirmar pedido'
-                  : checkoutStep === 1 && !isDeliveryOrder
+                  ? 'Listo'
+                  : checkoutStep === 1 && !isDeliveryOrder && !offersDeliveryAddressStep
                     ? 'Ir a pagar'
                     : checkoutStep === 2
                       ? 'Ir a pagar'
@@ -5697,12 +8520,26 @@ export default function PublicMenuPage() {
             }
             nextDisabled={
               isSubmittingOrder ||
-              (checkoutStep === 3 ? !canSubmitCheckout : !canAdvanceCurrentStep)
+              scheduleClosed ||
+              (checkoutStep === 3 ? !canReadyForReview : !canAdvanceCurrentStep)
             }
             submitting={isSubmittingOrder}
-            onClose={() => setIsConfirmOpen(false)}
-            onBack={checkoutStep === 0 ? () => setIsConfirmOpen(false) : goToPreviousStep}
-            onNext={checkoutStep === 3 ? () => void confirmOrder() : goToNextStep}
+            onClose={() => {
+              setIsOrderReviewOpen(false);
+              setIsConfirmOpen(false);
+            }}
+            onBack={
+              checkoutStep === 0
+                ? () => {
+                    setIsOrderReviewOpen(false);
+                    setIsConfirmOpen(false);
+                  }
+                : () => {
+                    setIsOrderReviewOpen(false);
+                    goToPreviousStep();
+                  }
+            }
+            onNext={checkoutStep === 3 ? openOrderReview : goToNextStep}
           >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
@@ -5717,7 +8554,10 @@ export default function PublicMenuPage() {
                               <div className="flex items-start gap-4">
                                 <KioskImage
                                   src={item.imageUrl}
+                                  sourceUrl={item.imageSourceUrl || item.imageUrl}
+                                  displayWidth={160}
                                   alt={item.name}
+                                  fit="cover"
                                   className="h-20 w-20 shrink-0 rounded-[22px] bg-[var(--menu-surface-alt)]"
                                 />
                                 <div className="min-w-0 flex-1">
@@ -5849,181 +8689,502 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 1 ? (
                     <div className="space-y-4">
-                      <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
-                          Pedido
-                        </p>
-                        <p className="mt-1 text-base font-black">
-                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
-                          {' · '}
-                          {checkoutItemsCount} unid.
-                        </p>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '40ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            <User className="h-3.5 w-3.5" strokeWidth={2.4} />
-                            Nombre completo
-                          </span>
-                          <input
-                            id="client-full-name"
-                            name="name"
-                            type="text"
-                            value={clientName}
-                            onChange={(event) => setClientName(event.target.value)}
-                            placeholder="Maria Fernanda Lopez"
-                            autoComplete="name"
-                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                            style={{
-                              borderColor: isClientNameValid || clientName.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                            }}
-                            required
-                          />
-                        </label>
-
-                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
-                            Correo electronico
-                          </span>
-                          <input
-                            id="client-email"
-                            type="email"
-                            inputMode="email"
-                            autoComplete="email"
-                            placeholder="correo@ejemplo.com"
-                            value={clientEmail}
-                            onChange={(event) => setClientEmail(event.target.value)}
-                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                            style={{
-                              borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                            }}
-                            required
-                          />
-                          {!isClientEmailValid && clientEmail.trim().length > 0 ? (
-                            <p className="mt-2 text-[11px] font-semibold text-rose-500">Ingresa un correo valido.</p>
-                          ) : null}
-                        </label>
-                      </div>
-
-                      <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
-                        <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                          WhatsApp
-                        </span>
-                        <div
-                          className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
-                          style={{
-                            borderColor:
-                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                          }}
-                        >
-                          <PhoneInput
-                            international
-                            countryCallingCodeEditable={false}
-                            defaultCountry={clientWhatsappCountry}
-                            country={clientWhatsappCountry}
-                            value={clientWhatsapp || undefined}
-                            onChange={(value) => setClientWhatsapp(value ?? '')}
-                            onCountryChange={(country) => {
-                              if (country) setClientWhatsappCountry(country as Country);
-                            }}
-                            placeholder="Ingresa tu numero"
-                            numberInputProps={{
-                              required: true,
-                              autoComplete: 'tel',
-                            }}
-                          />
+                      {isAssistedMode ? (
+                        <div className="overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]">
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]">
+                                <User className="h-4 w-4" strokeWidth={2.4} />
+                              </span>
+                              Nombre del cliente
+                            </span>
+                            <div className="relative">
+                              <input
+                                id="client-full-name"
+                                name="name"
+                                type="text"
+                                value={clientName}
+                                onChange={(event) => setClientName(event.target.value)}
+                                placeholder="Nombre del cliente"
+                                autoComplete="name"
+                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 pr-11 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                style={{
+                                  borderColor:
+                                    isClientNameValid || clientName.trim().length === 0
+                                      ? 'var(--menu-border)'
+                                      : '#F43F5E',
+                                }}
+                                required
+                              />
+                              {clientName.trim() ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClientName('')}
+                                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)]"
+                                  aria-label="Borrar nombre"
+                                >
+                                  <X className="h-4 w-4" strokeWidth={2.4} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </label>
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              Número de mesa
+                            </span>
+                            <input
+                              id="client-table"
+                              name="table"
+                              type="text"
+                              value={clientTable}
+                              onChange={(event) => setClientTable(event.target.value)}
+                              placeholder="Ej. 12"
+                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                              style={{
+                                borderColor:
+                                  isClientTableValid || clientTable.trim().length === 0
+                                    ? 'var(--menu-border)'
+                                    : '#F43F5E',
+                              }}
+                              required
+                            />
+                          </label>
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <WhatsAppLogo className="h-5 w-5" />
+                              WhatsApp o correo
+                              <span className="text-[12px] font-medium text-[var(--menu-text-muted)]">
+                                Opcional
+                              </span>
+                            </span>
+                            <input
+                              id="client-contact-optional"
+                              type="text"
+                              inputMode="email"
+                              value={clientEmail || clientWhatsapp}
+                              onChange={(event) => {
+                                const value = event.target.value.trim();
+                                if (value.includes('@')) {
+                                  setClientEmail(value);
+                                  setClientWhatsapp('');
+                                } else {
+                                  setClientWhatsapp(value);
+                                  setClientEmail('');
+                                }
+                              }}
+                              placeholder="Para enviar el resumen del pedido"
+                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                              style={{ borderColor: 'var(--menu-border)' }}
+                            />
+                            <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                              Si lo dejas vacío, el pedido igual se registra.
+                            </p>
+                          </label>
                         </div>
-                      </label>
+                      ) : (
+                        <div
+                          className="checkout-item-enter overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
+                          style={{ animationDelay: '40ms' }}
+                        >
+                          <label className="block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2.5 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]">
+                                <User className="h-4 w-4" strokeWidth={2.4} />
+                              </span>
+                              Nombre completo
+                            </span>
+                            <div className="relative">
+                              <input
+                                id="client-full-name"
+                                name="name"
+                                type="text"
+                                value={clientName}
+                                onChange={(event) => setClientName(event.target.value)}
+                                placeholder="Maria Fernanda Lopez"
+                                autoComplete="name"
+                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 pr-11 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                style={{
+                                  borderColor:
+                                    isClientNameValid || clientName.trim().length === 0
+                                      ? 'var(--menu-border)'
+                                      : '#F43F5E',
+                                }}
+                                required
+                              />
+                              {clientName.trim() ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClientName('')}
+                                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)]"
+                                  aria-label="Borrar nombre"
+                                >
+                                  <X className="h-4 w-4" strokeWidth={2.4} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </label>
+
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+
+                          <label className="block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2.5 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <WhatsAppLogo className="h-8 w-8" />
+                              WhatsApp
+                            </span>
+                            <div
+                              className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
+                              style={{
+                                borderColor:
+                                  isClientWhatsappValid || clientWhatsapp.trim().length === 0
+                                    ? 'var(--menu-border)'
+                                    : '#F43F5E',
+                              }}
+                            >
+                              <PhoneInput
+                                international
+                                countryCallingCodeEditable={false}
+                                defaultCountry={clientWhatsappCountry}
+                                country={clientWhatsappCountry}
+                                value={clientWhatsapp || undefined}
+                                onChange={(value) => setClientWhatsapp(value ?? '')}
+                                onCountryChange={(country) => {
+                                  if (country) setClientWhatsappCountry(country as Country);
+                                }}
+                                placeholder="Ingresa tu numero"
+                                numberInputProps={{
+                                  required: true,
+                                  autoComplete: 'tel',
+                                }}
+                              />
+                            </div>
+                            <div
+                              className="mt-3 flex items-start gap-2.5 rounded-2xl px-3 py-2.5"
+                              style={{
+                                backgroundColor:
+                                  'color-mix(in srgb, #25D366 10%, var(--menu-surface-alt))',
+                                border: '1px solid color-mix(in srgb, #25D366 22%, transparent)',
+                              }}
+                            >
+                              <Shield
+                                className="mt-0.5 h-4 w-4 shrink-0"
+                                style={{ color: '#128C7E' }}
+                                strokeWidth={2.4}
+                              />
+                              <p className="text-[12px] font-medium leading-snug text-[var(--menu-text)]">
+                                Usaremos tu número de WhatsApp solo para enviarte actualizaciones de
+                                tu pedido.
+                              </p>
+                            </div>
+                          </label>
+                        </div>
+                      )}
                     </div>
                   ) : null}
 
                   {checkoutStep === 2 ? (
                     <div className="space-y-3">
-                      <button
-                        type="button"
-                        onClick={() => setIsMapPickerOpen(true)}
-                        className="w-full rounded-[22px] bg-[var(--menu-surface)] p-4 text-left shadow-[var(--menu-shadow)]"
-                        style={{ boxShadow: isDeliveryAddressValid ? '0 8px 30px rgba(15,23,42,0.06)' : '0 0 0 1px #F43F5E' }}
-                      >
-                        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                          Direccion de entrega
-                        </p>
-                        <p className="mt-2 text-sm font-semibold">
-                          {normalizedDeliveryAddress || 'Toca para marcar la direccion en el mapa'}
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <span
-                            className="rounded-full px-2.5 py-1 text-[11px] font-black"
-                            style={
-                              hasDeliveryPoint
-                                ? {
-                                    backgroundColor: 'color-mix(in srgb, #10B981 16%, var(--menu-surface))',
-                                    color: 'color-mix(in srgb, #059669 70%, var(--menu-text))',
-                                  }
-                                : {
-                                    backgroundColor: 'color-mix(in srgb, #F59E0B 16%, var(--menu-surface))',
-                                    color: 'color-mix(in srgb, #D97706 72%, var(--menu-text))',
-                                  }
-                            }
-                          >
-                            {hasDeliveryPoint ? 'Punto confirmado' : 'Falta el punto en el mapa'}
-                          </span>
-                          {deliveryLineLabel ? (
-                            <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
-                              {deliveryQuote.free ? 'Delivery gratis 🎉' : `${deliveryLineLabel} ${deliveryLineValue}`}
-                            </span>
-                          ) : null}
+                      {offersDeliveryAddressStep ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3.5 shadow-[var(--menu-shadow)]">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                              <Store
+                                className="mt-0.5 h-5 w-5 shrink-0 text-[var(--menu-text-muted)]"
+                                strokeWidth={2.2}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-[15px] font-black leading-tight text-[var(--menu-text)]">
+                                  Retirar en tienda
+                                </p>
+                                <p className="mt-0.5 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                  {prefersSelfPickup
+                                    ? 'Sin envío. Retiras en el local cuando esté listo.'
+                                    : 'Actívalo si prefieres retirar en vez de delivery'}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={prefersSelfPickup}
+                              aria-label="Retirar en tienda"
+                              onClick={() =>
+                                changeCheckoutFulfillment(
+                                  prefersSelfPickup ? 'delivery' : 'takeaway',
+                                )
+                              }
+                              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                              style={{
+                                backgroundColor: prefersSelfPickup
+                                  ? 'var(--menu-primary)'
+                                  : 'color-mix(in srgb, var(--menu-text) 22%, var(--menu-surface-alt))',
+                              }}
+                            >
+                              <span
+                                className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform"
+                                style={{
+                                  transform: prefersSelfPickup
+                                    ? 'translateX(1.25rem)'
+                                    : 'translateX(0)',
+                                }}
+                              />
+                            </button>
+                          </div>
                         </div>
-                      </button>
-                      {deliveryQuote.blocked ? (
-                        <p className="text-sm font-semibold text-rose-500">{deliveryQuote.blockReason}</p>
-                      ) : deliveryEngineNote ? (
-                        <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">{deliveryEngineNote}</p>
                       ) : null}
-                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          Referencia
-                        </span>
-                        <input
-                          type="text"
-                          value={deliveryReference}
-                          onChange={(event) => setDeliveryReference(event.target.value)}
-                          placeholder="Apartamento, porton, piso, torre"
-                          className="h-12 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 text-sm outline-none"
-                        />
-                      </label>
-                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          Indicaciones
-                        </span>
-                        <textarea
-                          value={deliveryInstructions}
-                          onChange={(event) => setDeliveryInstructions(event.target.value)}
-                          placeholder="Tocar timbre, llamar al llegar..."
-                          rows={3}
-                          className="w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm outline-none"
-                        />
-                      </label>
+
+                      {prefersSelfPickup ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-4 shadow-[var(--menu-shadow)]">
+                          <div className="flex items-start gap-2.5">
+                            <Store
+                              className="mt-0.5 h-5 w-5 shrink-0"
+                              style={{ color: 'var(--menu-primary)' }}
+                              strokeWidth={2.2}
+                            />
+                            <div className="min-w-0">
+                              <p className="text-[15px] font-black text-[var(--menu-text)]">
+                                Retiro en el local
+                              </p>
+                              <p className="mt-1 text-[13px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                Te avisamos por WhatsApp. Pasa a buscar tu pedido cuando esté listo.
+                              </p>
+                              {comercioAddress ? (
+                                <p className="mt-2 text-[12px] font-semibold text-[var(--menu-text)]">
+                                  {comercioAddress}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div
+                            className="checkout-item-enter overflow-hidden rounded-[22px] border-2 p-4"
+                            style={{
+                              borderColor: hasDeliveryPoint
+                                ? 'var(--menu-border)'
+                                : 'var(--menu-primary)',
+                              backgroundColor: hasDeliveryPoint
+                                ? 'var(--menu-surface)'
+                                : 'color-mix(in srgb, var(--menu-primary) 8%, var(--menu-surface))',
+                              boxShadow: hasDeliveryPoint ? 'var(--menu-shadow)' : undefined,
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <MapPin
+                                  className="mt-0.5 h-5 w-5 shrink-0"
+                                  style={{ color: 'var(--menu-primary)' }}
+                                  strokeWidth={2.4}
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-[15px] font-black leading-tight text-[var(--menu-text)]">
+                                    Ubicación de entrega
+                                  </p>
+                                  <p className="mt-1 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                    {hasDeliveryPoint
+                                      ? normalizedDeliveryAddress ||
+                                        'Punto listo. Puedes cambiarlo si hace falta.'
+                                      : 'Confirma el punto exacto para calcular el envío'}
+                                  </p>
+                                </div>
+                              </div>
+                              {!hasDeliveryPoint ? (
+                                <span
+                                  className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.06em]"
+                                  style={{
+                                    backgroundColor:
+                                      'color-mix(in srgb, var(--menu-primary) 16%, var(--menu-surface))',
+                                    color: 'var(--menu-primary)',
+                                  }}
+                                >
+                                  Obligatorio
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {deliveryPoint ? (
+                              <DeliveryMapPreview
+                                className="mt-3"
+                                lat={deliveryPoint.lat}
+                                lng={deliveryPoint.lng}
+                                locating={deliveryPreviewLocating}
+                                onOpenMap={openDeliveryMapPicker}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={openDeliveryMapPicker}
+                                className="relative mt-3 w-full overflow-hidden rounded-2xl text-left"
+                                style={{
+                                  height: 148,
+                                  backgroundColor: 'var(--menu-surface-alt)',
+                                  border: '1px solid var(--menu-border)',
+                                }}
+                                aria-label="Marcar ubicación en el mapa"
+                              >
+                                <div className="absolute inset-0 grid place-items-center">
+                                  <p className="rounded-full bg-[var(--menu-surface)] px-3 py-1.5 text-[11px] font-bold text-[var(--menu-text)] shadow-sm">
+                                    {deliveryPreviewLocating
+                                      ? 'Obteniendo tu ubicación…'
+                                      : 'Marca tu punto en el mapa'}
+                                  </p>
+                                </div>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={openDeliveryMapPicker}
+                              className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black"
+                              style={{
+                                backgroundColor: 'var(--menu-primary)',
+                                color: 'var(--menu-on-primary)',
+                              }}
+                            >
+                              <MapPin className="h-4 w-4" strokeWidth={2.6} />
+                              {hasDeliveryPoint
+                                ? 'Cambiar ubicación en el mapa'
+                                : 'Marcar ubicación en el mapa'}
+                            </button>
+
+                            {deliveryLineLabel && deliveryPriceWithDistance ? (
+                              <div className="mt-3 flex justify-center">
+                                <span
+                                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-black"
+                                  style={{
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }}
+                                >
+                                  <Bike
+                                    className="h-3.5 w-3.5"
+                                    style={{ color: 'var(--menu-primary)' }}
+                                    strokeWidth={2.4}
+                                  />
+                                  {deliveryQuote.free
+                                    ? ['Delivery gratis 🎉', deliveryDistanceLabel]
+                                        .filter(Boolean)
+                                        .join(' · ')
+                                    : `${deliveryLineLabel} ${deliveryPriceWithDistance}`}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {deliveryQuote.blocked ? (
+                            <p className="text-sm font-semibold text-rose-500">
+                              {deliveryQuote.blockReason}
+                            </p>
+                          ) : deliveryOutOfZoneAllowed ? (
+                            <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
+                              {deliveryOutOfZoneNotice}
+                            </div>
+                          ) : deliveryEngineNote ? (
+                            <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">
+                              {deliveryEngineNote}
+                            </p>
+                          ) : null}
+
+                          <div className="overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]">
+                            <div className="p-4">
+                              <DeliveryNoteField
+                                id="delivery-reference"
+                                label="Punto de referencia"
+                                value={deliveryReference}
+                                placeholder="Al frente de la panadería, torre, piso"
+                                suggestions={deliveryNoteSuggestions(
+                                  deliveryNoteMemory.references,
+                                  DEFAULT_REFERENCE_SUGGESTIONS,
+                                )}
+                                prefixes={DEFAULT_REFERENCE_SUGGESTIONS}
+                                required
+                                framed={false}
+                                onChange={setDeliveryReference}
+                                onRemember={(value) => persistDeliveryNote('reference', value)}
+                              />
+                            </div>
+                            <div
+                              className="mx-4 border-t"
+                              style={{ borderColor: 'var(--menu-border)' }}
+                            />
+                            <div className="p-4">
+                              <DeliveryNoteField
+                                id="delivery-instructions"
+                                label="Indicaciones"
+                                value={deliveryInstructions}
+                                placeholder="Tocar timbre, llamar al llegar..."
+                                suggestions={deliveryNoteSuggestions(
+                                  deliveryNoteMemory.instructionsHistory,
+                                  DEFAULT_INSTRUCTION_SUGGESTIONS,
+                                )}
+                                multiline
+                                framed={false}
+                                onChange={setDeliveryInstructions}
+                                onRemember={(value) => persistDeliveryNote('instructions', value)}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ) : null}
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
-                      <div className="rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
-                          Resumen
-                        </p>
-                        <p className="mt-1 text-base font-black">
-                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-[var(--menu-text-muted)]">
-                          {normalizedClientName || 'Cliente'} · {checkoutItemsCount} unid.
-                        </p>
-                      </div>
-                      {checkoutUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
+                      {isAssistedMode ? (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPayLater(false)}
+                            className="min-h-11 flex-1 rounded-xl px-3 text-sm font-bold"
+                            style={
+                              !payLater
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary, #fff)',
+                                  }
+                                : {
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }
+                            }
+                          >
+                            Pagar ahora
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayLater(true);
+                              setSelectedPaymentMethodId(null);
+                            }}
+                            className="min-h-11 flex-1 rounded-xl px-3 text-sm font-bold"
+                            style={
+                              payLater
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary, #fff)',
+                                  }
+                                : {
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }
+                            }
+                          >
+                            Pagar después
+                          </button>
+                        </div>
+                      ) : null}
+                      {isAssistedMode && payLater ? (
+                        <div className="rounded-[22px] bg-[var(--menu-surface)] p-4 text-sm font-medium text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)]">
+                          El pedido se registra sin cobrar ahora. Puedes cobrar en mesa después.
+                        </div>
+                      ) : null}
+                      {(!isAssistedMode || !payLater) && checkoutUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
                         <div className="checkout-item-enter">
                           <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                             Antes de terminar
@@ -6037,11 +9198,13 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
+                      {(!isAssistedMode || !payLater) ? (
                       <p className="checkout-item-enter text-[11px] font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                         Como vas a pagar
                       </p>
+                      ) : null}
 
-                      {kioskCurrencyOptions.length > 1 ? (
+                      {(!isAssistedMode || !payLater) && kioskCurrencyOptions.length > 1 ? (
                         <div
                           className="checkout-item-enter rounded-[18px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]"
                           role="group"
@@ -6080,17 +9243,26 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      {selectedCurrencyGroup?.methods.length ? (
+                      {(!isAssistedMode || !payLater) ? (
+                      selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
                           {selectedCurrencyGroup.methods.map((method, index) => {
                             const isSelected = selectedPaymentMethodId === method.id;
-                            const details = paymentMethodDetails(method);
+                            const parsed = paymentMethodCopyModel(method);
+                            const methodIsCash = isCashPaymentMethod(method);
                             return (
-                              <button
+                              <div
                                 key={method.id}
-                                type="button"
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="checkout-item-enter w-full rounded-[22px] px-4 py-4 text-left shadow-[var(--menu-shadow)]"
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedPaymentMethodId(method.id);
+                                  }
+                                }}
+                                className="checkout-item-enter w-full cursor-pointer rounded-[22px] px-4 py-4 text-left shadow-[var(--menu-shadow)]"
                                 style={{
                                   ...(isSelected
                                     ? {
@@ -6102,17 +9274,453 @@ export default function PublicMenuPage() {
                                 }}
                               >
                                 <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-bold text-[var(--menu-text)]">{paymentMethodLabel(method)}</p>
-                                    {details.length > 0 ? (
-                                      <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{details.join(' · ')}</p>
-                                    ) : null}
+                                  <div className="flex min-w-0 items-center gap-2.5">
+                                    <span
+                                      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                                      style={{
+                                        backgroundColor: isSelected
+                                          ? 'color-mix(in srgb, var(--menu-primary) 18%, var(--menu-surface))'
+                                          : 'var(--menu-surface-alt)',
+                                        color: isSelected ? 'var(--menu-primary)' : 'var(--menu-text-muted)',
+                                      }}
+                                    >
+                                      <PaymentMethodGlyph method={method} />
+                                    </span>
+                                    <p className="text-sm font-bold text-[var(--menu-text)]">
+                                      {paymentMethodLabel(method)}
+                                    </p>
                                   </div>
-                                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'}`}>
+                                  <span
+                                    className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${
+                                      isSelected
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'
+                                    }`}
+                                  >
                                     {isSelected ? '✓' : ''}
                                   </span>
                                 </div>
-                              </button>
+                                {isSelected ? (
+                                  <div
+                                    className="mt-3 space-y-3"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    <PaymentCopyFields
+                                      fields={parsed.fields}
+                                      note={parsed.note}
+                                      dense
+                                      mode={methodIsCash ? 'info' : 'copy'}
+                                    />
+                                    {methodIsCash ? (
+                                      <div
+                                        className="overflow-hidden rounded-2xl border"
+                                        style={{
+                                          borderColor:
+                                            cashPaymentInput && !isCashTenderValid
+                                              ? '#F43F5E'
+                                              : 'var(--menu-border)',
+                                          backgroundColor:
+                                            'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                        }}
+                                      >
+                                        <div className="flex items-end justify-between gap-3 px-3.5 pb-1 pt-3">
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                              ¿Con cuánto pagas?
+                                            </p>
+                                            <p className="mt-0.5 text-xs text-[var(--menu-text-muted)]">
+                                              Total{' '}
+                                              <span className="font-semibold text-[var(--menu-text)]">
+                                                {formatAmountByCurrency(
+                                                  orderGrandTotalConverted,
+                                                  selectedCurrencyCode,
+                                                )}
+                                              </span>
+                                            </p>
+                                          </div>
+                                          {isCashTenderValid && paymentWithAmount !== null ? (
+                                            <p
+                                              className="shrink-0 text-xs font-bold"
+                                              style={{
+                                                color:
+                                                  changeAmount > 0
+                                                    ? 'color-mix(in srgb, #10B981 78%, var(--menu-text))'
+                                                    : 'var(--menu-text)',
+                                              }}
+                                            >
+                                              {changeAmount > 0
+                                                ? `Cambio ${formatAmountByCurrency(changeAmount, selectedCurrencyCode)}`
+                                                : 'Exacto'}
+                                            </p>
+                                          ) : null}
+                                        </div>
+
+                                        <label className="block px-2.5 pb-2.5 pt-1">
+                                          <div
+                                            className="flex items-center gap-2 rounded-2xl px-3.5 py-3"
+                                            style={{
+                                              backgroundColor: 'var(--menu-surface-alt)',
+                                              boxShadow:
+                                                'inset 0 0 0 1px color-mix(in srgb, var(--menu-text) 10%, transparent)',
+                                            }}
+                                          >
+                                            <span className="text-lg font-black tabular-nums text-[var(--menu-text-muted)]">
+                                              {currencyPrefix(selectedCurrencyCode)}
+                                            </span>
+                                            <input
+                                              type="text"
+                                              inputMode={
+                                                currencyAllowsDecimals(selectedCurrencyCode)
+                                                  ? 'decimal'
+                                                  : 'numeric'
+                                              }
+                                              autoComplete="transaction-amount"
+                                              enterKeyHint="done"
+                                              value={formatCashAmountInputValue(
+                                                cashPaymentInput,
+                                                selectedCurrencyCode,
+                                              )}
+                                              onChange={(event) => {
+                                                setCashPaymentInput(
+                                                  parseCashAmountInput(
+                                                    event.target.value,
+                                                    selectedCurrencyCode,
+                                                  ),
+                                                );
+                                              }}
+                                              onBlur={() => {
+                                                const amount = parseCashAmount(
+                                                  cashPaymentInput,
+                                                  selectedCurrencyCode,
+                                                );
+                                                if (amount == null || amount <= 0) {
+                                                  setCashPaymentInput('');
+                                                  return;
+                                                }
+                                                const makeable = snapCashAmountUp(
+                                                  amount,
+                                                  selectedCurrencyCode,
+                                                );
+                                                setCashPaymentInput(
+                                                  toCashAmountCanonical(
+                                                    makeable,
+                                                    selectedCurrencyCode,
+                                                  ),
+                                                );
+                                              }}
+                                              placeholder={
+                                                cashTenderSuggestions[0] != null
+                                                  ? formatCashAmountDisplay(
+                                                      cashTenderSuggestions[0],
+                                                      selectedCurrencyCode,
+                                                    )
+                                                  : formatCashAmountDisplay(
+                                                      orderGrandTotalConverted,
+                                                      selectedCurrencyCode,
+                                                    )
+                                              }
+                                              className="h-8 min-w-0 flex-1 bg-transparent text-[1.65rem] font-black leading-none tabular-nums tracking-tight text-[var(--menu-text)] outline-none placeholder:font-bold placeholder:text-[var(--menu-text-muted)] placeholder:opacity-45"
+                                              aria-label="Monto con el que vas a pagar"
+                                              aria-required
+                                              aria-invalid={
+                                                cashPaymentInput ? !isCashTenderValid : undefined
+                                              }
+                                            />
+                                          </div>
+                                        </label>
+
+                                        {cashTenderSuggestions.length > 0 ? (
+                                          <div className="flex gap-1.5 overflow-x-auto px-2.5 pb-2.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                                            {cashTenderSuggestions.map((amount) => {
+                                              const selected =
+                                                paymentWithAmount !== null &&
+                                                Math.abs(paymentWithAmount - amount) < 0.001;
+                                              return (
+                                                <button
+                                                  key={amount}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setCashPaymentInput(
+                                                      toCashAmountCanonical(
+                                                        amount,
+                                                        selectedCurrencyCode,
+                                                      ),
+                                                    )
+                                                  }
+                                                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold tabular-nums transition"
+                                                  style={
+                                                    selected
+                                                      ? {
+                                                          backgroundColor: 'var(--menu-primary)',
+                                                          color: 'var(--menu-on-primary)',
+                                                        }
+                                                      : {
+                                                          backgroundColor: 'var(--menu-surface-alt)',
+                                                          color: 'var(--menu-text-muted)',
+                                                          boxShadow:
+                                                            'inset 0 0 0 1px var(--menu-border)',
+                                                        }
+                                                  }
+                                                >
+                                                  {formatCashAmountDisplay(
+                                                    amount,
+                                                    selectedCurrencyCode,
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : null}
+
+                                        {!cashPaymentInput ? null : cashTender.reason === 'bills' ? (
+                                          <p className="border-t px-3.5 py-2 text-[11px] font-semibold text-rose-500" style={{ borderColor: 'var(--menu-border)' }}>
+                                            Se ajustará al billete posible al salir del campo (
+                                            {describeCashBills(selectedCurrencyCode)}).
+                                          </p>
+                                        ) : !isCashTenderValid ? (
+                                          <p className="border-t px-3.5 py-2 text-[11px] font-semibold text-rose-500" style={{ borderColor: 'var(--menu-border)' }}>
+                                            Debe ser igual o mayor al total.
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2.5">
+                                        <div className="flex items-center gap-2 pt-0.5">
+                                          <div
+                                            className="h-px min-w-0 flex-1"
+                                            style={{ backgroundColor: 'var(--menu-border)' }}
+                                          />
+                                          <p className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                                            Después de pagar
+                                          </p>
+                                          <div
+                                            className="h-px min-w-0 flex-1"
+                                            style={{ backgroundColor: 'var(--menu-border)' }}
+                                          />
+                                        </div>
+
+                                        <div
+                                          className="overflow-hidden rounded-2xl border"
+                                          style={{
+                                            borderColor: 'var(--menu-border)',
+                                            backgroundColor:
+                                              'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                          }}
+                                        >
+                                          {(() => {
+                                            const slotCount = Math.min(
+                                              3,
+                                              Math.max(
+                                                requiredPaymentProofCount,
+                                                paymentProofFiles.length,
+                                                1,
+                                              ),
+                                            );
+                                            const showNumberedLabels = slotCount > 1;
+                                            const canAddAnother =
+                                              paymentProofFiles.length > 0 &&
+                                              paymentProofFiles.length < 3 &&
+                                              paymentProofFiles.length >=
+                                                Math.max(1, requiredPaymentProofCount);
+                                            return (
+                                              <>
+                                                {Array.from({ length: slotCount }).map((_, index) => {
+                                                  const file = paymentProofFiles[index] ?? null;
+                                                  const previewUrl =
+                                                    paymentProofPreviewUrls[index] ?? null;
+                                                  const waiting = !file;
+                                                  const isExtra = index > 0;
+                                                  return (
+                                                    <div
+                                                      key={`payment-proof-slot-${index}`}
+                                                      className="flex items-center gap-2.5 px-3 py-2"
+                                                      style={
+                                                        index > 0
+                                                          ? {
+                                                              borderTop:
+                                                                '1px solid var(--menu-border)',
+                                                            }
+                                                          : undefined
+                                                      }
+                                                    >
+                                                      {file && previewUrl ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() =>
+                                                            setPaymentProofLightboxUrl(previewUrl)
+                                                          }
+                                                          className="h-9 w-9 shrink-0 overflow-hidden rounded-lg border"
+                                                          style={{
+                                                            borderColor: 'var(--menu-border)',
+                                                          }}
+                                                          aria-label={
+                                                            showNumberedLabels
+                                                              ? `Ver comprobante ${index + 1}`
+                                                              : 'Ver comprobante'
+                                                          }
+                                                        >
+                                                          <img
+                                                            src={previewUrl}
+                                                            alt=""
+                                                            className="h-full w-full object-cover"
+                                                          />
+                                                        </button>
+                                                      ) : null}
+                                                      <div className="min-w-0 flex-1">
+                                                        {showNumberedLabels ? (
+                                                          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                                            {`Comprobante ${index + 1}`}
+                                                          </p>
+                                                        ) : null}
+                                                        <p
+                                                          className={`truncate text-[11px] leading-4 text-[var(--menu-text-muted)] ${
+                                                            showNumberedLabels ? 'mt-0.5' : ''
+                                                          }`}
+                                                        >
+                                                          {paymentProofBusy && waiting
+                                                            ? 'Preparando…'
+                                                            : file
+                                                              ? 'Toca la miniatura para ver'
+                                                              : isExtra
+                                                                ? 'Foto adicional del pago'
+                                                                : 'Foto del pago'}
+                                                        </p>
+                                                      </div>
+                                                      {file ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => removePaymentProofAt(index)}
+                                                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--menu-text-muted)]"
+                                                          style={{
+                                                            backgroundColor:
+                                                              'var(--menu-surface-alt)',
+                                                          }}
+                                                          aria-label={
+                                                            showNumberedLabels
+                                                              ? `Quitar comprobante ${index + 1}`
+                                                              : 'Quitar comprobante'
+                                                          }
+                                                        >
+                                                          <X className="h-3.5 w-3.5" />
+                                                        </button>
+                                                      ) : index === paymentProofFiles.length ? (
+                                                        <div className="flex shrink-0 items-center gap-1.5">
+                                                          <label
+                                                            htmlFor="payment-proof-gallery"
+                                                            aria-label="Subir comprobante desde galería"
+                                                            aria-disabled={
+                                                              paymentProofBusy || undefined
+                                                            }
+                                                            className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
+                                                              paymentProofBusy
+                                                                ? 'pointer-events-none opacity-60'
+                                                                : ''
+                                                            }`}
+                                                            style={{
+                                                              borderColor: 'var(--menu-border)',
+                                                              backgroundColor:
+                                                                'var(--menu-surface-alt)',
+                                                            }}
+                                                          >
+                                                            <ImageIcon
+                                                              className="h-3.5 w-3.5"
+                                                              aria-hidden
+                                                            />
+                                                          </label>
+                                                          <label
+                                                            htmlFor="payment-proof-camera"
+                                                            aria-label="Tomar foto del comprobante"
+                                                            aria-disabled={
+                                                              paymentProofBusy || undefined
+                                                            }
+                                                            className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
+                                                              paymentProofBusy
+                                                                ? 'pointer-events-none opacity-60'
+                                                                : ''
+                                                            }`}
+                                                            style={{
+                                                              borderColor: 'var(--menu-border)',
+                                                              backgroundColor:
+                                                                'var(--menu-surface-alt)',
+                                                            }}
+                                                          >
+                                                            <Camera
+                                                              className="h-3.5 w-3.5"
+                                                              aria-hidden
+                                                            />
+                                                          </label>
+                                                        </div>
+                                                      ) : null}
+                                                    </div>
+                                                  );
+                                                })}
+                                                {canAddAnother ? (
+                                                  <div
+                                                    className="border-t px-3 py-2"
+                                                    style={{ borderColor: 'var(--menu-border)' }}
+                                                  >
+                                                    <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setRequiredPaymentProofCount((prev) =>
+                                                          Math.min(
+                                                            3,
+                                                            Math.max(
+                                                              prev,
+                                                              paymentProofFiles.length,
+                                                            ) + 1,
+                                                          ),
+                                                        )
+                                                      }
+                                                      className="text-[12px] font-bold text-[var(--menu-text)] underline-offset-2 hover:underline"
+                                                    >
+                                                      Añadir otro
+                                                    </button>
+                                                  </div>
+                                                ) : null}
+                                              </>
+                                            );
+                                          })()}
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            id="payment-proof-gallery"
+                                            disabled={paymentProofBusy}
+                                            onChange={(event) => {
+                                              const selected = event.target.files?.[0] ?? null;
+                                              void handlePaymentProofSelected(selected);
+                                              event.target.value = '';
+                                            }}
+                                          />
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            capture="environment"
+                                            className="hidden"
+                                            id="payment-proof-camera"
+                                            disabled={paymentProofBusy}
+                                            onChange={(event) => {
+                                              const selected = event.target.files?.[0] ?? null;
+                                              void handlePaymentProofSelected(selected);
+                                              event.target.value = '';
+                                            }}
+                                          />
+                                          {paymentProofError ? (
+                                            <p
+                                              className="border-t px-3 py-2 text-[11px] font-semibold text-[#F43F5E]"
+                                              style={{ borderColor: 'var(--menu-border)' }}
+                                            >
+                                              {paymentProofError}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
                             );
                           })}
                         </div>
@@ -6120,122 +9728,7 @@ export default function PublicMenuPage() {
                         <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-3 text-sm text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)]">
                           Este comercio no tiene metodos de pago configurados.
                         </div>
-                      )}
-
-                      {isCashPayment ? (
-                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              ¿Con cuánto vas a pagar?
-                            </span>
-                            <div
-                              className="flex h-12 items-center rounded-xl border bg-[var(--menu-surface-alt)] px-3"
-                              style={{
-                                borderColor:
-                                  cashPaymentInput && !isCashTenderValid ? '#F43F5E' : 'var(--menu-border)',
-                              }}
-                            >
-                              <span className="pr-2 text-sm font-semibold text-[var(--menu-text-muted)]">
-                                {selectedCurrencyCode === 'VES' ? 'Bs' : selectedCurrencyCode}
-                              </span>
-                              <input
-                                type="text"
-                                inputMode={currencyAllowsDecimals(selectedCurrencyCode) ? 'decimal' : 'numeric'}
-                                autoComplete="off"
-                                enterKeyHint="done"
-                                value={cashPaymentInput}
-                                onChange={(event) =>
-                                  setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
-                                }
-                                placeholder={
-                                  cashTenderSuggestions[0] != null
-                                    ? formatAmountByCurrency(cashTenderSuggestions[0], selectedCurrencyCode)
-                                    : formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)
-                                }
-                                className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                                aria-required
-                                aria-invalid={cashPaymentInput ? !isCashTenderValid : undefined}
-                              />
-                            </div>
-                          </label>
-                          {cashTenderSuggestions.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {cashTenderSuggestions.map((amount) => (
-                                <button
-                                  key={amount}
-                                  type="button"
-                                  onClick={() => setCashPaymentInput(parseCashAmountInput(String(amount), selectedCurrencyCode))}
-                                  className="rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text-muted)]"
-                                >
-                                  {formatAmountByCurrency(amount, selectedCurrencyCode)}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                          {!cashPaymentInput ? null : cashTender.reason === 'bills' ? (
-                            <p className="mt-2 text-xs font-semibold text-rose-500">
-                              Ese monto no se puede dar en efectivo. Usa billetes de {describeCashBills(selectedCurrencyCode)}. Puedes sumarlos.
-                            </p>
-                          ) : !isCashTenderValid ? (
-                            <p className="mt-2 text-xs font-semibold text-rose-500">
-                              El efectivo debe ser igual o mayor al total ({formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}).
-                            </p>
-                          ) : changeAmount > 0 ? (
-                            <p
-                              className="mt-2 text-sm font-bold"
-                              style={{ color: 'color-mix(in srgb, #10B981 72%, var(--menu-text))' }}
-                            >
-                              Cambio: {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}
-                            </p>
-                          ) : (
-                            <p className="mt-2 text-sm font-bold text-[var(--menu-text)]">
-                              Pago exacto. Sin cambio.
-                            </p>
-                          )}
-                        </div>
-                      ) : null}
-
-                      {isDigitalPayment ? (
-                        <div className="checkout-item-enter space-y-2 rounded-[22px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '120ms' }}>
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              Referencia (ultimos 4 digitos)
-                            </span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={4}
-                              value={paymentReferenceLast4}
-                              onChange={(event) => setDigitalPaymentReference(normalizePhone(event.target.value).slice(0, 4))}
-                              placeholder="1234"
-                              className="h-11 w-full rounded-xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none"
-                              style={{ borderColor: isPaymentReferenceValid || !digitalPaymentReference ? 'var(--menu-border)' : '#F43F5E' }}
-                              required
-                            />
-                          </label>
-
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              Cargar comprobante
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              id="payment-proof-upload"
-                              onChange={(event) => {
-                                const selected = event.target.files?.[0] ?? null;
-                                setPaymentProofFile(selected);
-                              }}
-                            />
-                            <label
-                              htmlFor="payment-proof-upload"
-                              className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
-                            >
-                              {paymentProofFile ? `Comprobante: ${paymentProofFile.name}` : 'Seleccionar captura'}
-                            </label>
-                          </label>
-                        </div>
+                      )
                       ) : null}
 
                       <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '150ms' }}>
@@ -6243,10 +9736,18 @@ export default function PublicMenuPage() {
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                         </p>
+                        {productDeliverySurchargeLineLabel ? (
+                          <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
+                            <span>{productDeliverySurchargeLineLabel}</span>
+                            <span className="font-semibold">
+                              {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                            </span>
+                          </p>
+                        ) : null}
                         {isDeliveryOrder && deliveryLineLabel ? (
                           <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
                             <span>{deliveryLineLabel}</span>
-                            <span className="font-semibold">{deliveryLineValue}</span>
+                            <span className="font-semibold">{deliveryPriceWithDistance}</span>
                           </p>
                         ) : null}
                         <p className="mt-2 flex items-center justify-between border-t border-[var(--menu-border)] pt-2 text-sm font-semibold text-[var(--menu-text)]">
@@ -6276,7 +9777,412 @@ export default function PublicMenuPage() {
           </KioskCheckout>
         ) : null}
 
+        {isConfirmOpen && isOrderReviewOpen && !kioskVoucher ? (
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center bg-black/55 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-8 sm:items-center"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-review-title"
+            onClick={() => {
+              if (!isSubmittingOrder) setIsOrderReviewOpen(false);
+            }}
+          >
+            <div
+              className="flex max-h-[min(92vh,720px)] w-full max-w-[420px] flex-col overflow-hidden rounded-[28px] bg-[var(--menu-surface)] shadow-[0_24px_64px_rgba(15,23,42,0.35)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="shrink-0 border-b px-5 pb-3 pt-4" style={{ borderColor: 'var(--menu-border)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                      Revisa tu pedido
+                    </p>
+                    <h3
+                      id="order-review-title"
+                      className="mt-1 text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]"
+                      style={titleFontStyle}
+                    >
+                      ¿Todo correcto?
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isSubmittingOrder) setIsOrderReviewOpen(false);
+                    }}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
+                    aria-label="Cerrar revisión"
+                    disabled={isSubmittingOrder}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {!isAssistedMode && checkoutFulfillmentOptions.length > 1 ? (
+                  <div className="mt-3">
+                    <div
+                      className="grid gap-1 rounded-xl p-1"
+                      role="radiogroup"
+                      aria-label="Tipo de pedido"
+                      style={{
+                        gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
+                        backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface-alt))',
+                      }}
+                    >
+                      {checkoutFulfillmentOptions.map((option) => {
+                        const selected = kioskFulfillment === option;
+                        return (
+                          <button
+                            key={`review-fulfillment-${option}`}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            disabled={isSubmittingOrder}
+                            onClick={() => changeReviewFulfillment(option)}
+                            className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em]"
+                            style={
+                              selected
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary)',
+                                  }
+                                : {
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--menu-text-muted)',
+                                  }
+                            }
+                          >
+                            {CHECKOUT_FULFILLMENT_SHORT_LABEL[option]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {reviewFulfillmentHint ? (
+                      <p
+                        className="mt-2 text-[11px] font-semibold leading-4"
+                        style={{
+                          color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))',
+                        }}
+                        role="status"
+                      >
+                        {reviewFulfillmentHint}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs font-semibold text-[var(--menu-text-muted)]">
+                    {isAssistedMode
+                      ? `Comer aquí${normalizedClientTable ? ` · Mesa ${normalizedClientTable}` : ''}`
+                      : kioskFulfillment
+                        ? CHECKOUT_FULFILLMENT_CHOICE_LABEL[kioskFulfillment]
+                        : 'Pedido'}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
+                <div className="min-h-0 max-h-[min(34vh,240px)] overflow-y-auto overscroll-contain pr-0.5">
+                  <ul className="space-y-2.5">
+                    {checkoutSummaryItems.map((item) => (
+                      <li
+                        key={`review-item-${item.id}`}
+                        className="flex items-baseline justify-between gap-3 border-b border-dashed pb-2.5 last:border-b-0 last:pb-0"
+                        style={{ borderColor: 'var(--menu-border)' }}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--menu-text)]">{item.name}</p>
+                          <p className="mt-0.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                            {item.soldByWeight
+                              ? formatWeightLabel(item.quantity)
+                              : `×${item.quantity}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-sm font-bold tabular-nums text-[var(--menu-text)]">
+                          {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="mt-3 shrink-0 space-y-3 border-t pt-3" style={{ borderColor: 'var(--menu-border)' }}>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                      <span>Subtotal</span>
+                      <span className="font-semibold tabular-nums">
+                        {formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}
+                      </span>
+                    </div>
+                    {productDeliverySurchargeLineLabel ? (
+                      <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                        <span>{productDeliverySurchargeLineLabel}</span>
+                        <span className="font-semibold tabular-nums">
+                          {formatAmountByCurrency(productDeliverySurchargeConverted, selectedCurrencyCode)}
+                        </span>
+                      </div>
+                    ) : null}
+                    {isDeliveryOrder && deliveryLineLabel ? (
+                      <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                        <span>{deliveryLineLabel}</span>
+                        <span className="font-semibold tabular-nums">{deliveryPriceWithDistance}</span>
+                      </div>
+                    ) : null}
+                    <div
+                      className="flex items-center justify-between gap-3 text-[var(--menu-text)]"
+                    >
+                      <span className="font-bold">Total</span>
+                      <span className="text-base font-black tabular-nums" style={titleFontStyle}>
+                        {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 text-xs font-medium text-[var(--menu-text-muted)]">
+                    <p>
+                      {normalizedClientName || 'Cliente'}
+                      {!isAssistedMode && formattedClientWhatsapp ? ` · ${formattedClientWhatsapp}` : ''}
+                    </p>
+                    {isDeliveryOrder && normalizedDeliveryAddress ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 line-clamp-2">{normalizedDeliveryAddress}</p>
+                        <button
+                          type="button"
+                          onClick={editDeliveryFromReview}
+                          disabled={isSubmittingOrder}
+                          className="shrink-0 text-[11px] font-bold text-[var(--menu-primary)] disabled:opacity-45"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    ) : null}
+                    {selectedPaymentLabel ? <p>Pago: {selectedPaymentSummary}</p> : null}
+                  </div>
+
+                  {!isAssistedMode ? (
+                    <div
+                      className="rounded-2xl px-3 py-3"
+                      style={{
+                        backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface-alt))',
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                            <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            Resumen por correo
+                          </p>
+                          <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
+                            Te llega el detalle y podrás dejar tu opinión.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={wantOrderEmail}
+                          aria-label="Recibir resumen por correo"
+                          disabled={isSubmittingOrder}
+                          onClick={() => {
+                            const next = !wantOrderEmail;
+                            setWantOrderEmail(next);
+                            writeCachedCheckoutCustomer({
+                              clientName: normalizedClientName,
+                              clientWhatsapp: normalizedClientWhatsapp,
+                              clientEmail: normalizedClientEmail,
+                              wantOrderEmail: next,
+                              selectedCurrency: selectedCurrencyCode,
+                            });
+                          }}
+                          className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                          style={{
+                            backgroundColor: wantOrderEmail
+                              ? 'var(--menu-primary)'
+                              : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface))',
+                          }}
+                        >
+                          <span
+                            className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
+                            style={{
+                              transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
+                            }}
+                          />
+                        </button>
+                      </div>
+                      {wantOrderEmail ? (
+                        <label className="mt-3 block">
+                          <span className="sr-only">Correo electronico</span>
+                          <input
+                            id="client-email-review"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="tu@correo.com"
+                            value={clientEmail}
+                            disabled={isSubmittingOrder}
+                            onChange={(event) => setClientEmail(event.target.value)}
+                            className="h-11 w-full rounded-xl border bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                            style={{
+                              borderColor:
+                                isClientEmailValid || clientEmail.trim().length === 0
+                                  ? 'var(--menu-border)'
+                                  : '#F43F5E',
+                            }}
+                          />
+                          {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                            <p className="mt-2 text-[11px] font-semibold text-rose-500">
+                              Revisa que el correo esté bien escrito.
+                            </p>
+                          ) : null}
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {checkoutError ? (
+                    <div
+                      className="rounded-2xl px-3 py-2.5 text-sm font-semibold"
+                      style={{
+                        backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
+                        color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
+                      }}
+                    >
+                      {checkoutError}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                className="shrink-0 grid grid-cols-[auto_1fr] gap-2 border-t px-5 py-3"
+                style={{ borderColor: 'var(--menu-border)' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsOrderReviewOpen(false)}
+                  disabled={isSubmittingOrder}
+                  className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[var(--menu-surface-alt)] px-4 text-sm font-bold text-[var(--menu-text-muted)] disabled:opacity-45"
+                >
+                  Atras
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmOrder()}
+                  disabled={isSubmittingOrder || !canSubmitCheckout}
+                  className="min-h-12 rounded-[16px] text-sm font-bold disabled:opacity-45"
+                  style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
+                >
+                  {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <AbandonedCartResumeDialog
+          open={Boolean(abandonedCartPrompt) && abandonedCartPreview.itemCount > 0}
+          businessName={comercioNombre}
+          itemCount={abandonedCartPreview.itemCount}
+          totalLabel={abandonedCartPreview.totalLabel}
+          fulfillmentLabel={abandonedCartPreview.fulfillmentLabel}
+          savedLabel={abandonedCartPreview.savedLabel}
+          items={abandonedCartPreview.items}
+          titleFontStyle={titleFontStyle}
+          resumeBlockedReason={
+            scheduleClosed
+              ? scheduleStatus.caption || 'El restaurante está cerrado actualmente. No puedes continuar el pedido ahora.'
+              : null
+          }
+          onResume={resumeAbandonedCart}
+          onStartFresh={startFreshAfterAbandonedCart}
+        />
+
+        {paymentProofLightboxUrl ? (
+          <div
+            className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 px-4 py-8"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Vista del comprobante"
+            onClick={() => setPaymentProofLightboxUrl(null)}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white"
+              aria-label="Cerrar comprobante"
+              onClick={() => setPaymentProofLightboxUrl(null)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={paymentProofLightboxUrl}
+              alt="Comprobante de pago"
+              className="max-h-full max-w-full rounded-2xl object-contain shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            />
+          </div>
+        ) : null}
+
+        {leaveConfirmOpen ? (
+          <div
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/55 px-4 pb-[calc(20px+env(safe-area-inset-bottom))] pt-6 sm:items-center"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-purchase-title"
+            onClick={cancelLeavePurchase}
+          >
+            <div
+              className="w-full max-w-md rounded-[28px] bg-[var(--menu-surface)] p-5 shadow-[0_24px_64px_rgba(15,23,42,0.35)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                Pedido en curso
+              </p>
+              <h3
+                id="leave-purchase-title"
+                className="mt-2 text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]"
+                style={titleFontStyle}
+              >
+                ¿Seguro que deseas abandonar la compra?
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--menu-text-muted)]">
+                Si sales ahora, guardaremos tu carrito en este teléfono para cuando vuelvas.
+              </p>
+              <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={cancelLeavePurchase}
+                  className="min-h-12 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
+                  style={{
+                    backgroundColor: 'var(--primary-color)',
+                    color: 'var(--text-on-primary)',
+                  }}
+                >
+                  Seguir comprando
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmLeavePurchase}
+                  className="min-h-12 rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm font-bold text-[var(--menu-text)]"
+                >
+                  Sí, abandonar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
       </main>
+      {bootSkeletonVisible ? (
+        <div
+          className="fixed inset-0 z-[220]"
+          style={{
+            opacity: bootSkeletonOpaque ? 1 : 0,
+            transition: prefersReducedMotion ? 'none' : 'opacity 360ms ease',
+            pointerEvents: 'none',
+          }}
+          aria-hidden
+        >
+          <PublicMenuSkeletonLoader businessName={comercioNombre} />
+        </div>
+      ) : null}
     </>
   );
 }

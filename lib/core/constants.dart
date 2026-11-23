@@ -132,6 +132,11 @@ class AppLinks {
     return '${publicMenuByComercio(comercioId)}?src=qr';
   }
 
+  /// Mesa / QR catalog-only: browse + cart totals, no WhatsApp order send.
+  static String publicMenuCatalogByComercio(String comercioId) {
+    return '${publicMenuByComercio(comercioId)}?catalogo=1';
+  }
+
   static String publicMenuByIdentifier({
     required String comercioId,
     String? slug,

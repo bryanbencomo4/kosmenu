@@ -2,10 +2,15 @@ import 'server-only';
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+import { isChatbotStagingMode } from './staging-guards';
+import { asReadOnlySupabaseClient } from './supabase-readonly';
+
 const FETCH_TIMEOUT_MS = 5_000;
 
 let serviceClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
+let stagingServiceClient: SupabaseClient | null = null;
+let stagingAnonClient: SupabaseClient | null = null;
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -45,6 +50,24 @@ function createServerClient(url: string, key: string): SupabaseClient {
  * Never import this module from Client Components.
  */
 export function getServiceSupabaseClient(): SupabaseClient {
+  if (isChatbotStagingMode()) {
+    if (stagingServiceClient) return stagingServiceClient;
+    // Catalog reads for offline Trueno need service role SELECT; wrap to deny writes.
+    // Prefer service role when present; otherwise anon (RLS-limited).
+    const url = getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const service = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+    const anon = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+    const key = service || anon;
+    if (!key) {
+      throw new Error(
+        'Staging mode requires SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY',
+      );
+    }
+    stagingServiceClient = asReadOnlySupabaseClient(
+      createServerClient(url, key),
+    );
+    return stagingServiceClient;
+  }
   if (serviceClient) return serviceClient;
   const url = getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL');
   const key = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
@@ -65,6 +88,13 @@ export function getServerSupabaseClient(): SupabaseClient {
  * Does not use the service role key.
  */
 export function getAnonServerSupabaseClient(): SupabaseClient {
+  if (isChatbotStagingMode()) {
+    if (stagingAnonClient) return stagingAnonClient;
+    const url = getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const key = getRequiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    stagingAnonClient = asReadOnlySupabaseClient(createServerClient(url, key));
+    return stagingAnonClient;
+  }
   if (anonClient) return anonClient;
   const url = getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL');
   const key = getRequiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');

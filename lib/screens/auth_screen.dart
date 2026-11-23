@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,15 +7,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
-import 'package:kosmenu_app/screens/billing_plan_screen.dart';
-import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
+import 'package:kosmenu_app/screens/business_setup_screen.dart' deferred as setup_screen;
+import 'package:kosmenu_app/screens/force_update_screen.dart';
+import 'package:kosmenu_app/screens/merchant_access_picker_screen.dart';
 import 'package:kosmenu_app/screens/pending_order_link_screen.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/deferred_library_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -26,6 +32,8 @@ import 'package:url_launcher/url_launcher.dart';
 /// mounted by the time a merchant reaches the profile. Popping then revealed
 /// the dashboard itself (the first route) with a dead session instead of the
 /// login screen.
+const String kMerchantLastComercioKeyPrefix = 'merchant_last_comercio_v1';
+
 void returnToAuthGate(BuildContext context) {
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const AuthGate()),
@@ -33,10 +41,68 @@ void returnToAuthGate(BuildContext context) {
   );
 }
 
+/// Clears the remembered comercio and remounts [AuthGate] so multi-comercio
+/// accounts see the picker again without signing out. Safe for single-comercio
+/// accounts: AuthGate auto-enters their only option.
+Future<void> switchMerchantAccess(BuildContext context) async {
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  if (userId != null && userId.isNotEmpty) {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$kMerchantLastComercioKeyPrefix:$userId');
+  }
+  SupabaseConfig.clearCurrentComercioId();
+  MerchantSession.clear();
+  clearMerchantPresence();
+  if (!context.mounted) return;
+  returnToAuthGate(context);
+}
+
+/// Applies [option] and remounts the panel for that comercio (no login, no
+/// picker). Used from account/profile when the user already has a session.
+Future<void> enterMerchantAccess(
+  BuildContext context,
+  MerchantAccessOption option,
+) async {
+  final userId = Supabase.instance.client.auth.currentUser?.id.trim() ?? '';
+  if (userId.isEmpty) return;
+
+  final prefs = await SharedPreferences.getInstance();
+  MerchantSession.set(role: option.role, isOwner: option.isOwner);
+  await prefs.setString(
+    '$kMerchantLastComercioKeyPrefix:$userId',
+    option.comercioId,
+  );
+  syncMerchantPresence(
+    name: option.nombre.trim().isEmpty ? 'Tu cuenta' : option.nombre,
+    logoUrl: option.logoUrl,
+    slug: option.slug,
+  );
+  SupabaseConfig.setCurrentComercioId(option.comercioId, slug: option.slug);
+  if (!context.mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => AuthGate(forcedAccess: option)),
+    (route) => false,
+  );
+}
+
 final ValueNotifier<bool> passwordRecoveryPending = ValueNotifier(false);
 
+class _AuthBootResult {
+  const _AuthBootResult({this.destination, this.options});
+
+  final PostAuthDestination? destination;
+  final List<MerchantAccessOption>? options;
+
+  bool get needsPicker =>
+      options != null && options!.length > 1 && destination == null;
+}
+
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
+  const AuthGate({super.key, this.forcedAccess});
+
+  /// When set (e.g. after switching menú from profile), skip the picker and
+  /// enter this comercio directly.
+  final MerchantAccessOption? forcedAccess;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -44,148 +110,196 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
-  Future<PostAuthDestination>? _targetFuture;
+  static const String _lastComercioKeyPrefix = kMerchantLastComercioKeyPrefix;
+  Future<_AuthBootResult>? _targetFuture;
   String _targetUserId = '';
+  MerchantAccessOption? _forcedAccess;
+  late final Future<AndroidAppRelease?> _androidUpdateFuture =
+      AppUpdateService.checkRequiredAndroidUpdate();
 
-  Future<PostAuthDestination> _resolveTargetForUser(String userId) async {
-    Future<PostAuthDestination> resolveOnce() async {
-      final owned = await Supabase.instance.client
-          .from('comercios')
-          .select('id, slug, nombre, logo_url')
-          .eq('owner_id', userId)
-          .limit(1)
-          .maybeSingle();
+  @override
+  void initState() {
+    super.initState();
+    _forcedAccess = widget.forcedAccess;
+  }
 
-      Map<String, dynamic>? row = owned;
-      var isOwner = owned != null;
-      var role = MerchantStaffRole.administrador;
-
-      if (row == null) {
-        try {
-          await Supabase.instance.client.rpc('accept_pending_comercio_invites');
-        } catch (_) {}
-        final member = await Supabase.instance.client
-            .from('comercio_members')
-            .select('comercio_id, role, comercios(id, slug, nombre, logo_url)')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .limit(1)
-            .maybeSingle();
-        if (member != null) {
-          role = MerchantStaffRoleUi.fromRaw(member['role']?.toString());
-          final nested = member['comercios'];
-          if (nested is Map) {
-            row = Map<String, dynamic>.from(nested);
-          } else if (member['comercio_id'] != null) {
-            row = {'id': member['comercio_id']};
-          }
-        }
-      }
-
-      MerchantSession.set(role: role, isOwner: isOwner);
-
-      if (row == null) {
-        SupabaseConfig.clearCurrentComercioId();
-        syncMerchantPresence(name: 'Tu cuenta');
-        return resolvePostAuthDestination(
-          hasCommerce: false,
-          hasCatalog: false,
-          hasActiveSubscription: false,
-        );
-      }
-
-      final comercioId = row['id']?.toString().trim() ?? '';
-      final comercioSlug = row['slug']?.toString().trim();
-      if (comercioId.isEmpty) {
-        SupabaseConfig.clearCurrentComercioId();
-        syncMerchantPresence(name: 'Tu cuenta');
-        return resolvePostAuthDestination(
-          hasCommerce: false,
-          hasCatalog: false,
-          hasActiveSubscription: false,
-        );
-      }
-
-      final comercioNombre = row['nombre']?.toString().trim();
-      final comercioLogoUrl = row['logo_url']?.toString().trim();
-      syncMerchantPresence(
-        name: (comercioNombre == null || comercioNombre.isEmpty)
-            ? 'Tu cuenta'
-            : comercioNombre,
-        logoUrl: comercioLogoUrl,
-        slug: comercioSlug,
+  Future<_AuthBootResult> _resolveTargetForUser(String userId) async {
+    Future<_AuthBootResult> resolveOnce() async {
+      final options = await loadMerchantAccessOptions(
+        userId: userId,
+        acceptPendingInvites: true,
       );
 
-      final firstCatalog = await Supabase.instance.client
-          .from('catalogos')
-          .select('id')
-          .eq('comercio_id', comercioId)
-          .limit(1)
-          .maybeSingle();
-      if (firstCatalog == null) {
-        SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-        return resolvePostAuthDestination(
-          hasCommerce: true,
-          hasCatalog: false,
-          hasActiveSubscription: false,
+      if (options.isEmpty) {
+        SupabaseConfig.clearCurrentComercioId();
+        clearMerchantPresence();
+        MerchantSession.clear();
+        return _AuthBootResult(
+          destination: resolvePostAuthDestination(
+            hasCommerce: false,
+            hasCatalog: false,
+            hasActiveSubscription: false,
+          ),
         );
       }
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('$_setupDraftKeyPrefix:$userId');
-
-      SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-
-      var hasActiveSubscription = false;
-      final sub = await Supabase.instance.client
-          .from('subscriptions')
-          .select('id, status')
-          .eq('business_id', comercioId)
-          .eq('status', 'active')
-          .limit(1)
-          .maybeSingle();
-      hasActiveSubscription = sub != null;
-
-      // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
-      if (!hasActiveSubscription) {
-        try {
-          final snap = await const BillingService().reconcileCheckout(
-            comercioId: comercioId,
-          );
-          hasActiveSubscription = snap.hasActiveSubscription;
-        } catch (_) {
-          // Continue with local state.
-        }
+      final lastId = prefs.getString('$_lastComercioKeyPrefix:$userId');
+      MerchantAccessOption selected;
+      if (_forcedAccess != null &&
+          options.any((o) => o.comercioId == _forcedAccess!.comercioId)) {
+        selected = options.firstWhere(
+          (o) => o.comercioId == _forcedAccess!.comercioId,
+        );
+      } else if (options.length > 1) {
+        // Multi-comercio accounts (e.g. two menus under one owner) always
+        // pick explicitly. Never auto-enter via lastId — otherwise adding a
+        // second comercio never surfaces the picker. Single-comercio accounts
+        // never hit this branch.
+        return _AuthBootResult(options: options);
+      } else if (lastId != null &&
+          options.any((o) => o.comercioId == lastId)) {
+        selected = options.firstWhere((o) => o.comercioId == lastId);
+      } else {
+        selected = options.first;
       }
 
-      return resolvePostAuthDestination(
-        hasCommerce: true,
-        hasCatalog: true,
-        hasActiveSubscription: hasActiveSubscription,
+      return _finishAccessSelection(
+        userId: userId,
+        selected: selected,
+        prefs: prefs,
       );
     }
 
-    try {
-      return await resolveOnce();
-    } catch (_) {
-      await Future<void>.delayed(const Duration(milliseconds: 320));
+    // PostgREST can be briefly cold (or hang on Cloudflare 525) after auth.
+    // Cap each attempt so the purple spinner never waits forever.
+    const attemptTimeout = Duration(seconds: 12);
+    const delays = <Duration>[
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 900),
+      Duration(milliseconds: 1600),
+    ];
+    Object? lastError;
+    for (var attempt = 0; attempt <= delays.length; attempt += 1) {
       try {
-        return await resolveOnce();
+        return await resolveOnce().timeout(attemptTimeout);
       } catch (error) {
-        debugPrint('Session validation failed; clearing local session: $error');
-        try {
-          await Supabase.instance.client.auth.signOut(
-            scope: SignOutScope.local,
-          );
-        } catch (signOutError) {
-          debugPrint('Could not clear local session: $signOutError');
-        }
-        rethrow;
+        lastError = error;
+        debugPrint(
+          'Session validation attempt ${attempt + 1}/${delays.length + 1} failed: $error',
+        );
+        if (attempt >= delays.length) break;
+        await Future<void>.delayed(delays[attempt]);
       }
     }
+    // Keep the session on transient network blips — show retry UI instead of
+    // signing the merchant out while Supabase is flapping.
+    if (_isTransientBootFailure(lastError)) {
+      throw TimeoutException(
+        'La conexión con el servidor está lenta o intermitente. Reintenta en unos segundos.',
+        attemptTimeout,
+      );
+    }
+    debugPrint('Session validation failed; clearing local session: $lastError');
+    try {
+      await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+    } catch (signOutError) {
+      debugPrint('Could not clear local session: $signOutError');
+    }
+    throw lastError ?? StateError('No se pudo validar el acceso.');
   }
 
-  Future<PostAuthDestination> _targetFutureFor(String userId) {
+  bool _isTransientBootFailure(Object? error) {
+    if (error is TimeoutException) return true;
+    final message = (error?.toString() ?? '').toLowerCase();
+    return message.contains('timeout') ||
+        message.contains('timed out') ||
+        message.contains('socketexception') ||
+        message.contains('failed host lookup') ||
+        message.contains('connection reset') ||
+        message.contains('connection closed') ||
+        message.contains('clientexception') ||
+        message.contains('525') ||
+        message.contains('502') ||
+        message.contains('503') ||
+        message.contains('504') ||
+        message.contains('ssl');
+  }
+
+  Future<_AuthBootResult> _finishAccessSelection({
+    required String userId,
+    required MerchantAccessOption selected,
+    required SharedPreferences prefs,
+  }) async {
+    MerchantSession.set(role: selected.role, isOwner: selected.isOwner);
+    await prefs.setString(
+      '$_lastComercioKeyPrefix:$userId',
+      selected.comercioId,
+    );
+
+    syncMerchantPresence(
+      name: selected.nombre.trim().isEmpty ? 'Tu cuenta' : selected.nombre,
+      logoUrl: selected.logoUrl,
+      slug: selected.slug,
+    );
+    SupabaseConfig.setCurrentComercioId(
+      selected.comercioId,
+      slug: selected.slug,
+    );
+
+    // Invited staff never enter onboarding/billing for someone else's restaurant.
+    if (!selected.isOwner && selected.role != MerchantStaffRole.administrador) {
+      await prefs.remove('$_setupDraftKeyPrefix:$userId');
+      return _AuthBootResult(destination: PostAuthDestination.dashboard);
+    }
+
+    final firstCatalog = await Supabase.instance.client
+        .from('catalogos')
+        .select('id')
+        .eq('comercio_id', selected.comercioId)
+        .limit(1)
+        .maybeSingle();
+    if (firstCatalog == null) {
+      return _AuthBootResult(
+        destination: resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: false,
+          hasActiveSubscription: false,
+        ),
+      );
+    }
+
+    await prefs.remove('$_setupDraftKeyPrefix:$userId');
+
+    var hasActiveSubscription = false;
+    final sub = await Supabase.instance.client
+        .from('subscriptions')
+        .select('id, status')
+        .eq('business_id', selected.comercioId)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
+    hasActiveSubscription = sub != null;
+
+    if (!hasActiveSubscription) {
+      try {
+        final snap = await const BillingService()
+            .reconcileCheckout(comercioId: selected.comercioId)
+            .timeout(const Duration(seconds: 2));
+        hasActiveSubscription = snap.hasActiveSubscription;
+      } catch (_) {}
+    }
+
+    return _AuthBootResult(
+      destination: resolvePostAuthDestination(
+        hasCommerce: true,
+        hasCatalog: true,
+        hasActiveSubscription: hasActiveSubscription,
+      ),
+    );
+  }
+
+  Future<_AuthBootResult> _targetFutureFor(String userId) {
     if (_targetFuture != null && _targetUserId == userId) {
       return _targetFuture!;
     }
@@ -201,6 +315,22 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<AndroidAppRelease?>(
+      future: _androidUpdateFuture,
+      builder: (context, updateSnapshot) {
+        if (updateSnapshot.connectionState == ConnectionState.waiting) {
+          return const BrandedLoadingScreen(withScaffold: true);
+        }
+        final requiredUpdate = updateSnapshot.data;
+        if (requiredUpdate != null) {
+          return ForceUpdateScreen(release: requiredUpdate);
+        }
+        return _buildAuthGateBody(context);
+      },
+    );
+  }
+
+  Widget _buildAuthGateBody(BuildContext context) {
     final supabase = Supabase.instance.client;
 
     return ValueListenableBuilder<bool>(
@@ -216,7 +346,13 @@ class _AuthGateState extends State<AuthGate> {
             final session =
                 snapshot.data?.session ?? supabase.auth.currentSession;
 
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            // Prefer the already-restored session; do not block on the first
+            // auth-stream tick when Supabase.initialize already hydrated it.
+            final waitingForAuthEvent =
+                snapshot.connectionState == ConnectionState.waiting &&
+                session == null &&
+                !snapshot.hasData;
+            if (waitingForAuthEvent) {
               return const BrandedLoadingScreen(withScaffold: true);
             }
 
@@ -236,7 +372,7 @@ class _AuthGateState extends State<AuthGate> {
             }
 
             final userId = session.user.id;
-            return FutureBuilder<PostAuthDestination>(
+            return FutureBuilder<_AuthBootResult>(
               future: _targetFutureFor(userId),
               builder: (context, targetSnapshot) {
                 if (targetSnapshot.connectionState == ConnectionState.waiting) {
@@ -244,27 +380,90 @@ class _AuthGateState extends State<AuthGate> {
                 }
 
                 if (targetSnapshot.hasError) {
+                  final message = targetSnapshot.error is TimeoutException
+                      ? 'La conexión está lenta o intermitente. Reintenta en unos segundos.'
+                      : 'No se pudo validar el acceso. Reintenta en unos segundos.';
                   return Scaffold(
+                    backgroundColor: const Color(0xFF5B21B6),
                     body: Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'No se pudo validar el acceso: ${targetSnapshot.error}',
-                          textAlign: TextAlign.center,
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.wifi_off_rounded,
+                              color: Color(0xFFF4ECFF),
+                              size: 40,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              message,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFF8F5FF),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFF4ECFF),
+                                foregroundColor: const Color(0xFF5B21B6),
+                              ),
+                              onPressed: () {
+                                setState(_resetTargetCache);
+                              },
+                              child: const Text('Reintentar'),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   );
                 }
 
-                switch (targetSnapshot.data) {
+                final boot = targetSnapshot.data;
+                if (boot == null) {
+                  return DeferredLibraryScreen(
+                    key: const ValueKey<String>('deferred-setup'),
+                    load: setup_screen.loadLibrary,
+                    builder: () => setup_screen.BusinessSetupScreen(),
+                  );
+                }
+
+                if (boot.needsPicker) {
+                  return MerchantAccessPickerScreen(
+                    options: boot.options!,
+                    onSelected: (option) {
+                      setState(() {
+                        _forcedAccess = option;
+                        _resetTargetCache();
+                      });
+                    },
+                  );
+                }
+
+                switch (boot.destination) {
                   case PostAuthDestination.dashboard:
+                    // Pending /panel/conversaciones/{id} is opened by
+                    // AdminDashboardScreen via MerchantDeepLink.
                     return const AdminDashboardScreen();
                   case PostAuthDestination.billing:
-                    return const BillingPlanScreen();
+                    return DeferredLibraryScreen(
+                      key: const ValueKey<String>('deferred-billing'),
+                      load: billing_screen.loadLibrary,
+                      builder: () => billing_screen.BillingPlanScreen(),
+                    );
                   case PostAuthDestination.setup:
                   case null:
-                    return const BusinessSetupScreen();
+                    return DeferredLibraryScreen(
+                      key: const ValueKey<String>('deferred-setup'),
+                      load: setup_screen.loadLibrary,
+                      builder: () => setup_screen.BusinessSetupScreen(),
+                    );
                 }
               },
             );
@@ -615,6 +814,33 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  bool _isTransientAuthFailure(Object error) {
+    if (error is AuthRetryableFetchException) return true;
+    if (error is AuthException) {
+      final status = int.tryParse(error.statusCode ?? '');
+      if (status != null && status >= 500) return true;
+      return _looksLikeTransientAuthMessage(error.message);
+    }
+    return _looksLikeTransientAuthMessage(error.toString());
+  }
+
+  bool _looksLikeTransientAuthMessage(String message) {
+    final normalized = message.trim().toLowerCase();
+    return normalized.contains('authretryable') ||
+        normalized.contains('network') ||
+        normalized.contains('socket') ||
+        normalized.contains('clientexception') ||
+        normalized.contains('connection') ||
+        normalized.contains('failed host') ||
+        normalized.contains('timed out') ||
+        normalized.contains('timeout') ||
+        normalized.contains('connection closed') ||
+        normalized.contains('connection reset') ||
+        normalized.contains('503') ||
+        normalized.contains('502') ||
+        normalized.contains('504');
+  }
+
   String _translateAuthError(String message) {
     final normalized = message.trim().toLowerCase();
     if (normalized.isEmpty) {
@@ -652,7 +878,7 @@ class _AuthScreenState extends State<AuthScreen> {
     if (normalized.contains('weak password')) {
       return 'La contraseña es demasiado debil. Usa una combinacion mas segura.';
     }
-    if (normalized.contains('network')) {
+    if (_looksLikeTransientAuthMessage(normalized)) {
       return 'Problema de red. Verifica tu conexion e intentalo otra vez.';
     }
     if (normalized.contains('too many requests')) {
@@ -679,18 +905,50 @@ class _AuthScreenState extends State<AuthScreen> {
     if (!_loginFormKey.currentState!.validate() || _isLoginLoading) return;
 
     setState(() => _isLoginLoading = true);
+    final email = _loginEmailController.text.trim();
+    final password = _loginPasswordController.text;
+    const maxAttempts = 3;
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: _loginEmailController.text.trim(),
-        password: _loginPasswordController.text,
-      );
-    } on AuthException catch (error) {
-      _showSnack(_translateAuthError(error.message), isError: true);
-    } catch (_) {
-      _showSnack(
-        'No se pudo iniciar sesión. Inténtalo nuevamente.',
-        isError: true,
-      );
+      for (var attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await Supabase.instance.client.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          return;
+        } on AuthException catch (error) {
+          final canRetry =
+              attempt < maxAttempts && _isTransientAuthFailure(error);
+          debugPrint(
+            'signIn attempt $attempt/$maxAttempts failed '
+            '(${error.runtimeType}, status=${error.statusCode}): ${error.message}',
+          );
+          if (canRetry) {
+            await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+            continue;
+          }
+          _showSnack(_translateAuthError(error.message), isError: true);
+          return;
+        } catch (error) {
+          final canRetry =
+              attempt < maxAttempts && _isTransientAuthFailure(error);
+          debugPrint(
+            'signIn attempt $attempt/$maxAttempts failed '
+            '(${error.runtimeType}): $error',
+          );
+          if (canRetry) {
+            await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+            continue;
+          }
+          _showSnack(
+            _looksLikeTransientAuthMessage(error.toString())
+                ? 'Problema de red. Verifica tu conexion e intentalo otra vez.'
+                : 'No se pudo iniciar sesión. Inténtalo nuevamente.',
+            isError: true,
+          );
+          return;
+        }
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoginLoading = false);
@@ -1169,6 +1427,10 @@ class _AuthScreenState extends State<AuthScreen> {
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
         statusBarBrightness: Brightness.dark,
+        systemStatusBarContrastEnforced: false,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.light,
+        systemNavigationBarContrastEnforced: false,
       ),
       child: DefaultTabController(
         length: 2,

@@ -82,6 +82,18 @@ supabase/functions/.env.zeno.preview.local
 tmp-*.txt
 tmp-*.json
 tmp-*.log
+tmp_*/
+**/tmp_*/
+site/tmp_*/
+site/scripts/_flavor_imgs/
+site/scripts/_meal4fit_*/
+site/scripts/_parche_imgs/
+site/scripts/_sushi_imgs/
+site/scripts/_meal4fit_logo*.jpg
+site/scripts/_meal4fit_menu_raw.txt
+site/scripts/_sushi_image_catalog.json
+node_modules/.vite/
+node_modules/.vitest-cache/
 
 # Zeno prod smoke local meta
 .tmp-zeno-prod-smoke.json

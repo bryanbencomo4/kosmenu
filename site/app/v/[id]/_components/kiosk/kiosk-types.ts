@@ -7,7 +7,11 @@ export type KioskCategory = {
   name: string;
   glyph: string;
   coverUrl: string | null;
+  /** Original Storage URL for cold-variant upgrade / hot fallback. */
+  coverSourceUrl?: string | null;
   productCount: number;
+  /** Merchant category role (`normal`, `bebida`, …). Null/empty ≈ main/normal. */
+  role?: string | null;
 };
 
 export type KioskProduct = {
@@ -16,7 +20,11 @@ export type KioskProduct = {
   description: string;
   priceLabel: string;
   imageUrl: string | null;
+  /** Original Storage URL for cold-variant upgrade / hot fallback. */
+  imageSourceUrl?: string | null;
   available: boolean;
+  /** Overrides the default "No disponible" chip when `available` is false. */
+  unavailableLabel?: string | null;
   /** Only set for products with option groups enabled ("3 tamaños disponibles"). */
   optionsSummary?: string | null;
 };
@@ -34,5 +42,19 @@ export type KioskVoucherData = {
 export const FULFILLMENT_LABEL: Record<KioskFulfillment, string> = {
   dine_in: 'Comer aqui',
   takeaway: 'Para llevar',
+  delivery: 'Delivery',
+};
+
+/** Customer-facing labels in public checkout (order notes still use FULFILLMENT_LABEL). */
+export const CHECKOUT_FULFILLMENT_CHOICE_LABEL: Record<KioskFulfillment, string> = {
+  dine_in: 'Comer aqui',
+  takeaway: 'Yo paso a buscarlo',
+  delivery: 'Delivery a domicilio',
+};
+
+/** Compact labels for the order-review segmented control. */
+export const CHECKOUT_FULFILLMENT_SHORT_LABEL: Record<KioskFulfillment, string> = {
+  dine_in: 'Comer aqui',
+  takeaway: 'Paso a buscarlo',
   delivery: 'Delivery',
 };

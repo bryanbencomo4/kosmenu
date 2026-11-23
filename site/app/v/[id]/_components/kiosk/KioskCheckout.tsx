@@ -1,17 +1,11 @@
 'use client';
 
-import { Manrope } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { ArrowLeft, X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
-import { FULFILLMENT_LABEL, type KioskFulfillment } from './kiosk-types';
-
-const titleFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
+import type { KioskFulfillment } from './kiosk-types';
 
 export type KioskCheckoutStep = {
   id: number;
@@ -19,7 +13,9 @@ export type KioskCheckoutStep = {
 };
 
 type KioskCheckoutProps = {
-  fulfillment: KioskFulfillment | null;
+  fulfillment?: KioskFulfillment | null;
+  fulfillmentOptions?: KioskFulfillment[];
+  onFulfillmentChange?: (next: KioskFulfillment) => void;
   steps: KioskCheckoutStep[];
   currentStepId: number;
   title: string;
@@ -38,7 +34,6 @@ type KioskCheckoutProps = {
 };
 
 export function KioskCheckout({
-  fulfillment,
   steps,
   currentStepId,
   title,
@@ -66,7 +61,7 @@ export function KioskCheckout({
       <KioskDecor density="lite" />
       <KioskMotionStyles />
 
-      <header className="relative z-10 px-5 py-3">
+      <header className="relative z-20 shrink-0 px-5 py-3">
         <div className="mx-auto flex w-full max-w-[560px] items-center gap-3">
           <button
             type="button"
@@ -77,19 +72,11 @@ export function KioskCheckout({
             <X className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className={`${titleFont.className} truncate text-xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
+            <h2 className={`truncate text-xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
               {title}
             </h2>
             <p className="truncate text-sm font-medium text-[var(--menu-text-muted)]">{subtitle}</p>
           </div>
-          {fulfillment ? (
-            <span
-              className="shrink-0 rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-            >
-              {FULFILLMENT_LABEL[fulfillment]}
-            </span>
-          ) : null}
         </div>
         <ol className="mx-auto mt-4 flex w-full max-w-[560px] items-center gap-2">
           {steps.map((step, index) => {
@@ -132,10 +119,9 @@ export function KioskCheckout({
 
       <div data-sheet-scroll className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]">
         <div className="mx-auto w-full max-w-[560px] pb-4">
-          <div>{children}</div>
           {error ? (
             <div
-              className="mt-4 rounded-[18px] px-4 py-3 text-sm font-semibold"
+              className="mb-4 rounded-[18px] px-4 py-3 text-sm font-semibold"
               style={{
                 backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
                 color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
@@ -144,6 +130,7 @@ export function KioskCheckout({
               {error}
             </div>
           ) : null}
+          <div>{children}</div>
         </div>
       </div>
 
@@ -151,7 +138,7 @@ export function KioskCheckout({
         <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Total</p>
-            <p className={`${titleFont.className} text-[28px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
+            <p className={`text-[28px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
               {totalLabel}
             </p>
             <p className="text-xs font-medium text-[var(--menu-text-muted)]">{itemsLabel}</p>

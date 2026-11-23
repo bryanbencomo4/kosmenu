@@ -38,6 +38,35 @@ class AiImageService {
     }
   }
 
+  /// Generates a promotional vertical 9:16 category cover (1 credit) and saves
+  /// it on `categorias.imagen_url`. Works with or without product photos.
+  Future<Map<String, dynamic>> generateCategoryCover({
+    required String comercioId,
+    required String categoryId,
+    String? customPrompt,
+  }) async {
+    final supabase = Supabase.instance.client;
+    try {
+      final response = await supabase.functions.invoke(
+        'generate-category-cover-ai',
+        body: {
+          'comercio_id': comercioId.trim(),
+          'category_id': categoryId.trim(),
+          if ((customPrompt ?? '').trim().isNotEmpty)
+            'custom_prompt': customPrompt!.trim(),
+        },
+        headers: _functionHeaders(comercioId),
+      );
+
+      return _parseResponse(
+        response,
+        functionName: 'generate-category-cover-ai',
+      );
+    } on FunctionException catch (error) {
+      throw StateError(formatAiImageUserMessage(_functionExceptionDetail(error)));
+    }
+  }
+
   Future<Map<String, dynamic>> enqueueOnboardingImages({
     required String comercioId,
     required String catalogId,
@@ -166,6 +195,11 @@ String formatAiImageUserMessage(String? rawMessage) {
 
   if (normalized.contains('producto no encontrado')) {
     return 'No se encontró el producto para generar su imagen IA.';
+  }
+
+  if (normalized.contains('categoría no encontrada') ||
+      normalized.contains('categoria no encontrada')) {
+    return 'No se encontró la categoría para generar su portada IA.';
   }
 
   if (normalized.contains('ya estaba en proceso') ||

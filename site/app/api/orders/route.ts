@@ -29,14 +29,20 @@ import {
   parseExchangeRate,
   type MarketRatesInput,
 } from '../../_lib/checkout-exchange-rate';
+import { isComprobanteStorageRef } from '../_lib/comprobante-path';
 import { createOrderShortLink } from '../_lib/order-short-links';
 import {
   buildOrderItemSnapshots,
   type SnapshotCategoryRow,
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
-import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
+import {
+  isProductExcludedFromDelivery,
+  sanitizeCartLineSelection,
+  summarizeProductDeliverySurcharges,
+} from '../../_lib/menu-product-options';
 import { optionalMerchantComanda } from '../../_lib/whatsapp-order-format';
+import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { resolveCommerceManagementMode } from '../../_lib/order-management-mode';
 import { extractDeliveryConfigSource, parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
@@ -47,8 +53,50 @@ import {
   isTransientSupabaseFailure,
   supabaseWriteCircuit,
 } from '../_lib/supabase-circuit';
+import {
+  parsePromoAttributionCookie,
+  PROMO_ATTR_COOKIE,
+  recordDirectoryPromoEvents,
+} from '../_lib/directory-promo-events';
+import {
+  appCorsPreflight,
+  withAppCors,
+} from '../_lib/app-cors';
+import { userCanOperateComercio } from '../_lib/comercio-staff-access';
+import { getUserFromBearerRequest } from '../_lib/supabase-user-auth';
 
 export const maxDuration = 10;
+
+const ORDERS_CORS = {
+  methods: 'POST, OPTIONS',
+  headers:
+    'authorization, content-type, accept, x-idempotency-key',
+} as const;
+
+export async function OPTIONS(request: Request) {
+  return appCorsPreflight(request, ORDERS_CORS);
+}
+
+export async function POST(request: Request) {
+  // Server-side staging / chatbot smoke block (not only Playwright interceptors).
+  const { isChatbotOrdersBlocked } = await import('../_lib/staging-guards');
+  if (isChatbotOrdersBlocked()) {
+    return withAppCors(
+      request,
+      NextResponse.json(
+        {
+          ok: false,
+          error: 'orders_blocked_staging',
+          message:
+            'La creación de pedidos está bloqueada en modo staging del chatbot.',
+        },
+        { status: 403 },
+      ),
+      ORDERS_CORS,
+    );
+  }
+  return withAppCors(request, await postOrder(request), ORDERS_CORS);
+}
 
 function hashCustomerAccessToken(token: string) {
   return createHash('sha256').update(token.trim(), 'utf8').digest('hex');
@@ -67,6 +115,10 @@ type CreateOrderPayload = {
   clientEmail?: string;
   clientName?: string;
   clientWhatsapp?: string;
+  /** Table number for dine-in / waiter-assisted orders. */
+  mesa?: string;
+  /** Waiter-assisted checkout from the public menu (?mode=assisted). */
+  assisted?: boolean;
   currency?: string;
   exchangeRate?: number;
   comercioNombre?: string;
@@ -87,6 +139,8 @@ type CreateOrderPayload = {
   } | null;
   paymentReferenceLast4?: string;
   paymentProofUrl?: string;
+  /** One or more opaque storage refs (`storage://comprobantes/...`). */
+  paymentProofUrls?: string[];
   cashPaymentAmount?: number | null;
   cashChangeAmount?: number | null;
   orderNotes?: string;
@@ -110,6 +164,9 @@ const ItemSchema = z.object({
   nombre: z.string().trim().optional(),
   cantidad: z.number().finite().positive('items[].cantidad debe ser mayor a 0.'),
   precio: z.number().finite().min(0, 'items[].precio debe ser >= 0.'),
+  /** Present only for weight-sold products (price is per kg; cantidad is kg). */
+  unidad: z.enum(['kg']).optional(),
+  venta_por_peso: z.boolean().optional(),
 });
 
 const DeliverySchema = z
@@ -118,6 +175,8 @@ const DeliverySchema = z
     address: z.string().trim().optional(),
     reference: z.string().trim().optional(),
     instructions: z.string().trim().optional(),
+    /** Out-of-zone delivery: fee TBD with customer (not free). */
+    fee_pending: z.boolean().optional(),
     coordinates: z
       .object({
         lat: z.number().finite(),
@@ -209,6 +268,7 @@ function normalizeDelivery(value: unknown) {
     address?: unknown;
     reference?: unknown;
     instructions?: unknown;
+    fee_pending?: unknown;
     coordinates?: { lat?: unknown; lng?: unknown } | null;
   } | null;
   if (!raw) return { mode: 'pickup' as const };
@@ -217,6 +277,7 @@ function normalizeDelivery(value: unknown) {
   const address = normalizeText(raw.address);
   const reference = normalizeText(raw.reference);
   const instructions = normalizeText(raw.instructions);
+  const feePending = raw.fee_pending === true;
   const lat = Number(raw.coordinates?.lat);
   const lng = Number(raw.coordinates?.lng);
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
@@ -226,11 +287,12 @@ function normalizeDelivery(value: unknown) {
     address,
     reference,
     instructions,
+    ...(feePending ? { fee_pending: true as const } : {}),
     coordinates: hasCoords ? { lat, lng } : null,
   };
 }
 
-export async function POST(request: Request) {
+async function postOrder(request: Request): Promise<NextResponse> {
   try {
     const ip = getClientIp(request);
     const rate = consumeRateLimit(`orders:ip:${ip}`, 20, 60_000);
@@ -262,10 +324,25 @@ export async function POST(request: Request) {
     const rawClientEmail = (body.clientEmail ?? '').trim().toLowerCase();
     const rawClientName = normalizeText(body.clientName ?? incomingDetalles.cliente_nombre);
     const rawClientWhatsapp = normalizeDigits(body.clientWhatsapp ?? incomingDetalles.telefono_cliente);
+    const rawMesa = normalizeText(body.mesa ?? incomingDetalles.mesa);
     const rawCurrency = normalizeOrderCurrency(body.currency ?? incomingDetalles.moneda_checkout?.toString());
     const rawExchangeRate = Number(body.exchangeRate ?? incomingDetalles.tasa_cambio_snapshot);
     const rawCostDelivery = Number(body.costoDelivery ?? incomingDetalles.costo_delivery ?? 0);
     const rawDelivery = normalizeDelivery(body.delivery ?? incomingDetalles.delivery);
+    // Waiter-assisted checkout may omit phone; placeholder satisfies schema until verified.
+    const staffUserEarly = await getUserFromBearerRequest(request);
+    const ASSISTED_PHONE_PLACEHOLDER = '0000000000';
+    const assistedFlag = body.assisted === true || incomingDetalles.order_source === 'assisted_waiter';
+    const assistedDineIn =
+      assistedFlag &&
+      rawMesa.length > 0 &&
+      (rawDelivery.mode === 'pickup' || !rawDelivery.mode);
+    const optionalAssistedPhone =
+      rawClientWhatsapp.length < 10 &&
+      (Boolean(staffUserEarly?.id) || assistedDineIn);
+    const phoneForValidation = optionalAssistedPhone
+      ? ASSISTED_PHONE_PLACEHOLDER
+      : rawClientWhatsapp;
     const rawItems = Array.isArray(body.items)
       ? body.items.map((item) => ({
           product_id: normalizeText((item as CreateOrderItemInput)?.product_id ?? (item as CreateOrderItemInput)?.productId),
@@ -285,7 +362,7 @@ export async function POST(request: Request) {
     const validationResult = OrderSchema.safeParse({
       comercioId: rawComercioId,
       cliente_nombre: rawClientName,
-      telefono_cliente: rawClientWhatsapp,
+      telefono_cliente: phoneForValidation,
       moneda_checkout: rawCurrency,
       tasa_cambio_snapshot: rawExchangeRate,
       costo_delivery: Number.isFinite(rawCostDelivery) ? Math.max(rawCostDelivery, 0) : 0,
@@ -381,17 +458,21 @@ export async function POST(request: Request) {
     const comercioId = validated.comercioId;
     const clientEmail = rawClientEmail;
     const clientName = validated.cliente_nombre;
-    const clientWhatsapp = validated.telefono_cliente;
+    // Cleared below when a verified waiter omits the optional phone.
+    let clientWhatsapp = validated.telefono_cliente;
     const comercioNombre = (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
     let costoDelivery = validated.costo_delivery;
     const currency = validated.moneda_checkout;
     const exchangeRate = validated.tasa_cambio_snapshot;
-    const delivery = validated.delivery;
+    let delivery = validated.delivery;
     const items = validated.items.map((item) => ({
       product_id: item.product_id,
       nombre: item.nombre || 'Producto',
       cantidad: item.cantidad,
       precio: item.precio,
+      ...(item.venta_por_peso === true || item.unidad === 'kg'
+        ? { unidad: 'kg' as const, venta_por_peso: true as const }
+        : {}),
     }));
     const paymentMethod = normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago);
     const orderNotes = normalizeText(body.orderNotes ?? incomingDetalles.order_notes);
@@ -399,7 +480,23 @@ export async function POST(request: Request) {
     const whatsappNotificationsEnabled =
       typeof notifications.whatsapp_enabled === 'boolean' ? notifications.whatsapp_enabled : true;
     const paymentReferenceLast4 = normalizeDigits(body.paymentReferenceLast4 ?? incomingDetalles.referencia_pago).slice(-4);
-    const paymentProofUrl = normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url);
+    const paymentProofUrls: string[] = [];
+    const pushProofUrl = (value: unknown) => {
+      const ref = normalizeText(value);
+      if (!ref || paymentProofUrls.includes(ref)) return;
+      if (!isComprobanteStorageRef(ref)) return;
+      if (paymentProofUrls.length >= 3) return;
+      paymentProofUrls.push(ref);
+    };
+    if (Array.isArray(body.paymentProofUrls)) {
+      for (const entry of body.paymentProofUrls) pushProofUrl(entry);
+    }
+    if (Array.isArray(incomingDetalles.comprobantes)) {
+      for (const entry of incomingDetalles.comprobantes) pushProofUrl(entry);
+    }
+    pushProofUrl(body.paymentProofUrl);
+    pushProofUrl(incomingDetalles.comprobante_url);
+    const paymentProofUrl = paymentProofUrls[0] || '';
     const cashPaymentAmount = Number(body.cashPaymentAmount ?? incomingDetalles.pago_con ?? 0);
     const cashChangeAmount = Number(body.cashChangeAmount ?? incomingDetalles.cambio_de ?? 0);
 
@@ -458,6 +555,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
+    let snapshotProducts: SnapshotProductRow[] = [];
     const snapshotResult = await buildOrderItemSnapshots({
       items,
       selections: rawItemSelections,
@@ -469,7 +567,8 @@ export async function POST(request: Request) {
           .eq('comercio_id', resolvedComercioId)
           .in('id', productIds);
         if (error) throw new Error(error.message);
-        return (data ?? []) as SnapshotProductRow[];
+        snapshotProducts = (data ?? []) as SnapshotProductRow[];
+        return snapshotProducts;
       },
       loadCategories: async (categoryIds) => {
         const { data, error } = await supabase
@@ -481,9 +580,51 @@ export async function POST(request: Request) {
         return (data ?? []) as SnapshotCategoryRow[];
       },
     });
+    let productDeliverySurcharge = 0;
+    let productDeliverySurchargeLines: Array<{
+      productId: string;
+      productName: string;
+      label: string;
+      unitSurcharge: number;
+      quantity: number;
+      total: number;
+    }> = [];
     if (snapshotResult.ok === true) {
       subtotal = snapshotResult.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
-      total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
+      if (delivery.mode === 'delivery') {
+        const productById = new Map(snapshotProducts.map((row) => [row.id, row]));
+        for (const item of snapshotResult.items) {
+          const product = productById.get(item.product_id);
+          if (product && isProductExcludedFromDelivery(product)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: 'product_not_available_for_delivery',
+                message: `"${product.nombre ?? item.nombre}" no está disponible para delivery. Quítalo del carrito o elige retiro.`,
+              },
+              { status: 400 },
+            );
+          }
+        }
+        const surchargeSummary = summarizeProductDeliverySurcharges(
+          snapshotResult.items.map((item, index) => ({
+            product: productById.get(item.product_id) ?? {
+              id: item.product_id,
+              nombre: item.nombre,
+              opciones_menu: null,
+            },
+            quantity: item.cantidad,
+            selection: rawItemSelections[index] ?? null,
+          })),
+          true,
+        );
+        productDeliverySurcharge = surchargeSummary.total;
+        productDeliverySurchargeLines = surchargeSummary.lines;
+      }
+      total =
+        subtotal +
+        productDeliverySurcharge +
+        (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     }
 
     const originLat = Number(comercioRow?.latitud);
@@ -575,7 +716,10 @@ export async function POST(request: Request) {
     }
     if (deliveryQuote.applied) {
       costoDelivery = deliveryQuote.fee;
-      total = subtotal + costoDelivery;
+      total = subtotal + productDeliverySurcharge + costoDelivery;
+      if (deliveryQuote.outOfZone) {
+        delivery = { ...delivery, fee_pending: true };
+      }
     }
 
     const customerRatingSummary = await loadOrderServiceRatingSummary(
@@ -584,11 +728,44 @@ export async function POST(request: Request) {
       await createCustomerRatingKey(clientWhatsapp),
     );
 
+    const staffUser = staffUserEarly;
+    const staffAssisted =
+      staffUser?.id != null
+        ? await userCanOperateComercio(staffUser.id, resolvedComercioId)
+        : false;
+
+    if (optionalAssistedPhone && !staffAssisted && !assistedDineIn) {
+      return NextResponse.json(
+        {
+          error: 'Bad Request',
+          details: [
+            {
+              path: 'telefono_cliente',
+              message: 'telefono_cliente es requerido.',
+            },
+          ],
+        },
+        { status: 400 },
+      );
+    }
+    if (optionalAssistedPhone && (staffAssisted || assistedDineIn)) {
+      clientWhatsapp = '';
+    }
+    // Waiters only take dine-in ("comer aquí") — never delivery.
+    if ((staffAssisted || assistedDineIn) && delivery.mode === 'delivery') {
+      delivery = { mode: 'pickup' };
+      costoDelivery = 0;
+      productDeliverySurcharge = 0;
+      productDeliverySurchargeLines = [];
+      total = subtotal;
+    }
+
     const ordering = evaluateBusinessOrdering({
       enLinea: comercioRow?.en_linea,
       horarios: comercioRow?.horarios,
     });
-    if (ordering.allowed === false) {
+    // Staff / mesero taking assisted orders from the app may operate offline.
+    if (ordering.allowed === false && !staffAssisted) {
       return NextResponse.json(
         { error: ordering.error, message: ordering.message },
         { status: 403 },
@@ -609,8 +786,19 @@ export async function POST(request: Request) {
       currency,
       exchangeRate,
     );
+    const productDeliverySurchargeCheckout = convertOrderAmount(
+      productDeliverySurcharge,
+      baseCurrency,
+      currency,
+      exchangeRate,
+    );
     const totalCheckout = convertOrderAmount(total, baseCurrency, currency, exchangeRate);
-    if (subtotalCheckout === null || costoDeliveryCheckout === null || totalCheckout === null) {
+    if (
+      subtotalCheckout === null ||
+      costoDeliveryCheckout === null ||
+      productDeliverySurchargeCheckout === null ||
+      totalCheckout === null
+    ) {
       throw new Error('Invalid exchange rate for the selected checkout currency.');
     }
 
@@ -633,6 +821,13 @@ export async function POST(request: Request) {
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
+      mesa: rawMesa || null,
+      order_source:
+        staffAssisted || assistedDineIn
+          ? 'assisted_waiter'
+          : incomingDetalles.order_source === 'catalog'
+            ? 'catalog'
+            : null,
       moneda_base: baseCurrency,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
@@ -644,6 +839,7 @@ export async function POST(request: Request) {
       },
       referencia_pago: paymentReferenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
+      ...(paymentProofUrls.length > 0 ? { comprobantes: paymentProofUrls } : {}),
       delivery,
       order_notes: orderNotes,
       pago_con: Number.isFinite(cashPaymentAmount) && cashPaymentAmount > 0 ? cashPaymentAmount : null,
@@ -652,6 +848,13 @@ export async function POST(request: Request) {
       subtotal_moneda_checkout: subtotalCheckout,
       costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
       costo_delivery_moneda_checkout: costoDeliveryCheckout,
+      ...(productDeliverySurcharge > 0
+        ? {
+            recargo_delivery_productos: productDeliverySurcharge,
+            recargo_delivery_productos_moneda_checkout: productDeliverySurchargeCheckout,
+            recargo_delivery_productos_detalle: productDeliverySurchargeLines,
+          }
+        : {}),
       ...(delivery.mode === 'delivery'
         ? {
             delivery_estimate_minutes:
@@ -730,6 +933,11 @@ export async function POST(request: Request) {
       const shortLinkDetalles = {
         ...detalles,
         tracking_url: publicOrderUrl,
+        ...(paymentProofUrl
+          ? {
+              comprobante_public_url: `${publicSiteUrl}/p/${encodeURIComponent(shortLink.code)}`,
+            }
+          : {}),
       };
       await supabase
         .from('pedidos')
@@ -747,21 +955,61 @@ export async function POST(request: Request) {
 
     if (clientEmail && canSendOrderEmail()) {
       emailStatus = 'queued';
+      const tipoMatch = orderNotes.match(/^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?=\s|$|\.)/i);
+      const fulfillmentLabel =
+        tipoMatch?.[1]?.replace(/aqui$/i, 'aquí') ||
+        (delivery.mode === 'delivery' ? 'Delivery' : 'Retiro / para llevar');
+      const packagingEmailLabel = (() => {
+        if (productDeliverySurcharge <= 0) return null;
+        const labels = [
+          ...new Set(
+            productDeliverySurchargeLines
+              .map((line) => (line.label ?? '').toString().trim())
+              .filter(Boolean),
+          ),
+        ];
+        if (labels.length === 1) return labels[0];
+        if (labels.length > 1) return 'Recargos de delivery';
+        return 'Empaque / delivery';
+      })();
       void sendOrderEmail({
         clientEmail,
+        clientName,
         comercioNombre,
         orderId,
         orderTrackingUrl: publicOrderUrl,
         comercioSlug: resolvedComercioSlug,
+        currency,
+        subtotal: subtotalCheckout,
+        packagingFee:
+          productDeliverySurcharge > 0 ? productDeliverySurchargeCheckout : null,
+        packagingLabel: packagingEmailLabel,
+        deliveryFee: costoDeliveryCheckout,
+        total: totalCheckout,
+        fulfillmentLabel,
+        managementMode: detalles.management_mode,
+        items: storedItems.map((item) => {
+          const unitBase = Number(item.precio_final ?? item.precio) || 0;
+          const rawQty = Number(item.cantidad) || 1;
+          const qty = Math.max(
+            0.01,
+            Math.round((Number.isFinite(rawQty) ? rawQty : 1) * 1000) / 1000,
+          );
+          const lineBase = unitBase * qty;
+          const lineCheckout =
+            convertOrderAmount(lineBase, baseCurrency, currency, exchangeRate) ?? lineBase;
+          return {
+            name: (item.nombre || item.producto || 'Producto').toString(),
+            quantity: qty,
+            lineTotal: lineCheckout,
+          };
+        }),
       }).catch(() => {
         // Keep response fast; email failures are handled asynchronously.
       });
     }
 
-    const appSiteUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
-    const appOrderUrl = publicShortCode
-      ? `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(publicShortCode)}`
-      : `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(publicOrderUrl)}`;
+    const appOrderUrl = merchantOrderShareHref(orderId, publicOrderUrl);
     const merchantWhatsappText = optionalMerchantComanda(comercioRow, {
       orderId,
       appOrderUrl,
@@ -802,6 +1050,35 @@ export async function POST(request: Request) {
     }
 
     supabaseWriteCircuit.recordSuccess();
+
+    // Attribute order to directory promo click (24h window) when present.
+    try {
+      const cookieHeader = request.headers.get('cookie') ?? '';
+      const match = cookieHeader
+        .split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(`${PROMO_ATTR_COOKIE}=`));
+      const rawAttr = match ? match.slice(PROMO_ATTR_COOKIE.length + 1) : null;
+      const attribution = parsePromoAttributionCookie(rawAttr);
+      if (attribution && attribution.comercioId === resolvedComercioId) {
+        const pedidoId = (insertedOrder.id ?? '').toString().trim();
+        void recordDirectoryPromoEvents([
+          {
+            comercioId: resolvedComercioId,
+            eventType: 'order',
+            visitorId: `order:${pedidoId || orderId}`,
+            sessionId: `order:${orderId}`,
+            placement: 'promoted_carousel',
+            orderId: pedidoId || null,
+          },
+        ]).catch(() => {
+          // Never block checkout on analytics.
+        });
+      }
+    } catch {
+      // ignore attribution failures
+    }
+
       const response = NextResponse.json(responseBody, { status: 201 });
       if (publicShortCode) {
         response.cookies.set({

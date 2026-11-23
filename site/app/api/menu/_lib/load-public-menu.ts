@@ -25,7 +25,8 @@ const MENU_STALE_MS = 60_000;
 const MARKET_RATES_TTL_MS = 60_000;
 const OWNER_VERIFY_TTL_MS = 5 * 60_000;
 
-const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu,rol';
+const CATEGORIA_SELECT =
+  'id,comercio_id,nombre,orden,icono,imagen_url,opciones_menu,rol';
 const PRODUCTO_SELECT = [
   'id',
   'comercio_id',
@@ -90,6 +91,8 @@ const COMERCIO_COLUMNS = [
   'longitud',
   'permite_delivery',
   'recibe_pedidos_whatsapp',
+  'negocio_virtual',
+  'estados_operacion',
   'en_linea',
   'owner_id',
   'menu_palette',
@@ -310,7 +313,7 @@ async function loadPublicMenuByIdentifierUncached(
         if (!result.error) return result;
         return supabase
           .from('categorias')
-          .select('id,comercio_id,nombre,orden,icono,opciones_menu')
+          .select('id,comercio_id,nombre,orden,icono,imagen_url,opciones_menu')
           .eq('comercio_id', resolvedComercioId)
           .order('orden', { ascending: true });
       }),

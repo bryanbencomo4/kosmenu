@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
+import 'package:kosmenu_app/screens/merchant_access_picker_screen.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,15 +17,18 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const _appVersion = '1.0.0+1';
-
   late Future<Map<String, dynamic>?> _businessFuture;
+  late final Future<String> _versionLabelFuture;
+  late Future<List<MerchantAccessOption>> _accessOptionsFuture;
   bool _signingOut = false;
+  bool _switchingAccess = false;
 
   @override
   void initState() {
     super.initState();
     _businessFuture = _loadBusiness();
+    _versionLabelFuture = AppUpdateService.installedVersionLabel();
+    _accessOptionsFuture = loadMerchantAccessOptions();
   }
 
   @override
@@ -49,6 +54,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
     }
     return business;
+  }
+
+  Future<void> _selectAccess(MerchantAccessOption option) async {
+    if (_switchingAccess || _signingOut) return;
+    if (option.comercioId == SupabaseConfig.currentComercioId) return;
+
+    setState(() => _switchingAccess = true);
+    try {
+      await enterMerchantAccess(context, option);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _switchingAccess = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo cambiar de menú: $error')),
+      );
+    }
   }
 
   String _displayName(User user) {
@@ -99,6 +120,89 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMenuOptionTile({
+    required MerchantAccessOption option,
+    required bool selected,
+    required bool enabled,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasLogo =
+        option.logoUrl != null && option.logoUrl!.trim().isNotEmpty;
+    return Material(
+      color: selected
+          ? colorScheme.primary.withValues(alpha: 0.08)
+          : colorScheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: enabled ? () => _selectAccess(option) : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? colorScheme.primary.withValues(alpha: 0.45)
+                  : colorScheme.outlineVariant,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: const Color(0xFFF3E8FF),
+                backgroundImage: hasLogo ? NetworkImage(option.logoUrl!) : null,
+                child: hasLogo
+                    ? null
+                    : const Icon(
+                        Icons.storefront_outlined,
+                        color: Color(0xFF6D28D9),
+                        size: 20,
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      option.nombre,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    Text(
+                      selected ? 'Menú activo' : option.subtitle,
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: selected
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle_rounded, color: colorScheme.primary)
+              else
+                Icon(
+                  Icons.radio_button_unchecked_rounded,
+                  color: colorScheme.outline,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -247,24 +351,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: colorScheme.outlineVariant),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildInfoRow(
-                            context,
-                            'Negocio',
-                            businessName.isEmpty
-                                ? 'No configurado'
-                                : businessName,
+                      child: _buildInfoRow(
+                        context,
+                        'Negocio activo',
+                        businessName.isEmpty
+                            ? 'No configurado'
+                            : businessName,
+                      ),
+                    );
+                  },
+                ),
+                FutureBuilder<List<MerchantAccessOption>>(
+                  future: _accessOptionsFuture,
+                  builder: (context, snapshot) {
+                    final options = snapshot.data ?? const [];
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox.shrink();
+                    }
+                    // Only Parche (or any future multi-menu account) sees this.
+                    if (options.length < 2) return const SizedBox.shrink();
+
+                    final currentId = SupabaseConfig.currentComercioId;
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: colorScheme.outlineVariant,
                           ),
-                          _buildInfoRow(
-                            context,
-                            'Comercio activo',
-                            SupabaseConfig.currentComercioId.isEmpty
-                                ? 'No definido'
-                                : SupabaseConfig.currentComercioId,
-                          ),
-                        ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tus menús',
+                              style: GoogleFonts.manrope(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _switchingAccess
+                                  ? 'Cambiando de menú...'
+                                  : 'Toca otro menú para administrarlo.',
+                              style: GoogleFonts.manrope(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            for (var i = 0; i < options.length; i++) ...[
+                              if (i > 0) const SizedBox(height: 8),
+                              _buildMenuOptionTile(
+                                option: options[i],
+                                selected:
+                                    options[i].comercioId == currentId,
+                                enabled: !_switchingAccess && !_signingOut,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -320,14 +472,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '© elmenuxfa.com · v$_appVersion',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.manrope(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: FutureBuilder<String>(
+                      future: _versionLabelFuture,
+                      builder: (context, snapshot) {
+                        final version = snapshot.data?.trim() ?? '';
+                        final label = version.isEmpty
+                            ? '© elmenuxfa.com'
+                            : '© elmenuxfa.com · $version';
+                        return Text(
+                          label,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

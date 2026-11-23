@@ -4,6 +4,8 @@ import {
   DEFAULT_KIOSK_HOME_CONFIG,
   parseKioskHomeConfig,
   kioskHomeConfigToJson,
+  isCatalogModeQueryValue,
+  shouldForceCatalogModeFromQuery,
 } from '../app/_lib/kiosk-home-config';
 
 describe('kiosk home config', () => {
@@ -84,4 +86,26 @@ describe('kiosk home config', () => {
       verMetodosPago: false,
     });
   });
+
+  it('accepts mesa QR catalog query values without forcing others', () => {
+    expect(isCatalogModeQueryValue('1')).toBe(true);
+    expect(isCatalogModeQueryValue('true')).toBe(true);
+    expect(isCatalogModeQueryValue('catalogo')).toBe(true);
+    expect(isCatalogModeQueryValue('0')).toBe(false);
+    expect(isCatalogModeQueryValue(null)).toBe(false);
+    expect(shouldForceCatalogModeFromQuery({ catalogo: '1' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ qr: '1' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ src: 'qr' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ source: 'qr' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ src: 'qr_code' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ modo: 'catalogo' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ modo: 'catalog' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ modo: 'qr' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ catalogo: '0' })).toBe(false);
+    expect(shouldForceCatalogModeFromQuery({ qr: '0' })).toBe(false);
+    expect(shouldForceCatalogModeFromQuery({ src: 'web' })).toBe(false);
+    expect(shouldForceCatalogModeFromQuery({})).toBe(false);
+  });
 });
+
+

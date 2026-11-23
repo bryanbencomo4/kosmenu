@@ -2,14 +2,20 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 
+import { kitCheckoutHref } from '../app/_lib/public-site-config';
 import { SubscriptionBillingTabs } from './SubscriptionBillingTabs';
 
 type PricingSectionProps = {
   signupHref: string;
   supportHref: string;
+  kitHref?: string;
 };
 
-export function PricingSection({ signupHref, supportHref }: PricingSectionProps) {
+export function PricingSection({
+  signupHref,
+  supportHref,
+  kitHref = kitCheckoutHref,
+}: PricingSectionProps) {
   return (
     <section
       id="kit"
@@ -46,21 +52,31 @@ export function PricingSection({ signupHref, supportHref }: PricingSectionProps)
               ¿Necesitas más mesas?
             </h3>
             <p className="mt-2 text-[0.92rem] leading-6 text-slate-300/90">
-              Agrega portamenús extra cuando tu restaurante crezca.
+              Agrega portamenús extra cuando tu restaurante crezca. Envío por Zoom; el flete lo
+              pagas al retirar (1–2 días hábiles).
             </p>
             <p className="mt-4 font-[var(--font-display)] text-[2.2rem] font-black leading-none tracking-[-0.04em] text-[#FACC15]">
               +$2.50
               <span className="ml-2 text-[1rem] font-semibold tracking-normal text-white">c/u</span>
             </p>
             <Link
-              href={supportHref}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={kitHref}
               className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#FDE68A] transition hover:text-white"
             >
-              Pedir portamenús extra
+              Pedir extras / envío Zoom
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
+            <p className="mt-2 text-xs text-slate-500">
+              ¿Dudas?{' '}
+              <Link
+                href={supportHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-white/20 underline-offset-2 hover:text-slate-300"
+              >
+                WhatsApp soporte
+              </Link>
+            </p>
           </div>
           <div className="relative border-t border-white/8 px-5 py-5 sm:border-l sm:border-t-0">
             <div className="relative mx-auto aspect-[3/4] w-full max-w-[9.5rem]">

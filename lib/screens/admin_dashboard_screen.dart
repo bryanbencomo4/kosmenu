@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:fl_chart/fl_chart.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,16 +25,22 @@ import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/business_hours_screen.dart';
+import 'package:kosmenu_app/screens/account_settings_screen.dart';
 import 'package:kosmenu_app/screens/comercio_staff_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/merchant_client_profile_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
+import 'package:kosmenu_app/screens/chat_conversations_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
+import 'package:kosmenu_app/services/merchant_shell_history.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/screens/delivery_settings_screen.dart';
 import 'package:kosmenu_app/screens/kiosk_home_settings_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
+import 'package:kosmenu_app/utils/merchant_business_day.dart';
+import 'package:kosmenu_app/utils/merchant_sales_money.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
@@ -85,6 +94,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   Set<String> _seenOrderIds = <String>{};
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
 
+  /// Ids removed by hard-delete so paginated Pedidos caches drop them
+  /// immediately even before realtime catches up.
+  final Set<String> _purgedOrderIds = <String>{};
+
   /// Orders for the selected sales range (plus today), fetched on demand so
   /// the realtime stream only has to carry the most recent orders.
   List<PedidoModel> _metricsOrders = const <PedidoModel>[];
@@ -105,8 +118,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   int _ordersReconnectAttempts = 0;
   bool _isRecoveringOrdersAuth = false;
   bool _isRestartingOrdersStream = false;
-  _SalesRange _selectedSalesRange = _SalesRange.today;
+  _SalesRange _selectedSalesRange = _SalesRange.lastWeek;
   DateTimeRange? _customSalesRange;
+  /// `all` | `usd_estimate` | currency code (COP, VES, USD…)
+  String _chartCurrencyFilter = 'all';
+  /// Business primary currency (`comercios.moneda`), used for converted totals.
+  String _businessCurrency = 'COP';
+  /// Units of each currency per 1 USD (business + market), same as admin.
+  Map<String, double> _unitsPerUsd = const <String, double>{};
+  MerchantOrdersSeedFilter? _ordersSeedFilter;
+  int _ordersSeedRevision = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   final GlobalKey _salesSectionKey = GlobalKey();
@@ -116,8 +137,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   bool _sidebarCollapsed = false;
   MerchantNavDestination _selectedNav = MerchantNavDestination.home;
   bool _shellHasPushedRoute = false;
+  int _contentOverlayDepth = 0;
   ComercioModel? _cachedComercio;
-  late final NavigatorObserver _contentNavObserver;
+  late NavigatorObserver _contentNavObserver;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
@@ -125,17 +147,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _DashboardSnapshot? dashboardData,
     double screenWidth,
   ) {
-    return dashboardData != null &&
-        screenWidth < 720 &&
-        _selectedNav == MerchantNavDestination.home &&
-        !_shellHasPushedRoute;
+    if (dashboardData == null ||
+        _selectedNav != MerchantNavDestination.home ||
+        _shellHasPushedRoute) {
+      return false;
+    }
+    // Mesero: always show (phone + tablet/web) — it's their only job.
+    if (MerchantSession.isMesero) return true;
+    // Existing restaurants: keep the mobile FAB for every staff role.
+    return screenWidth < 720;
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _contentNavObserver = _DashboardContentNavObserver(_syncShellStack);
+    _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
+    MerchantShellHistory.attach(onLocation: _onBrowserLocation);
+    _restoreNavFromBrowserRoute();
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
@@ -146,8 +175,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     unawaited(_refreshBillingGate());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openPendingMerchantOrder());
+      unawaited(_openPendingChatConversation());
       unawaited(_loadMetricsOrders());
       unawaited(_loadTotalOrdersCount());
+      // Normalize `/` → `/panel` (or keep deep link) without creating a Back trap.
+      _syncBrowserHistory(push: false);
     });
   }
 
@@ -270,6 +302,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   @override
   void dispose() {
+    MerchantShellHistory.detach();
     WidgetsBinding.instance.removeObserver(this);
     _ordersSubscription?.cancel();
     _authStateSubscription?.cancel();
@@ -293,7 +326,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
     final client = Supabase.instance.client;
     final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
+    final todayWindow = merchantTodayBusinessWindow(now);
+    final todayStart = todayWindow.startInclusive;
     final yesterdayStart = todayStart.subtract(const Duration(days: 1));
     final comercioFuture = client
         .from('comercios')
@@ -317,10 +351,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       },
     );
     final analyticsFuture = _loadAnalytics(client);
+    final marketRatesFuture = () async {
+      try {
+        return await client
+            .from('global_market_rates')
+            .select('bcv_rate, p2p_binance_rate, payload')
+            .order('updated_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+      } catch (_) {
+        return null;
+      }
+    }();
     final yesterdayOrdersFuture = client
         .from('pedidos')
-        .select('id, comercio_id, total, detalles, estado, created_at')
+        .select(
+          'id, comercio_id, total, detalles, estado, created_at, archived_at',
+        )
         .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .filter('archived_at', 'is', null)
         .gte('created_at', yesterdayStart.toIso8601String())
         .lt('created_at', todayStart.toIso8601String());
 
@@ -331,7 +380,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       creditsFuture,
       yesterdayOrdersFuture,
       analyticsFuture,
-    ]);
+      marketRatesFuture,
+    ]).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw TimeoutException(
+        'El panel tardó demasiado en cargar. Reintenta.',
+      ),
+    );
 
     final comercio = ComercioModel.fromMap(
       Map<String, dynamic>.from(
@@ -391,6 +446,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final comercioRow = Map<String, dynamic>.from(
       (results[0] as Map?) ?? const <String, dynamic>{},
     );
+    final marketRow = results[6] is Map
+        ? Map<String, dynamic>.from(results[6] as Map)
+        : null;
+    _unitsPerUsd = resolveMerchantUnitsPerUsd(
+      comercioRow: comercioRow,
+      marketRow: marketRow,
+    );
+    final rawMoneda = normalizeMerchantCurrency(
+      comercioRow['moneda']?.toString(),
+      fallback: 'COP',
+    );
+    _businessCurrency = rawMoneda.isEmpty ? 'COP' : rawMoneda;
     final hasLocation =
         comercioRow['latitud'] != null ||
         comercioRow['longitud'] != null ||
@@ -452,7 +519,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       }
     }
 
-    _latestOrders = orders;
+    _latestOrders = _purgedOrderIds.isEmpty
+        ? orders
+        : orders
+              .where((order) => !_purgedOrderIds.contains(order.id))
+              .toList(growable: false);
     _ordersPublishTimer ??= Timer(const Duration(milliseconds: 250), () {
       _ordersPublishTimer = null;
       if (!mounted) return;
@@ -469,7 +540,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       );
       _bumpShell();
     });
-    final validOrders = orders.where((order) => !order.hasParseError);
+    final validOrders = _latestOrders.where((order) => !order.hasParseError);
     final currentIds = validOrders.map((e) => e.id).toSet();
 
     if (!_didPrimeOrderAlert) {
@@ -689,31 +760,119 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return count < live.length ? live.length : count;
   }
 
+  Map<String, dynamic>? _asStringKeyedMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, item) => MapEntry('$key', item));
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(trimmed);
+        return _asStringKeyedMap(decoded);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
   Future<MenuAnalyticsSummary> _loadAnalytics(SupabaseClient client) async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return const MenuAnalyticsSummary();
+
     try {
       final payload = await client.rpc(
         'get_menu_analytics_summary',
-        params: {
-          'p_comercio_id': SupabaseConfig.currentComercioId,
-          'p_days': 30,
-        },
+        params: {'p_comercio_id': comercioId, 'p_days': 30},
       );
-      if (payload is Map) {
-        return MenuAnalyticsSummary.fromMap(Map<String, dynamic>.from(payload));
+      final map = _asStringKeyedMap(payload);
+      if (map != null) {
+        final summary = MenuAnalyticsSummary.fromMap(map);
+        if (summary.hasTraffic || summary.orders > 0) return summary;
       }
-    } catch (_) {}
-    return const MenuAnalyticsSummary();
+    } catch (error) {
+      debugPrint('menu analytics rpc failed: $error');
+    }
+
+    try {
+      return await _loadAnalyticsFallback(client, comercioId);
+    } catch (error) {
+      debugPrint('menu analytics fallback failed: $error');
+      return const MenuAnalyticsSummary();
+    }
   }
 
-  Uri _ownerPreviewUri(ComercioModel comercio) {
-    final identifier = (comercio.slug ?? '').trim().isNotEmpty
-        ? comercio.slug!.trim()
-        : comercio.id.trim();
-    final token =
-        Supabase.instance.client.auth.currentSession?.accessToken ?? '';
-    return AppLinks.ownerMenuPreviewUri(
-      comercioId: identifier,
-      accessToken: token,
+  /// Lightweight client-side summary when the RPC is unavailable so Visitas
+  /// still populate without pulling full event payloads.
+  Future<MenuAnalyticsSummary> _loadAnalyticsFallback(
+    SupabaseClient client,
+    String comercioId,
+  ) async {
+    final since = DateTime.now().toUtc().subtract(const Duration(days: 30));
+    final rows = await client
+        .from('menu_analytics_events')
+        .select('event_type, created_at')
+        .eq('comercio_id', comercioId)
+        .gte('created_at', since.toIso8601String())
+        .limit(5000);
+
+    var visits = 0;
+    var scans = 0;
+    var productViews = 0;
+    var addToCart = 0;
+    var checkouts = 0;
+    final now = DateTime.now().toUtc();
+    final todayEnd = merchantBusinessDayEndExclusive(now);
+    final dayKeys = List<String>.generate(7, (index) {
+      final start = todayEnd.subtract(Duration(days: 7 - index));
+      final label = merchantBusinessDayLabelDate(start);
+      return '${label.year.toString().padLeft(4, '0')}-'
+          '${label.month.toString().padLeft(2, '0')}-'
+          '${label.day.toString().padLeft(2, '0')}';
+    });
+    final visitsByDay = List<int>.filled(7, 0);
+
+    for (final raw in rows as List<dynamic>) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final type = '${row['event_type'] ?? ''}';
+      switch (type) {
+        case 'menu_view':
+          visits += 1;
+          break;
+        case 'qr_scan':
+          scans += 1;
+          break;
+        case 'product_view':
+          productViews += 1;
+          break;
+        case 'add_to_cart':
+          addToCart += 1;
+          break;
+        case 'checkout_started':
+          checkouts += 1;
+          break;
+      }
+      if (type != 'menu_view') continue;
+      final created = DateTime.tryParse('${row['created_at'] ?? ''}');
+      if (created == null) continue;
+      final label = merchantBusinessDayLabelDate(created);
+      final key =
+          '${label.year.toString().padLeft(4, '0')}-'
+          '${label.month.toString().padLeft(2, '0')}-'
+          '${label.day.toString().padLeft(2, '0')}';
+      final index = dayKeys.indexOf(key);
+      if (index >= 0) visitsByDay[index] += 1;
+    }
+
+    return MenuAnalyticsSummary(
+      visits: visits,
+      scans: scans,
+      productViews: productViews,
+      addToCart: addToCart,
+      checkouts: checkouts,
+      visitsByDay: visitsByDay,
     );
   }
 
@@ -746,6 +905,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Future<void> _openStaff() async {
     await _pushInShell(const ComercioStaffScreen());
+  }
+
+  Future<void> _openAccount() async {
+    await _pushInShell(const AccountSettingsScreen());
   }
 
   Future<void> _openKioskHome() async {
@@ -829,6 +992,46 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  Future<void> _openPendingChatConversation() async {
+    final conversationId = MerchantDeepLink.peekConversation();
+    if (conversationId == null || conversationId.isEmpty || !mounted) {
+      return;
+    }
+    final deepComercio =
+        (MerchantDeepLink.peekConversationComercioId() ?? '').trim();
+    final comercioId =
+        deepComercio.isNotEmpty
+            ? deepComercio
+            : SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+    MerchantDeepLink.consumeConversation();
+    await _openChatConversations(
+      initialConversationId: conversationId,
+      comercioIdOverride: deepComercio.isNotEmpty ? deepComercio : null,
+    );
+  }
+
+  Future<void> _openChatConversations({
+    String? initialConversationId,
+    String? comercioIdOverride,
+  }) async {
+    final comercioId =
+        (comercioIdOverride ?? SupabaseConfig.currentComercioId).trim();
+    if (comercioId.isEmpty || !mounted) return;
+    if (!MerchantSession.isAdmin &&
+        MerchantSession.role != MerchantStaffRole.caja &&
+        MerchantSession.role != MerchantStaffRole.marketing) {
+      _showInfo(MerchantSession.deniedMessage('abrir conversaciones'));
+      return;
+    }
+    await _pushInShell(
+      ChatConversationsScreen(
+        comercioId: comercioId,
+        initialConversationId: initialConversationId,
+      ),
+    );
+  }
+
   Future<void> _openOrderDetail(PedidoModel pedido) async {
     final orderId = pedido.orderId;
     if (orderId == null || orderId.trim().isEmpty) {
@@ -851,8 +1054,184 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         initialPedido: pedido.items.isEmpty ? null : pedido,
         initialComercioNombre: comercio?.nombre,
         initialBusinessLogoUrl: comercio?.logoUrl,
+        onArchiveChanged: (archived) async {
+          await _toggleOrderArchive(pedido, archive: archived);
+        },
+        onDeletePermanent: () => _deleteArchivedOrder(pedido),
       ),
     );
+  }
+
+  List<PedidoModel> _withReplacedOrder(
+    List<PedidoModel> source,
+    PedidoModel updated,
+  ) {
+    final next = <PedidoModel>[];
+    var found = false;
+    for (final order in source) {
+      if (order.id == updated.id) {
+        next.add(updated);
+        found = true;
+      } else {
+        next.add(order);
+      }
+    }
+    if (!found) next.insert(0, updated);
+    return next;
+  }
+
+  void _applyOptimisticOrderUpdate(PedidoModel updated) {
+    _purgedOrderIds.remove(updated.id);
+    _latestOrders = _withReplacedOrder(_latestOrders, updated);
+    if (updated.isArchived) {
+      _metricsOrders = _metricsOrders
+          .where((order) => order.id != updated.id)
+          .toList(growable: false);
+      final clients = _clientOrders;
+      if (clients != null) {
+        _clientOrders = clients
+            .where((order) => order.id != updated.id)
+            .toList(growable: false);
+      }
+      if (_totalOrdersCount != null && _totalOrdersCount! > 0) {
+        _totalOrdersCount = _totalOrdersCount! - 1;
+      }
+    } else {
+      _metricsOrders = _withReplacedOrder(_metricsOrders, updated);
+      _clientOrders = null;
+      if (_totalOrdersCount != null) {
+        _totalOrdersCount = _totalOrdersCount! + 1;
+      }
+    }
+    _bumpShell();
+  }
+
+  void _applyOptimisticOrderRemoval(String orderId, {required bool wasArchived}) {
+    _purgedOrderIds.add(orderId);
+    _latestOrders = _latestOrders
+        .where((order) => order.id != orderId)
+        .toList(growable: false);
+    _metricsOrders = _metricsOrders
+        .where((order) => order.id != orderId)
+        .toList(growable: false);
+    final clients = _clientOrders;
+    if (clients != null) {
+      _clientOrders = clients
+          .where((order) => order.id != orderId)
+          .toList(growable: false);
+    }
+    if (!wasArchived && _totalOrdersCount != null && _totalOrdersCount! > 0) {
+      _totalOrdersCount = _totalOrdersCount! - 1;
+    }
+    _bumpShell();
+  }
+
+  Future<void> _toggleOrderArchive(
+    PedidoModel pedido, {
+    required bool archive,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(archive ? 'Archivar pedido' : 'Recuperar pedido'),
+        content: Text(
+          archive
+              ? 'El pedido saldrá de la lista activa y no contará en las finanzas. Puedes recuperarlo después desde Archivados.'
+              : 'El pedido volverá a la lista activa y contará otra vez en las finanzas.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(archive ? 'Archivar' : 'Recuperar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final updated = await MerchantOrdersRepository.setArchived(
+        pedidoId: pedido.id,
+        archived: archive,
+      );
+      if (!mounted) return;
+      _applyOptimisticOrderUpdate(updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archive
+                ? 'Pedido archivado. Ya no cuenta en finanzas.'
+                : 'Pedido recuperado.',
+          ),
+        ),
+      );
+      unawaited(_loadMetricsOrders());
+      unawaited(_loadTotalOrdersCount());
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archive
+                ? 'No se pudo archivar el pedido. Intenta de nuevo.'
+                : 'No se pudo recuperar el pedido. Intenta de nuevo.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteArchivedOrder(PedidoModel pedido) async {
+    if (!pedido.isArchived) return;
+    final orderLabel = (pedido.orderId ?? pedido.id).trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar permanentemente'),
+        content: Text(
+          'Se borrará el pedido $orderLabel y no se podrá recuperar. '
+          'Esta acción es definitiva.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB91C1C),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await MerchantOrdersRepository.deleteArchived(pedidoId: pedido.id);
+      if (!mounted) return;
+      _applyOptimisticOrderRemoval(pedido.id, wasArchived: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pedido eliminado permanentemente.')),
+      );
+      unawaited(_loadMetricsOrders());
+      unawaited(_loadTotalOrdersCount());
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se pudo eliminar. Solo el administrador puede borrar archivados.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<ComercioModel> _resolveCurrentComercio() async {
@@ -908,12 +1287,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Future<void> _openAssistedPublicMenu(ComercioModel comercio) async {
+    // Same Next.js public menu clients use (elmenuxfa.com/v/...), with waiter mode.
     final baseUrl = _buildPublicUrl(comercio).trim();
     if (baseUrl.isEmpty) {
       _showInfo('No hay una URL pública disponible para este comercio.');
       return;
     }
-
     final uri = Uri.parse(baseUrl);
     final assistedUri = uri.replace(
       queryParameters: <String, String>{
@@ -922,12 +1301,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         'source': 'dashboard',
       },
     );
-
     final launched = await launchUrl(
       assistedUri,
-      mode: LaunchMode.externalApplication,
+      mode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.inAppBrowserView,
     );
-
     if (!launched && mounted) {
       _showInfo('No se pudo abrir el menú de venta asistida.');
     }
@@ -1149,8 +1528,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           behavior: SnackBarBehavior.floating,
           content: Text(
             value
-                ? 'Negocio en línea y aceptando pedidos.'
-                : 'Negocio pausado para nuevos pedidos.',
+                ? 'Menú visible al público y aceptando pedidos.'
+                : 'Menú oculto al público. No acepta nuevos pedidos.',
           ),
         ),
       );
@@ -1223,6 +1602,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Future<void> _refreshBillingGate() async {
+    // Staff without billing access must never see owner paywall / plan prompts.
+    if (!MerchantSession.canManageBilling) {
+      if (!mounted) return;
+      setState(() {
+        _requiresPaymentToPublish = false;
+        _didLoadBillingGate = true;
+      });
+      return;
+    }
     try {
       // If payment completed on Zeno but webhook never arrived, activate now.
       var snap = await const BillingService().loadSnapshot();
@@ -1254,14 +1642,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _selectNav(MerchantNavDestination.plan);
   }
 
-  DateTime _startOfDay(DateTime date) =>
-      DateTime(date.year, date.month, date.day);
+  /// Sales "day" boundary: midnight America/Caracas (not device-local).
+  DateTime _startOfDay(DateTime date) => merchantBusinessDayStart(date);
 
   DateTime _endOfDayExclusive(DateTime date) =>
-      DateTime(date.year, date.month, date.day + 1);
+      merchantBusinessDayEndExclusive(date);
 
   DateTime _subtractFromToday(int days) =>
-      _startOfDay(DateTime.now()).subtract(Duration(days: days));
+      merchantTodayBusinessWindow().startInclusive.subtract(Duration(days: days));
 
   String _monthShortEs(int month) {
     const names = <String>[
@@ -1302,9 +1690,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return '$day ${_monthShortEs(date.month)}';
   }
 
+  /// Week-scale axis: Caracas weekday (Lun..Dom), never device-local weekday.
+  String _weekChartDateLabel(DateTime caracasLabelDate) {
+    return caracasWeekdayShort(caracasLabelDate);
+  }
+
   String _fullChartDateLabel(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
-    return '$day ${_monthShortEs(date.month)}';
+    return '${caracasWeekdayShort(date)} $day ${_monthShortEs(date.month)}';
   }
 
   String _hourAxisLabel(int hour) => hour.toString().padLeft(2, '0');
@@ -1389,7 +1782,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final now = DateTime.now();
     final todayStart = _startOfDay(now);
     final tomorrow = _endOfDayExclusive(now);
-    final currentMonthStart = DateTime(todayStart.year, todayStart.month);
+    final labelToday = merchantBusinessDayLabelDate(now);
+    final currentMonthStart = merchantBusinessDayStartForLabel(
+      DateTime(labelToday.year, labelToday.month, 1),
+    );
 
     switch (_selectedSalesRange) {
       case _SalesRange.today:
@@ -1441,9 +1837,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         final knownEarliest = _earliestOrderAt;
         DateTime? earliest = knownEarliest == null
             ? null
-            : _startOfDay(knownEarliest.toLocal());
+            : _startOfDay(knownEarliest.toUtc());
         for (final order in orders) {
-          final created = order.createdAt?.toLocal();
+          final created = order.createdAt?.toUtc();
           if (created == null) continue;
           final day = _startOfDay(created);
           if (earliest == null || day.isBefore(earliest)) {
@@ -1462,9 +1858,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             endExclusive: tomorrow,
           );
         }
+        final startLabel = DateTime(
+          custom.start.year,
+          custom.start.month,
+          custom.start.day,
+        );
+        final endLabel = DateTime(
+          custom.end.year,
+          custom.end.month,
+          custom.end.day,
+        );
         return _SalesRangeWindow(
-          startInclusive: _startOfDay(custom.start),
-          endExclusive: _endOfDayExclusive(custom.end),
+          startInclusive: merchantBusinessDayStartForLabel(startLabel),
+          endExclusive: merchantBusinessDayEndForLabel(endLabel),
         );
     }
   }
@@ -1476,35 +1882,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return double.tryParse(raw.replaceAll(',', '.')) ?? 0;
   }
 
-  double _resolvePedidoTotal(PedidoModel pedido) {
-    final direct = pedido.total;
-    if (direct != null && direct > 0) return direct;
-
-    final detalles = pedido.detalles;
-    final resumenRaw = detalles['resumen'];
-    final resumen = resumenRaw is Map
-        ? Map<String, dynamic>.from(resumenRaw)
-        : const <String, dynamic>{};
-
-    final candidates = <dynamic>[
-      detalles['total'],
-      detalles['total_pedido'],
-      detalles['monto_total'],
-      detalles['amount_total'],
-      resumen['total'],
-      resumen['monto_total'],
-    ];
-
-    for (final candidate in candidates) {
-      final parsed = _toDoubleSafe(candidate);
-      if (parsed > 0) return parsed;
+  Color _merchantCurrencyColor(String currency) {
+    switch (normalizeMerchantCurrency(currency)) {
+      case 'USD':
+        return const Color(0xFF059669);
+      case 'EUR':
+        return const Color(0xFFDB2777);
+      case 'COP':
+        return const Color(0xFF2563EB);
+      case 'VES':
+        return const Color(0xFFD97706);
+      default:
+        return const Color(0xFF64748B);
     }
+  }
 
-    final itemsTotal = pedido.items.fold<double>(
-      0,
-      (sum, item) => sum + item.total,
+  void _accumulateOrderIntoBucket(
+    PedidoModel pedido, {
+    required Map<String, double> byCurrency,
+    required void Function(double usd) addUsd,
+    required void Function() addOrder,
+  }) {
+    final money = extractMerchantOrderMoney(
+      pedido,
+      unitsPerUsd: _unitsPerUsd,
     );
-    return itemsTotal > 0 ? itemsTotal : 0;
+    if (money.amount <= 0) return;
+    addOrder();
+    byCurrency[money.currency] = (byCurrency[money.currency] ?? 0) + money.amount;
+    final usd = money.usdEstimate;
+    if (usd != null && usd > 0) addUsd(usd);
   }
 
   _SalesHistorySeries _buildSalesHistoryForSelectedRange(
@@ -1512,119 +1919,209 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   ) {
     final window = _resolveSalesRangeWindow(orders);
     final filtered = orders
+        .where((pedido) => !pedido.isArchived)
         .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
         .where((pedido) => window.contains(pedido.createdAt))
         .toList(growable: false);
 
+    List<_SalesHistoryPoint> points;
+
     if (_selectedSalesRange == _SalesRange.today ||
         _selectedSalesRange == _SalesRange.yesterday) {
       final dayStart = window.startInclusive;
-      final values = List<double>.filled(24, 0);
-      final labels = List<String>.generate(24, _hourAxisLabel);
-      final tooltipLabels = List<String>.generate(
-        24,
-        (hour) => _hourTooltipLabel(dayStart, hour),
-      );
-
-      for (final pedido in filtered) {
-        final createdAt = pedido.createdAt?.toLocal();
-        if (createdAt == null) continue;
-        values[createdAt.hour] += _resolvePedidoTotal(pedido);
-      }
-
-      return _SalesHistorySeries(
-        values: values,
-        labels: labels,
-        tooltipLabels: tooltipLabels,
-      );
-    }
-
-    final spanDays = window.endExclusive
-        .difference(window.startInclusive)
-        .inDays;
-
-    if (spanDays <= 31) {
-      final values = <double>[];
-      final labels = <String>[];
-      final tooltipLabels = <String>[];
-
-      var cursor = window.startInclusive;
-      DateTime? previousBucketStart;
-      while (cursor.isBefore(window.endExclusive)) {
-        final bucketEnd = cursor.add(const Duration(days: 1));
-
-        final total = filtered.fold<double>(0, (sum, pedido) {
-          final created = pedido.createdAt?.toLocal();
-          if (created == null) return sum;
-          if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
-            return sum;
+      final dayEnd = window.endExclusive;
+      final labelDay = merchantBusinessDayLabelDate(dayStart);
+      points = List<_SalesHistoryPoint>.generate(24, (hour) {
+        final bucketStart = dayStart.add(Duration(hours: hour));
+        final bucketEnd = bucketStart.add(const Duration(hours: 1));
+        final byCurrency = <String, double>{};
+        var usd = 0.0;
+        var orderCount = 0;
+        for (final pedido in filtered) {
+          final createdAt = pedido.createdAt;
+          if (createdAt == null) continue;
+          if (createdAt.isBefore(bucketStart) ||
+              !createdAt.isBefore(bucketEnd)) {
+            continue;
           }
-          return sum + _resolvePedidoTotal(pedido);
-        });
-
-        values.add(total);
-        labels.add(
-          _compactChartDateLabel(cursor, previous: previousBucketStart),
-        );
-        tooltipLabels.add(_fullChartDateLabel(cursor));
-        previousBucketStart = cursor;
-        cursor = bucketEnd;
-      }
-
-      return _SalesHistorySeries(
-        values: values,
-        labels: labels,
-        tooltipLabels: tooltipLabels,
-      );
-    }
-
-    final monthStarts = <DateTime>[];
-    var monthCursor = DateTime(
-      window.startInclusive.year,
-      window.startInclusive.month,
-    );
-    final monthEnd = DateTime(
-      window.endExclusive.year,
-      window.endExclusive.month,
-    );
-    while (!monthCursor.isAfter(monthEnd)) {
-      monthStarts.add(monthCursor);
-      monthCursor = DateTime(monthCursor.year, monthCursor.month + 1);
-    }
-
-    final desiredBuckets = monthStarts.length <= 12 ? monthStarts.length : 12;
-    final groupSize = (monthStarts.length / desiredBuckets).ceil();
-    final values = <double>[];
-    final labels = <String>[];
-    final tooltipLabels = <String>[];
-
-    for (var i = 0; i < monthStarts.length; i += groupSize) {
-      final bucketStart = monthStarts[i];
-      final nextIndex = (i + groupSize) < monthStarts.length
-          ? i + groupSize
-          : monthStarts.length;
-      final bucketEnd = nextIndex < monthStarts.length
-          ? monthStarts[nextIndex]
-          : window.endExclusive;
-
-      final total = filtered.fold<double>(0, (sum, pedido) {
-        final created = pedido.createdAt?.toLocal();
-        if (created == null) return sum;
-        if (created.isBefore(bucketStart) || !created.isBefore(bucketEnd)) {
-          return sum;
+          _accumulateOrderIntoBucket(
+            pedido,
+            byCurrency: byCurrency,
+            addUsd: (v) => usd += v,
+            addOrder: () => orderCount += 1,
+          );
         }
-        return sum + _resolvePedidoTotal(pedido);
+        final caracasHour =
+            bucketStart.toUtc().add(kCaracasOffsetFromUtc).hour;
+        return _SalesHistoryPoint(
+          label: _hourAxisLabel(caracasHour),
+          tooltipLabel: _hourTooltipLabel(labelDay, caracasHour),
+          orderCount: orderCount,
+          byCurrency: byCurrency,
+          usdEstimate: usd,
+          startInclusive: dayStart,
+          endExclusive: dayEnd,
+        );
       });
+    } else {
+      final spanDays = window.endExclusive
+          .difference(window.startInclusive)
+          .inDays;
 
-      values.add(total);
-      labels.add(_monthShortEs(bucketStart.month));
-      tooltipLabels.add(_fullChartDateLabel(bucketStart));
+      if (spanDays <= 31) {
+        points = <_SalesHistoryPoint>[];
+        var cursor = window.startInclusive.toUtc();
+        final endExclusive = window.endExclusive.toUtc();
+        DateTime? previousLabelDate;
+        final useWeekdayLabels = spanDays <= 7;
+        while (cursor.isBefore(endExclusive)) {
+          final bucketEnd = cursor.add(const Duration(days: 1));
+          final labelDate = merchantBusinessDayLabelDate(cursor);
+          final byCurrency = <String, double>{};
+          var usd = 0.0;
+          var orderCount = 0;
+          for (final pedido in filtered) {
+            final created = pedido.createdAt?.toUtc();
+            if (created == null) continue;
+            if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
+              continue;
+            }
+            _accumulateOrderIntoBucket(
+              pedido,
+              byCurrency: byCurrency,
+              addUsd: (v) => usd += v,
+              addOrder: () => orderCount += 1,
+            );
+          }
+          points.add(
+            _SalesHistoryPoint(
+              label: useWeekdayLabels
+                  ? _weekChartDateLabel(labelDate)
+                  : _compactChartDateLabel(
+                      labelDate,
+                      previous: previousLabelDate,
+                    ),
+              tooltipLabel: _fullChartDateLabel(labelDate),
+              orderCount: orderCount,
+              byCurrency: byCurrency,
+              usdEstimate: usd,
+              startInclusive: cursor,
+              endExclusive: bucketEnd,
+            ),
+          );
+          previousLabelDate = labelDate;
+          cursor = bucketEnd;
+        }
+      } else {
+        final startUtc = window.startInclusive.toUtc();
+        final endUtc = window.endExclusive.toUtc();
+        final startWall = caracasWall(startUtc);
+        final endWall = caracasWall(
+          endUtc.subtract(const Duration(milliseconds: 1)),
+        );
+        final monthStarts = <DateTime>[];
+        var monthCursor = DateTime.utc(startWall.year, startWall.month, 1);
+        final monthEnd = DateTime.utc(endWall.year, endWall.month, 1);
+        while (!monthCursor.isAfter(monthEnd)) {
+          monthStarts.add(monthCursor);
+          monthCursor = DateTime.utc(monthCursor.year, monthCursor.month + 1);
+        }
+
+        final desiredBuckets =
+            monthStarts.length <= 12 ? monthStarts.length : 12;
+        final groupSize = (monthStarts.length / desiredBuckets).ceil();
+        points = <_SalesHistoryPoint>[];
+
+        for (var i = 0; i < monthStarts.length; i += groupSize) {
+          final labelMonth = monthStarts[i];
+          final bucketStart = merchantBusinessDayStartForLabel(labelMonth);
+          final nextIndex = (i + groupSize) < monthStarts.length
+              ? i + groupSize
+              : monthStarts.length;
+          final bucketEnd = nextIndex < monthStarts.length
+              ? merchantBusinessDayStartForLabel(monthStarts[nextIndex])
+              : endUtc;
+
+          final byCurrency = <String, double>{};
+          var usd = 0.0;
+          var orderCount = 0;
+          for (final pedido in filtered) {
+            final created = pedido.createdAt?.toUtc();
+            if (created == null) continue;
+            if (created.isBefore(bucketStart) ||
+                !created.isBefore(bucketEnd)) {
+              continue;
+            }
+            _accumulateOrderIntoBucket(
+              pedido,
+              byCurrency: byCurrency,
+              addUsd: (v) => usd += v,
+              addOrder: () => orderCount += 1,
+            );
+          }
+          points.add(
+            _SalesHistoryPoint(
+              label: _monthShortEs(labelMonth.month),
+              tooltipLabel: _fullChartDateLabel(labelMonth),
+              orderCount: orderCount,
+              byCurrency: byCurrency,
+              usdEstimate: usd,
+              startInclusive: bucketStart,
+              endExclusive: bucketEnd,
+            ),
+          );
+        }
+      }
     }
+
+    final currencies = <String>{};
+    for (final point in points) {
+      currencies.addAll(point.byCurrency.keys);
+    }
+    final sortedCurrencies = currencies.toList()..sort();
 
     return _SalesHistorySeries(
-      values: values,
-      labels: labels,
-      tooltipLabels: tooltipLabels,
+      points: points,
+      currencies: sortedCurrencies,
+      preferredCurrency: _businessCurrency,
+      unitsPerUsd: _unitsPerUsd,
+    );
+  }
+
+  void _openOrdersForSalesPoint(_SalesHistoryPoint point) {
+    final start = point.startInclusive;
+    final endExclusive = point.endExclusive;
+    final endInclusive = endExclusive.subtract(const Duration(seconds: 1));
+    final currency = _chartCurrencyFilter;
+    // Primary / Todas / ≈USD show every checkout that day; only narrow when a
+    // specific non-primary checkout currency chip is active.
+    final seedCurrency =
+        currency == 'all' ||
+            currency == 'usd_estimate' ||
+            currency == _businessCurrency
+        ? null
+        : currency;
+    setState(() {
+      _ordersSeedRevision += 1;
+      _ordersSeedFilter = MerchantOrdersSeedFilter(
+        dateRange: DateTimeRange(start: start, end: endInclusive),
+        currency: seedCurrency,
+        revision: _ordersSeedRevision,
+      );
+    });
+    _selectNav(MerchantNavDestination.orders);
+  }
+
+  _SalesRangeWindow _resolvePreviousSalesRangeWindow(
+    _SalesRangeWindow current,
+  ) {
+    final duration = current.endExclusive.difference(current.startInclusive);
+    final safeDuration = duration.inMinutes <= 0
+        ? const Duration(days: 1)
+        : duration;
+    return _SalesRangeWindow(
+      startInclusive: current.startInclusive.subtract(safeDuration),
+      endExclusive: current.startInclusive,
     );
   }
 
@@ -1661,16 +2158,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return keys.length;
   }
 
-  bool _isOnLocalDay(DateTime? date, DateTime dayStart) {
-    if (date == null) return false;
-    final local = date.toLocal();
-    return !local.isBefore(dayStart) &&
-        local.isBefore(dayStart.add(const Duration(days: 1)));
-  }
-
   List<MerchantTopProduct> _topProducts(Iterable<PedidoModel> orders) {
     final counts = <String, ({int quantity, String? imageUrl})>{};
     for (final pedido in orders) {
+      if (pedido.isArchived) continue;
       if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
       for (final item in pedido.items) {
         final name = item.displayName.trim().isEmpty
@@ -1826,13 +2317,136 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _shellRevision.value++;
   }
 
-  void _syncShellStack() {
+  void _onContentStackChanged(int overlayDepth) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final pushed = _contentNavKey.currentState?.canPop() ?? false;
-      if (pushed == _shellHasPushedRoute) return;
-      setState(() => _shellHasPushedRoute = pushed);
+      // Trust canPop as source of truth after popUntil races.
+      final resolvedDepth = !pushed
+          ? 0
+          : (overlayDepth < 1 ? 1 : overlayDepth);
+      if (pushed == _shellHasPushedRoute &&
+          resolvedDepth == _contentOverlayDepth) {
+        // replaceState only — never history.go after a save/pop.
+        _syncBrowserHistory(push: false);
+        return;
+      }
+      final grew = resolvedDepth > _contentOverlayDepth;
+      setState(() {
+        _shellHasPushedRoute = pushed;
+        _contentOverlayDepth = resolvedDepth;
+      });
+      // Opening a real page (not a sheet) pushes a URL entry; closing/saving
+      // rewrites the current entry so it cannot fake a Back-to-Inicio.
+      _syncBrowserHistory(push: grew);
     });
+  }
+
+  MerchantShellRoute _currentShellRoute() {
+    return MerchantShellRoute.fromDestination(
+      _selectedNav.name,
+      stack: _contentOverlayDepth,
+    );
+  }
+
+  bool get _shellCanExit {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) return false;
+    if (_contentNavKey.currentState?.canPop() == true) return false;
+    if (_selectedNav != MerchantNavDestination.home) return false;
+    return true;
+  }
+
+  void _restoreNavFromBrowserRoute() {
+    if (!kIsWeb) return;
+    final route = MerchantShellHistory.current;
+    final dest = _destinationFromSection(route.section);
+    if (dest == null || dest == _selectedNav) return;
+    if (!MerchantSession.canOpen(dest)) return;
+    _selectedNav = dest;
+  }
+
+  MerchantNavDestination? _destinationFromSection(String section) {
+    for (final dest in MerchantNavDestination.values) {
+      if (dest.name == section) return dest;
+    }
+    return null;
+  }
+
+  bool _handleShellSystemBack() {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) {
+      Navigator.of(context).pop();
+      return true;
+    }
+    final nav = _contentNavKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+      if (_contentOverlayDepth > 0) {
+        _contentOverlayDepth -= 1;
+      }
+      if (!(nav.canPop())) {
+        _contentOverlayDepth = 0;
+        _shellHasPushedRoute = false;
+      }
+      return true;
+    }
+    if (_selectedNav != MerchantNavDestination.home) {
+      _applyNavFromBrowser(MerchantNavDestination.home);
+      return true;
+    }
+    return false;
+  }
+
+  /// Browser Back/Forward landed on a `/panel/...` URL — mirror it in the UI.
+  void _onBrowserLocation(MerchantShellRoute route) {
+    if (!mounted) return;
+
+    final nav = _contentNavKey.currentState;
+    var guard = 0;
+    while (nav != null &&
+        nav.canPop() &&
+        _contentOverlayDepth > route.stack &&
+        guard < 8) {
+      guard += 1;
+      nav.pop();
+      if (_contentOverlayDepth > 0) {
+        _contentOverlayDepth -= 1;
+      }
+    }
+    if (!(nav?.canPop() ?? false)) {
+      _contentOverlayDepth = 0;
+      _shellHasPushedRoute = false;
+    }
+
+    final dest = _destinationFromSection(route.section);
+    if (dest != null && dest != _selectedNav) {
+      if (!MerchantSession.canOpen(dest)) {
+        _syncBrowserHistory(push: false);
+        return;
+      }
+      _applyNavFromBrowser(dest);
+      return;
+    }
+
+    if (mounted) {
+      setState(() {});
+      _bumpShell();
+    }
+  }
+
+  /// Apply a section change that already happened in the address bar.
+  void _applyNavFromBrowser(MerchantNavDestination destination) {
+    _contentNavKey.currentState?.popUntil((route) => route.isFirst);
+    _contentOverlayDepth = 0;
+    _shellHasPushedRoute = false;
+    setState(() {
+      _selectedNav = destination;
+    });
+    _bumpShell();
+  }
+
+  void _syncBrowserHistory({required bool push}) {
+    if (!kIsWeb || !mounted) return;
+    MerchantShellHistory.setRoute(_currentShellRoute(), push: push);
   }
 
   void _selectNav(MerchantNavDestination destination) {
@@ -1844,12 +2458,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       Navigator.of(context).pop();
     }
     _contentNavKey.currentState?.popUntil((route) => route.isFirst);
+    _contentOverlayDepth = 0;
+    _shellHasPushedRoute = false;
     if (_selectedNav == destination) {
       _bumpShell();
+      _syncBrowserHistory(push: false);
       return;
     }
-    setState(() => _selectedNav = destination);
+    setState(() {
+      _selectedNav = destination;
+    });
     _bumpShell();
+    // Real section navigation → real history entry (like a normal website).
+    _syncBrowserHistory(push: true);
   }
 
   void _resetContentNavigator() {
@@ -1857,8 +2478,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     setState(() {
       _contentNavKey = GlobalKey<NavigatorState>();
       _shellHasPushedRoute = false;
+      _contentOverlayDepth = 0;
+      _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
     });
     _bumpShell();
+    _syncBrowserHistory(push: false);
   }
 
   Future<T?> _pushInShell<T>(Widget page, {bool standalone = false}) {
@@ -1948,6 +2572,51 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           return const BrandedLoadingScreen(withScaffold: true);
         }
 
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF5B21B6),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.wifi_off_rounded,
+                      color: Color(0xFFF4ECFF),
+                      size: 40,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No se pudo cargar el panel. La conexión puede estar intermitente.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFFF8F5FF),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFF4ECFF),
+                        foregroundColor: const Color(0xFF5B21B6),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _snapshotFuture = _fetchSnapshot();
+                        });
+                      },
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
         final dashboardData = snapshot.data;
         final isWideShell = screenWidth >= 1024;
         final sidebar = MerchantDashboardSidebar(
@@ -1967,7 +2636,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           selected: _selectedNav,
           onSelect: _selectNav,
           onResetContent: _resetContentNavigator,
-          child: Scaffold(
+          child: PopScope(
+            canPop: _shellCanExit,
+            onPopInvokedWithResult: (didPop, result) {
+              if (didPop) return;
+              // Web Back/Forward is owned by real `/panel/...` URLs.
+              if (kIsWeb) return;
+              _handleShellSystemBack();
+            },
+            child: SafeArea(
+            // Header paints its own top inset so the bar background reaches the
+            // status bar; keep left/right/bottom clear of system gestures.
+            top: false,
+            child: Scaffold(
             key: _scaffoldKey,
             backgroundColor: _dashboardBg,
             drawer: isWideShell ? null : Drawer(child: sidebar),
@@ -1983,7 +2664,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     onPressed: () =>
                         _openAssistedPublicMenu(dashboardData!.comercio),
                     icon: const Icon(Icons.point_of_sale_rounded, size: 20),
-                    label: const Text('Nuevo pedido'),
+                    label: Text(
+                      MerchantSession.isMesero
+                          ? 'Tomar pedido'
+                          : 'Nuevo pedido',
+                    ),
                   ),
             floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
             body: Row(
@@ -2016,7 +2701,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                           onToggleOnline: _updateBusinessOnline,
                           onOpenNotifications: _openNotificationsSheet,
                           onOpenProfile: _openProfile,
-                          onScanWithAi: _openMagicOnboarding,
+                          onScanWithAi: MerchantSession.canManageCatalog
+                              ? _openMagicOnboarding
+                              : null,
                           showMenuButton: !isWideShell,
                           onOpenMenu: () =>
                               _scaffoldKey.currentState?.openDrawer(),
@@ -2030,9 +2717,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                               ListenableBuilder(
                                 listenable: _shellRevision,
                                 builder: (context, _) {
-                                  return SafeArea(
-                                    top: false,
-                                    child: Builder(
+                                  return Builder(
                                       builder: (context) {
                                         if (snapshot.hasError) {
                                           return Center(
@@ -2122,36 +2807,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                   validOrders,
                                                 );
 
-                                            final todayStart = _startOfDay(
-                                              DateTime.now(),
-                                            );
-                                            final todayOrders = metricsOrders
-                                                .where(
-                                                  (pedido) => _isOnLocalDay(
-                                                    pedido.createdAt,
-                                                    todayStart,
-                                                  ),
-                                                )
-                                                .where(
-                                                  (pedido) =>
-                                                      pedido.statusBucket !=
-                                                      OrderStatusBucket
-                                                          .canceled,
-                                                )
-                                                .toList(growable: false);
-                                            final todayActiveOrders =
-                                                todayOrders;
-                                            final todayRevenue =
-                                                todayActiveOrders.fold<double>(
-                                                  0,
-                                                  (sum, o) =>
-                                                      sum +
-                                                      _resolvePedidoTotal(o),
-                                                );
-                                            final todayCustomers =
-                                                _uniqueCustomerCount(
-                                                  todayActiveOrders,
-                                                );
                                             final publicUrl = getPublicMenuUrl(
                                               data.comercio,
                                             );
@@ -2163,7 +2818,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                 _resolveSalesRangeWindow(
                                                   metricsOrders,
                                                 );
+                                            final previousWindow =
+                                                _resolvePreviousSalesRangeWindow(
+                                                  salesWindow,
+                                                );
                                             final selectedOrders = metricsOrders
+                                                .where((o) => !o.isArchived)
                                                 .where(
                                                   (o) => salesWindow.contains(
                                                     o.createdAt,
@@ -2176,20 +2836,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                           .canceled,
                                                 )
                                                 .toList(growable: false);
+                                            final previousOrders = metricsOrders
+                                                .where((o) => !o.isArchived)
+                                                .where(
+                                                  (o) => previousWindow
+                                                      .contains(o.createdAt),
+                                                )
+                                                .where(
+                                                  (o) =>
+                                                      o.statusBucket !=
+                                                      OrderStatusBucket
+                                                          .canceled,
+                                                )
+                                                .toList(growable: false);
                                             final selectedCount =
                                                 selectedOrders.length;
+                                            final selectedSalesTotals =
+                                                summarizeMerchantSales(
+                                              selectedOrders,
+                                              unitsPerUsd: _unitsPerUsd,
+                                              preferredCurrency:
+                                                  _businessCurrency,
+                                            );
+                                            final previousSalesTotals =
+                                                summarizeMerchantSales(
+                                              previousOrders,
+                                              unitsPerUsd: _unitsPerUsd,
+                                              preferredCurrency:
+                                                  _businessCurrency,
+                                            );
+                                            final selectedCustomers =
+                                                _uniqueCustomerCount(
+                                              selectedOrders,
+                                            );
+                                            final previousCustomers =
+                                                _uniqueCustomerCount(
+                                              previousOrders,
+                                            );
                                             final selectedRevenue =
-                                                selectedOrders.fold<double>(
-                                                  0,
-                                                  (sum, o) =>
-                                                      sum +
-                                                      _resolvePedidoTotal(o),
-                                                );
+                                                selectedSalesTotals.chartAmount;
                                             final double ticketPromedio =
                                                 selectedCount == 0
                                                 ? 0.0
                                                 : (selectedRevenue /
                                                       selectedCount);
+                                            final previousTicket =
+                                                previousOrders.isEmpty
+                                                ? 0.0
+                                                : previousSalesTotals
+                                                        .chartAmount /
+                                                    previousOrders.length;
                                             final topProducts = _topProducts(
                                               selectedOrders,
                                             );
@@ -2197,82 +2893,106 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                 _buildSalesHistoryForSelectedRange(
                                                   metricsOrders,
                                                 );
+                                            final chartCurrencyFilter =
+                                                (_chartCurrencyFilter !=
+                                                            'all' &&
+                                                        _chartCurrencyFilter !=
+                                                            'usd_estimate' &&
+                                                        !salesSeries.currencies
+                                                            .contains(
+                                                              _chartCurrencyFilter,
+                                                            ))
+                                                    ? 'all'
+                                                    : _chartCurrencyFilter;
                                             final ordersLabel =
                                                 _selectedSalesRange.ordersLabel;
                                             final incomeLabel =
                                                 _selectedSalesRange.incomeLabel;
+                                            final periodShort =
+                                                _selectedSalesRange.kpiShortLabel;
                                             final kpiCards = <_CompactKpiCardData>[
                                               _CompactKpiCardData(
-                                                title: 'Pedidos hoy',
-                                                value: todayOrders.isEmpty
+                                                title: 'Pedidos $periodShort',
+                                                value: selectedOrders.isEmpty
                                                     ? '—'
-                                                    : '${todayOrders.length}',
-                                                hasData: todayOrders.isNotEmpty,
+                                                    : '$selectedCount',
+                                                hasData:
+                                                    selectedOrders.isNotEmpty,
                                                 icon:
                                                     Icons.shopping_bag_outlined,
                                                 color: _purple,
                                                 deltaPercent:
                                                     _deltaPercentVsYesterday(
                                                       todayValue:
-                                                          todayOrders.length,
-                                                      yesterdayValue: data
-                                                          .yesterdayTotalOrders,
+                                                          selectedCount,
+                                                      yesterdayValue:
+                                                          previousOrders.length,
                                                     ),
+                                                deltaLabel: 'vs período ant.',
                                               ),
                                               if (MerchantSession
                                                   .canSeeSalesKpis) ...[
                                                 _CompactKpiCardData(
-                                                  title: 'Ventas hoy',
-                                                  value: todayOrders.isEmpty
+                                                  title: 'Ventas $periodShort',
+                                                  value: selectedOrders.isEmpty
                                                       ? '—'
-                                                      : '\$${todayRevenue.toStringAsFixed(2)}',
+                                                      : _kpiSalesLabel(
+                                                          selectedSalesTotals,
+                                                        ),
                                                   hasData:
-                                                      todayOrders.isNotEmpty,
+                                                      selectedOrders.isNotEmpty,
                                                   icon: Icons
                                                       .attach_money_rounded,
                                                   color: _green,
                                                   deltaPercent:
                                                       _deltaPercentVsYesterday(
                                                         todayValue:
-                                                            todayRevenue,
+                                                            selectedSalesTotals
+                                                                .chartAmount,
                                                         yesterdayValue:
-                                                            data.lastDayRevenue,
+                                                            previousSalesTotals
+                                                                .chartAmount,
                                                       ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                                 _CompactKpiCardData(
-                                                  title: 'Clientes hoy',
-                                                  value: todayCustomers == 0
+                                                  title: 'Clientes $periodShort',
+                                                  value: selectedCustomers == 0
                                                       ? '—'
-                                                      : '$todayCustomers',
-                                                  hasData: todayCustomers > 0,
+                                                      : '$selectedCustomers',
+                                                  hasData:
+                                                      selectedCustomers > 0,
                                                   icon: Icons.groups_outlined,
                                                   color: _orange,
                                                   deltaPercent:
                                                       _deltaPercentVsYesterday(
                                                         todayValue:
-                                                            todayCustomers,
-                                                        yesterdayValue: data
-                                                            .yesterdayUniqueCustomers,
+                                                            selectedCustomers,
+                                                        yesterdayValue:
+                                                            previousCustomers,
                                                       ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                                 _CompactKpiCardData(
-                                                  title: 'Ticket promedio',
+                                                  title: 'Ticket prom.',
                                                   value: selectedCount == 0
                                                       ? '—'
-                                                      : '\$${ticketPromedio.toStringAsFixed(2)}',
+                                                      : formatMerchantMoneyKpi(
+                                                          ticketPromedio,
+                                                          selectedSalesTotals
+                                                              .chartCurrency,
+                                                        ),
                                                   hasData: selectedCount > 0,
                                                   icon: Icons
                                                       .receipt_long_outlined,
                                                   color: _purple,
-                                                  deltaPercent: _deltaPercentVsYesterday(
+                                                  deltaPercent:
+                                                      _deltaPercentVsYesterday(
                                                     todayValue: ticketPromedio,
                                                     yesterdayValue:
-                                                        data.yesterdayTotalOrders ==
-                                                            0
-                                                        ? 0
-                                                        : data.lastDayRevenue /
-                                                              data.yesterdayTotalOrders,
+                                                        previousTicket,
                                                   ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                               ],
                                             ];
@@ -2301,8 +3021,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                     topProducts: topProducts,
                                                     publicUrl: publicUrl,
                                                     displayUrl: displayUrl,
-                                                    todayOrders:
-                                                        todayActiveOrders,
+                                                    salesTotals:
+                                                        selectedSalesTotals,
+                                                    currencyFilter:
+                                                        chartCurrencyFilter,
+                                                    previousChartAmount:
+                                                        previousSalesTotals
+                                                            .chartAmount,
                                                   ),
                                                 ),
                                               );
@@ -2365,10 +3090,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 _openNotificationsSheet,
                                                             onOpenProfile:
                                                                 _openProfile,
-                                                            hoursCaption: data
-                                                                .schedule
-                                                                .statusAt()
-                                                                .caption,
+                                                            hoursCaption:
+                                                                MerchantSession
+                                                                        .isMesero
+                                                                    ? 'Listo para tomar pedidos asistidos.'
+                                                                    : data
+                                                                        .schedule
+                                                                        .statusAt()
+                                                                        .caption,
                                                             showActions: false,
                                                           ),
                                                           const SizedBox(
@@ -2380,7 +3109,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                               result:
                                                                   _recentCatalogResult!,
                                                             ),
-                                                          if (_didLoadBillingGate &&
+                                                          if (MerchantSession
+                                                                  .canManageBilling &&
+                                                              _didLoadBillingGate &&
                                                               _requiresPaymentToPublish) ...[
                                                             _PublishPaywallBanner(
                                                               onActivate:
@@ -2390,19 +3121,92 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                               height: 16,
                                                             ),
                                                           ],
-                                                          _DashboardKpiGrid(
-                                                            cards: kpiCards,
-                                                            columns: isDesktop
-                                                                ? 4
-                                                                : 2,
-                                                            useVerticalLayout:
-                                                                isMobile,
-                                                          ),
-                                                          SizedBox(
-                                                            height: isDesktop
-                                                                ? 18
-                                                                : 14,
-                                                          ),
+                                                          if (!MerchantSession
+                                                              .isMesero) ...[
+                                                            _DashboardKpiGrid(
+                                                              cards: kpiCards,
+                                                              columns: isDesktop
+                                                                  ? 4
+                                                                  : 2,
+                                                              useVerticalLayout:
+                                                                  isMobile,
+                                                            ),
+                                                            SizedBox(
+                                                              height: isDesktop
+                                                                  ? 18
+                                                                  : 14,
+                                                            ),
+                                                            if (isMobile) ...[
+                                                              KeyedSubtree(
+                                                                key:
+                                                                    _salesSectionKey,
+                                                                child: _CompactSalesSummaryCard(
+                                                                  title:
+                                                                      'Ventas · ${_selectedSalesRange.label}',
+                                                                  salesToday:
+                                                                      selectedRevenue,
+                                                                  ordersToday:
+                                                                      selectedCount,
+                                                                  averageTicket:
+                                                                      ticketPromedio,
+                                                                  darkText:
+                                                                      _darkText,
+                                                                  mutedText:
+                                                                      _mutedText,
+                                                                  purple:
+                                                                      _purple,
+                                                                  salesSeries:
+                                                                      salesSeries,
+                                                                  currencyFilter:
+                                                                      chartCurrencyFilter,
+                                                                  onCurrencyFilterChanged:
+                                                                      (value) {
+                                                                    setState(
+                                                                      () =>
+                                                                          _chartCurrencyFilter =
+                                                                              value,
+                                                                    );
+                                                                    _bumpShell();
+                                                                  },
+                                                                  currencyColorFor:
+                                                                      _merchantCurrencyColor,
+                                                                  selectedRange:
+                                                                      _selectedSalesRange,
+                                                                  rangeLabel:
+                                                                      _activeRangeLabel(),
+                                                                  ordersLabel:
+                                                                      ordersLabel,
+                                                                  incomeLabel:
+                                                                      incomeLabel,
+                                                                  salesTotals:
+                                                                      selectedSalesTotals,
+                                                                  deltaPercent: _deltaPercentVsYesterday(
+                                                                    todayValue:
+                                                                        selectedRevenue,
+                                                                    yesterdayValue:
+                                                                        previousSalesTotals
+                                                                            .chartAmount,
+                                                                  ),
+                                                                  showMiniMetrics:
+                                                                      false,
+                                                                  emptyMessage:
+                                                                      'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                                                  onRangeSelected:
+                                                                      (
+                                                                        range,
+                                                                      ) => _onSalesRangeSelected(
+                                                                        range,
+                                                                        metricsOrders,
+                                                                      ),
+                                                                  onOpenOrdersForPoint:
+                                                                      _openOrdersForSalesPoint,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(
+                                                                height: 14,
+                                                              ),
+                                                            ],
+                                                          ],
                                                           MerchantQuickActions(
                                                             onAddProduct:
                                                                 _openAddProduct,
@@ -2425,13 +3229,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 () => _openHours(
                                                                   data.schedule,
                                                                 ),
+                                                            onTakeAssistedOrder:
+                                                                () => _openAssistedPublicMenu(
+                                                                  data.comercio,
+                                                                ),
                                                           ),
-                                                          SizedBox(
-                                                            height: isDesktop
-                                                                ? 18
-                                                                : 14,
-                                                          ),
-                                                          if (isDesktop)
+                                                          if (!MerchantSession
+                                                              .isMesero)
+                                                            const SizedBox(
+                                                              height: 14,
+                                                            ),
+                                                          if (!MerchantSession
+                                                                  .isMesero &&
+                                                              isDesktop)
                                                             Row(
                                                               crossAxisAlignment:
                                                                   CrossAxisAlignment
@@ -2470,23 +3280,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                             child: KeyedSubtree(
                                                                               key: _salesSectionKey,
                                                                               child: _CompactSalesSummaryCard(
-                                                                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                                                                title: 'Ventas · ${_selectedSalesRange.label}',
                                                                                 salesToday: selectedRevenue,
                                                                                 ordersToday: selectedCount,
                                                                                 averageTicket: ticketPromedio,
                                                                                 darkText: _darkText,
                                                                                 mutedText: _mutedText,
                                                                                 purple: _purple,
-                                                                                salesHistory: salesSeries.values,
-                                                                                salesLabels: salesSeries.labels,
-                                                                                salesTooltipLabels: salesSeries.tooltipLabels,
+                                                                                salesSeries: salesSeries,
+                                                                                currencyFilter: chartCurrencyFilter,
+                                                                                onCurrencyFilterChanged: (value) {
+                                                                                  setState(() => _chartCurrencyFilter = value);
+                                                                                  _bumpShell();
+                                                                                },
+                                                                                currencyColorFor: _merchantCurrencyColor,
                                                                                 selectedRange: _selectedSalesRange,
                                                                                 rangeLabel: _activeRangeLabel(),
                                                                                 ordersLabel: ordersLabel,
                                                                                 incomeLabel: incomeLabel,
+                                                                                salesTotals: selectedSalesTotals,
                                                                                 deltaPercent: _deltaPercentVsYesterday(
                                                                                   todayValue: selectedRevenue,
-                                                                                  yesterdayValue: data.lastDayRevenue,
+                                                                                  yesterdayValue: previousSalesTotals.chartAmount,
                                                                                 ),
                                                                                 showMiniMetrics: false,
                                                                                 emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
@@ -2497,6 +3312,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                                       range,
                                                                                       metricsOrders,
                                                                                     ),
+                                                                                onOpenOrdersForPoint:
+                                                                                    _openOrdersForSalesPoint,
                                                                               ),
                                                                             ),
                                                                           ),
@@ -2759,7 +3576,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 ],
                                                               ],
                                                             )
-                                                          else ...[
+                                                          else if (!MerchantSession
+                                                              .isMesero) ...[
                                                             MerchantSmartMenuCard(
                                                               publicUrl:
                                                                   publicUrl,
@@ -2781,62 +3599,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                   _openQrGenerator,
                                                               onOpenUrl:
                                                                   _openPublicMenu,
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 12,
-                                                            ),
-                                                            KeyedSubtree(
-                                                              key:
-                                                                  _salesSectionKey,
-                                                              child: _CompactSalesSummaryCard(
-                                                                title:
-                                                                    'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
-                                                                salesToday:
-                                                                    selectedRevenue,
-                                                                ordersToday:
-                                                                    selectedCount,
-                                                                averageTicket:
-                                                                    ticketPromedio,
-                                                                darkText:
-                                                                    _darkText,
-                                                                mutedText:
-                                                                    _mutedText,
-                                                                purple: _purple,
-                                                                salesHistory:
-                                                                    salesSeries
-                                                                        .values,
-                                                                salesLabels:
-                                                                    salesSeries
-                                                                        .labels,
-                                                                salesTooltipLabels:
-                                                                    salesSeries
-                                                                        .tooltipLabels,
-                                                                selectedRange:
-                                                                    _selectedSalesRange,
-                                                                rangeLabel:
-                                                                    _activeRangeLabel(),
-                                                                ordersLabel:
-                                                                    ordersLabel,
-                                                                incomeLabel:
-                                                                    incomeLabel,
-                                                                deltaPercent: _deltaPercentVsYesterday(
-                                                                  todayValue:
-                                                                      selectedRevenue,
-                                                                  yesterdayValue:
-                                                                      data.lastDayRevenue,
-                                                                ),
-                                                                showMiniMetrics:
-                                                                    false,
-                                                                emptyMessage:
-                                                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
-                                                                onRangeSelected:
-                                                                    (
-                                                                      range,
-                                                                    ) => _onSalesRangeSelected(
-                                                                      range,
-                                                                      metricsOrders,
-                                                                    ),
-                                                              ),
                                                             ),
                                                             const SizedBox(
                                                               height: 12,
@@ -3053,8 +3815,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                           },
                                         );
                                       },
-                                    ),
-                                  );
+                                    );
                                 },
                               ),
                             );
@@ -3067,9 +3828,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ],
             ),
           ),
+          ),
+          ),
         );
       },
     );
+  }
+
+  String _kpiSalesLabel(MerchantSalesTotals totals) {
+    if (totals.orderCount <= 0 || totals.chartAmount <= 0) return '—';
+    // Always prefer business main currency (already converted in summarize).
+    return formatMerchantMoneyKpi(totals.chartAmount, totals.chartCurrency);
   }
 
   Widget _salesSummaryCard({
@@ -3080,30 +3849,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     required String ordersLabel,
     required String incomeLabel,
     required List<PedidoModel> validOrders,
-    required _DashboardSnapshot data,
+    required MerchantSalesTotals salesTotals,
+    required String currencyFilter,
+    required double previousChartAmount,
   }) {
     return _CompactSalesSummaryCard(
-      title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+      title: 'Ventas · ${_selectedSalesRange.label}',
       salesToday: selectedRevenue,
       ordersToday: selectedCount,
       averageTicket: ticketPromedio,
       darkText: _darkText,
       mutedText: _mutedText,
       purple: _purple,
-      salesHistory: salesSeries.values,
-      salesLabels: salesSeries.labels,
-      salesTooltipLabels: salesSeries.tooltipLabels,
+      salesSeries: salesSeries,
+      currencyFilter: currencyFilter,
+      onCurrencyFilterChanged: (value) {
+        setState(() => _chartCurrencyFilter = value);
+        _bumpShell();
+      },
+      currencyColorFor: _merchantCurrencyColor,
       selectedRange: _selectedSalesRange,
       rangeLabel: _activeRangeLabel(),
       ordersLabel: ordersLabel,
       incomeLabel: incomeLabel,
+      salesTotals: salesTotals,
       deltaPercent: _deltaPercentVsYesterday(
         todayValue: selectedRevenue,
-        yesterdayValue: data.lastDayRevenue,
+        yesterdayValue: previousChartAmount,
       ),
       showMiniMetrics: false,
       emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
       onRangeSelected: (range) => _onSalesRangeSelected(range, validOrders),
+      onOpenOrdersForPoint: _openOrdersForSalesPoint,
     );
   }
 
@@ -3121,10 +3898,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     required List<MerchantTopProduct> topProducts,
     required String publicUrl,
     required String displayUrl,
-    required List<PedidoModel> todayOrders,
+    required MerchantSalesTotals salesTotals,
+    required String currencyFilter,
+    required double previousChartAmount,
   }) {
+    // Same window as the sales chart so peak hours match what merchants filter.
+    final salesWindow = _resolveSalesRangeWindow(metricsOrders);
     final hourCounts = List<int>.filled(24, 0);
-    for (final pedido in todayOrders) {
+    for (final pedido in metricsOrders) {
+      if (pedido.isArchived) continue;
+      if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
+      if (!salesWindow.contains(pedido.createdAt)) continue;
       final hour = pedido.createdAt?.toLocal().hour;
       if (hour == null) continue;
       hourCounts[hour] += 1;
@@ -3135,14 +3919,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         return const SizedBox.shrink();
       case MerchantNavDestination.orders:
         return MerchantOrdersWorkspace(
+          key: ValueKey(
+            'orders-seed-${_ordersSeedFilter?.revision ?? 0}',
+          ),
           orders: validOrders,
+          purgedOrderIds: _purgedOrderIds,
           errorSubtitle: ordersSnapshot.hasError
               ? _ordersErrorSubtitle(ordersSnapshot.error)
               : null,
           onRetry: _refreshDashboard,
+          seedFilter: _ordersSeedFilter,
           itemBuilder: (pedido) => _CompactRecentOrderTile(
             pedido: pedido,
             onTap: () => _openOrderDetail(pedido),
+            onToggleArchive: () =>
+                _toggleOrderArchive(pedido, archive: !pedido.isArchived),
+            onDeletePermanent: pedido.isArchived
+                ? () => _deleteArchivedOrder(pedido)
+                : null,
             darkText: _darkText,
             mutedText: _mutedText,
           ),
@@ -3151,7 +3945,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         return MerchantDigitalMenuWorkspace(
           publicUrl: publicUrl,
           displayUrl: displayUrl,
-          previewUrl: _ownerPreviewUri(data.comercio),
           menuOrders: data.analytics.orders,
           visits: data.analytics.visits,
           scans: data.analytics.scans,
@@ -3185,7 +3978,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ordersLabel: ordersLabel,
               incomeLabel: incomeLabel,
               validOrders: metricsOrders,
-              data: data,
+              salesTotals: salesTotals,
+              currencyFilter: currencyFilter,
+              previousChartAmount: previousChartAmount,
             ),
           ),
           topProducts: topProducts,
@@ -3203,6 +3998,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           hoursSubtitle: data.schedule.isConfigured
               ? (data.schedule.statusAt().caption ?? 'Horario configurado')
               : 'Define cuándo recibes pedidos',
+          accountEmail:
+              Supabase.instance.client.auth.currentUser?.email?.trim() ?? '',
           onOpenBusiness: () => _openBusinessSettings(
             data.comercio,
             MerchantBusinessSettingsSection.profile,
@@ -3222,8 +4019,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           onOpenHours: () => _openHours(data.schedule),
           onOpenPlan: () => _selectNav(MerchantNavDestination.plan),
           onOpenUsers: _openStaff,
+          onOpenAccount: _openAccount,
           onOpenKioskHome: _openKioskHome,
           onOpenDelivery: _openDeliverySettings,
+          onOpenConversations: () => unawaited(_openChatConversations()),
         );
       case MerchantNavDestination.plan:
         return const MerchantEmbeddedBilling();
@@ -3490,6 +4289,7 @@ class _CompactKpiCardData {
     required this.color,
     required this.deltaPercent,
     this.hasData = true,
+    this.deltaLabel = 'vs ayer',
   });
 
   final String title;
@@ -3499,6 +4299,7 @@ class _CompactKpiCardData {
   final double deltaPercent;
   final _KpiTrendSemantics trendSemantics = _KpiTrendSemantics.growthIsPositive;
   final bool hasData;
+  final String deltaLabel;
 }
 
 enum _KpiTrendSemantics {
@@ -3598,7 +4399,7 @@ class _CompactKpiCard extends StatelessWidget {
     final trendColor = _trendColor(isUp);
     final trendValue = data.deltaPercent.abs().round();
     final label = Text(
-      '$trendValue% vs ayer',
+      '$trendValue% ${data.deltaLabel}',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: GoogleFonts.poppins(
@@ -3655,16 +4456,23 @@ class _CompactKpiCard extends StatelessWidget {
                 child: Icon(data.icon, color: data.color, size: 16),
               ),
               const Spacer(),
-              Text(
-                data.value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF11183C),
-                  height: 1,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+              SizedBox(
+                width: double.infinity,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    data.value,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF11183C),
+                      height: 1,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 2),
@@ -3735,21 +4543,27 @@ class _CompactKpiCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: Text(
-                    data.value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF11183C),
-                      height: 1,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      data.value,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: GoogleFonts.poppins(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF11183C),
+                        height: 1,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                _kpiTrend(iconSize: 18, fontSize: 11, compact: true),
+                Flexible(
+                  child: _kpiTrend(iconSize: 18, fontSize: 11, compact: true),
+                ),
               ],
             ),
           ],
@@ -3786,14 +4600,23 @@ class _CompactKpiCard extends StatelessWidget {
             child: Icon(data.icon, color: data.color, size: 18),
           ),
           const Spacer(),
-          Text(
-            data.value,
-            style: GoogleFonts.poppins(
-              fontSize: 34,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF11183C),
-              height: 1,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                data.value,
+                maxLines: 1,
+                softWrap: false,
+                style: GoogleFonts.poppins(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF11183C),
+                  height: 1,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 1),
@@ -4209,109 +5032,6 @@ class _BusinessActionTile extends StatelessWidget {
   }
 }
 
-String _formatSalesFullCurrency(double value) {
-  final fixed = value.toStringAsFixed(2);
-  final parts = fixed.split('.');
-  final integer = parts.first.replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+(?!\d))'),
-    (_) => ',',
-  );
-  return '\$$integer.${parts.last}';
-}
-
-String _formatSalesDisplayCurrency(double value) {
-  final absolute = value.abs();
-  if (absolute >= 1000000) {
-    return '\$${(value / 1000000).toStringAsFixed(1)}M';
-  }
-  if (absolute >= 1000) {
-    return _formatSalesFullCurrency(value);
-  }
-  return _formatSalesFullCurrency(value);
-}
-
-class _ResponsiveSalesTotal extends StatelessWidget {
-  const _ResponsiveSalesTotal({
-    required this.value,
-    required this.color,
-    required this.compact,
-  });
-
-  final double? value;
-  final Color color;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final amount = value;
-    if (amount == null) {
-      return Text(
-        '—',
-        style: GoogleFonts.poppins(
-          fontSize: compact ? 32 : 38,
-          height: 0.98,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      );
-    }
-
-    final fullValue = _formatSalesFullCurrency(amount);
-    final displayValue = _formatSalesDisplayCurrency(amount);
-    final amountOnly = displayValue.substring(1);
-    final baseSize = compact ? 32.0 : 38.0;
-    final scale = amountOnly.length >= 10
-        ? 0.72
-        : amountOnly.length >= 8
-        ? 0.84
-        : amountOnly.length >= 6
-        ? 0.94
-        : 1.0;
-
-    return Tooltip(
-      message: fullValue,
-      waitDuration: const Duration(milliseconds: 350),
-      child: SizedBox(
-        height: compact ? 42 : 48,
-        width: double.infinity,
-        child: FittedBox(
-          alignment: Alignment.centerLeft,
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '\$',
-                style: GoogleFonts.poppins(
-                  fontSize: baseSize * 0.68 * scale,
-                  height: 1,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
-              ),
-              const SizedBox(width: 2),
-              Text(
-                amountOnly,
-                maxLines: 1,
-                softWrap: false,
-                style: GoogleFonts.poppins(
-                  fontSize: baseSize * scale,
-                  height: 0.98,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _CompactSalesSummaryCard extends StatelessWidget {
   const _CompactSalesSummaryCard({
     required this.salesToday,
@@ -4320,18 +5040,21 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     required this.darkText,
     required this.mutedText,
     required this.purple,
-    this.salesHistory,
-    this.salesLabels,
-    this.salesTooltipLabels,
+    required this.salesSeries,
+    required this.currencyFilter,
+    required this.onCurrencyFilterChanged,
+    required this.currencyColorFor,
     required this.selectedRange,
     required this.rangeLabel,
     required this.ordersLabel,
     required this.incomeLabel,
     required this.onRangeSelected,
+    required this.onOpenOrdersForPoint,
     this.title = 'Resumen de ventas',
     this.deltaPercent = 0,
     this.showMiniMetrics = true,
     this.emptyMessage,
+    this.salesTotals,
   });
 
   final double salesToday;
@@ -4340,34 +5063,39 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final Color darkText;
   final Color mutedText;
   final Color purple;
-  final List<double>? salesHistory;
-  final List<String>? salesLabels;
-  final List<String>? salesTooltipLabels;
+  final _SalesHistorySeries salesSeries;
+  final String currencyFilter;
+  final ValueChanged<String> onCurrencyFilterChanged;
+  final Color Function(String currency) currencyColorFor;
   final _SalesRange selectedRange;
   final String rangeLabel;
   final String ordersLabel;
   final String incomeLabel;
   final ValueChanged<_SalesRange> onRangeSelected;
+  final ValueChanged<_SalesHistoryPoint> onOpenOrdersForPoint;
   final String title;
   final double deltaPercent;
   final bool showMiniMetrics;
   final String? emptyMessage;
+  final MerchantSalesTotals? salesTotals;
 
   @override
   Widget build(BuildContext context) {
     final hasSalesData = salesToday > 0 || ordersToday > 0;
-    final chartData = salesHistory == null || salesHistory!.isEmpty
+    final points = salesSeries.points;
+    final labels = points.isEmpty
+        ? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D']
+        : salesSeries.labels;
+    final tooltipLabels = points.isEmpty ? labels : salesSeries.tooltipLabels;
+    final primarySeries = points.isEmpty
         ? const <double>[0, 0, 0, 0, 0, 0, 0]
-        : salesHistory!;
-    final labels =
-        salesLabels ?? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-    final tooltipLabels = salesTooltipLabels ?? labels;
+        : salesSeries.valuesForFilter(currencyFilter);
 
     var highlightIndex = 0;
     var peak = -1.0;
-    for (var i = 0; i < chartData.length; i++) {
-      if (chartData[i] >= peak) {
-        peak = chartData[i];
+    for (var i = 0; i < primarySeries.length; i++) {
+      if (primarySeries[i] >= peak) {
+        peak = primarySeries[i];
         highlightIndex = i;
       }
     }
@@ -4381,6 +5109,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           onTap: () async {
             final selected = await showModalBottomSheet<_SalesRange>(
               context: context,
+              useRootNavigator: true,
               showDragHandle: true,
               builder: (sheetContext) => SafeArea(
                 child: ListView(
@@ -4432,11 +5161,46 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           ),
         );
 
+        final totals = salesTotals;
+        final preferred = salesSeries.preferredCurrency;
+        final filterIsUsd = currencyFilter == 'usd_estimate';
+        final filterIsAll = currencyFilter == 'all';
+        final filterIsPreferred = currencyFilter == preferred;
+        final heroAmount = !hasSalesData
+            ? null
+            : filterIsUsd
+            ? (totals?.usdEstimate ?? 0)
+            : (filterIsAll || filterIsPreferred)
+            ? (totals?.chartAmount ?? salesToday)
+            : (totals?.buckets
+                    .where((b) => b.currency == currencyFilter)
+                    .fold<double>(0, (sum, b) => sum + b.amount) ??
+                0);
+        final heroCurrency = filterIsUsd
+            ? 'USD'
+            : (filterIsAll || filterIsPreferred)
+            ? (totals?.chartCurrency ?? preferred)
+            : currencyFilter;
+        final heroIsConverted =
+            (filterIsAll || filterIsPreferred) &&
+            (totals?.buckets.length ?? 0) > 1 &&
+            heroCurrency == preferred;
+        final primaryLabel = heroAmount == null || heroAmount <= 0
+            ? null
+            : formatMerchantMoneyCompact(heroAmount, heroCurrency);
+        final primaryExact = heroAmount == null || heroAmount <= 0
+            ? null
+            : formatMerchantMoneyExact(heroAmount, heroCurrency);
+
         final salesTotalBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Ventas totales',
+              filterIsUsd
+                  ? 'Total ≈ USD'
+                  : heroIsConverted
+                  ? 'Total ≈ $preferred'
+                  : 'Ventas totales',
               style: GoogleFonts.poppins(
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
@@ -4444,33 +5208,72 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            _ResponsiveSalesTotal(
-              value: hasSalesData ? salesToday : null,
-              color: darkText,
-              compact: isMobile,
-            ),
-            if (hasSalesData) ...[
-              const SizedBox(height: 6),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF4F3FB),
-                  borderRadius: BorderRadius.circular(999),
+            if (primaryLabel == null)
+              Text(
+                '—',
+                style: GoogleFonts.poppins(
+                  fontSize: isMobile ? 28 : 32,
+                  height: 0.98,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  child: Text(
-                    'Valor exacto: ${_formatSalesFullCurrency(salesToday)}',
-                    style: GoogleFonts.poppins(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: mutedText,
+              )
+            else
+              Tooltip(
+                message: primaryExact ?? primaryLabel,
+                waitDuration: const Duration(milliseconds: 280),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      primaryLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: GoogleFonts.poppins(
+                        fontSize: isMobile ? 26 : 30,
+                        height: 1.05,
+                        fontWeight: FontWeight.w700,
+                        color: darkText,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
                 ),
               ),
+            if (hasSalesData &&
+                totals != null &&
+                totals.buckets.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              for (final bucket in totals.buckets.take(4))
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '${formatMerchantMoneyExact(bucket.amount, bucket.currency)} · ${bucket.count} pedido${bucket.count == 1 ? '' : 's'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: mutedText,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              if (totals.usdEstimate != null &&
+                  !totals.chartIsUsd &&
+                  totals.usdCoveredOrders > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '≈ ${formatMerchantMoneyExact(totals.usdEstimate!, 'USD')}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: purple,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
             ],
             const SizedBox(height: 8),
             if (hasSalesData)
@@ -4499,14 +5302,18 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                         size: 14,
                       ),
                       const SizedBox(width: 3),
-                      Text(
-                        '${deltaPercent.abs().round()}% vs período anterior',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: deltaPercent >= 0
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFFEF4444),
+                      Flexible(
+                        child: Text(
+                          '${deltaPercent.abs().round()}% vs período anterior',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: deltaPercent >= 0
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFEF4444),
+                          ),
                         ),
                       ),
                     ],
@@ -4525,22 +5332,96 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           ],
         );
 
-        final chartWidget = SizedBox(
-          height: isMobile ? 112 : 108,
-          width: double.infinity,
-          child: _SalesSummaryChart(
-            salesHistory: chartData,
-            labels: labels,
-            tooltipLabels: tooltipLabels,
-            color: purple,
-            highlightIndex: highlightIndex,
+        final currencySelector = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _ChartFilterChip(
+                label: 'Todas',
+                selected: currencyFilter == 'all',
+                color: purple,
+                onTap: () => onCurrencyFilterChanged('all'),
+              ),
+              const SizedBox(width: 6),
+              _ChartFilterChip(
+                label: preferred,
+                selected: currencyFilter == preferred,
+                color: currencyColorFor(preferred),
+                onTap: () => onCurrencyFilterChanged(preferred),
+              ),
+              for (final code in salesSeries.currencies) ...[
+                if (code == preferred) const SizedBox.shrink() else ...[
+                  const SizedBox(width: 6),
+                  _ChartFilterChip(
+                    label: code,
+                    selected: currencyFilter == code,
+                    color: currencyColorFor(code),
+                    onTap: () => onCurrencyFilterChanged(code),
+                  ),
+                ],
+              ],
+              const SizedBox(width: 6),
+              _ChartFilterChip(
+                label: '≈ USD',
+                selected: currencyFilter == 'usd_estimate',
+                color: const Color(0xFF7C3AED),
+                onTap: () => onCurrencyFilterChanged('usd_estimate'),
+              ),
+            ],
           ),
+        );
+
+        final legend = Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          children: [
+            if (currencyFilter == 'all' || currencyFilter == preferred)
+              _ChartLegendItem(
+                color: currencyColorFor(preferred),
+                label: '≈ $preferred',
+                dashed: true,
+              ),
+            if (currencyFilter == 'all')
+              for (final code in salesSeries.currencies)
+                _ChartLegendItem(
+                  color: currencyColorFor(code),
+                  label: code,
+                )
+            else if (currencyFilter == 'usd_estimate')
+              _ChartLegendItem(
+                color: const Color(0xFF7C3AED),
+                label: '≈ USD',
+                dashed: true,
+              )
+            else if (currencyFilter != preferred)
+              _ChartLegendItem(
+                color: currencyColorFor(currencyFilter),
+                label: currencyFilter,
+              ),
+          ],
+        );
+
+        final chartWidget = _SalesSummaryChart(
+          series: salesSeries,
+          currencyFilter: currencyFilter,
+          labels: labels,
+          tooltipLabels: tooltipLabels,
+          highlightIndex: highlightIndex,
+          purple: purple,
+          currencyColorFor: currencyColorFor,
+          isMobile: isMobile,
+          onOpenOrders: onOpenOrdersForPoint,
         );
 
         final ticketCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: 'Ticket promedio',
-            value: hasSalesData ? '\$${averageTicket.toStringAsFixed(2)}' : '—',
+            value: hasSalesData
+                ? formatMerchantMoneyCompact(
+                    averageTicket,
+                    heroCurrency,
+                  )
+                : '—',
             color: const Color(0xFF8B5CF6),
             icon: Icons.receipt_rounded,
           ),
@@ -4556,7 +5437,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final incomeCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: incomeLabel,
-            value: hasSalesData ? '\$${salesToday.toStringAsFixed(2)}' : '—',
+            value: hasSalesData && primaryLabel != null ? primaryLabel : '—',
             color: const Color(0xFF22C55E),
             icon: Icons.attach_money_rounded,
           ),
@@ -4651,6 +5532,12 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   rangeSelector,
                 ],
               ),
+              const SizedBox(height: 10),
+              currencySelector,
+              if (hasSalesData) ...[
+                const SizedBox(height: 8),
+                legend,
+              ],
               const SizedBox(height: 12),
               if (isMobile) ...[
                 salesTotalBlock,
@@ -4660,7 +5547,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 166, child: salesTotalBlock),
+                    SizedBox(width: 200, child: salesTotalBlock),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Stack(
@@ -4712,9 +5599,13 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          hasSalesData
+                          !hasSalesData
+                              ? 'Sin datos todavía. Tus ventas aparecerán aquí cuando recibas pedidos reales.'
+                              : deltaPercent > 0
                               ? 'Buen trabajo. Tus ventas están creciendo en este período.'
-                              : 'Sin datos todavía. Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                              : deltaPercent < 0
+                              ? 'Este período va por debajo del anterior. Revisa pedidos y promociones.'
+                              : 'Tus ventas se mantienen estables frente al período anterior.',
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -4735,20 +5626,106 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   }
 }
 
-class _SalesSummaryChart extends StatefulWidget {
-  const _SalesSummaryChart({
-    required this.salesHistory,
-    required this.labels,
-    required this.tooltipLabels,
+class _ChartFilterChip extends StatelessWidget {
+  const _ChartFilterChip({
+    required this.label,
+    required this.selected,
     required this.color,
-    required this.highlightIndex,
+    required this.onTap,
   });
 
-  final List<double> salesHistory;
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.14) : Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? color.withValues(alpha: 0.55) : const Color(0xFFE9EAF4),
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: selected ? color : const Color(0xFF6B6F92),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChartLegendItem extends StatelessWidget {
+  const _ChartLegendItem({
+    required this.color,
+    required this.label,
+    this.dashed = false,
+  });
+
+  final Color color;
+  final String label;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: dashed ? 16 : 8,
+          height: 3,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFF6B6F92),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SalesSummaryChart extends StatefulWidget {
+  const _SalesSummaryChart({
+    required this.series,
+    required this.currencyFilter,
+    required this.labels,
+    required this.tooltipLabels,
+    required this.highlightIndex,
+    required this.purple,
+    required this.currencyColorFor,
+    required this.isMobile,
+    required this.onOpenOrders,
+  });
+
+  final _SalesHistorySeries series;
+  final String currencyFilter;
   final List<String> labels;
   final List<String> tooltipLabels;
-  final Color color;
   final int highlightIndex;
+  final Color purple;
+  final Color Function(String currency) currencyColorFor;
+  final bool isMobile;
+  final ValueChanged<_SalesHistoryPoint> onOpenOrders;
 
   @override
   State<_SalesSummaryChart> createState() => _SalesSummaryChartState();
@@ -4756,97 +5733,410 @@ class _SalesSummaryChart extends StatefulWidget {
 
 class _SalesSummaryChartState extends State<_SalesSummaryChart> {
   late int _selectedIndex;
+  bool _inspectorOpen = false;
+  int _viewStart = 0;
+  int _viewEnd = 0;
 
-  void _updateSelectedIndexFromDx(double dx, double width) {
-    if (widget.salesHistory.length <= 1 || width <= 0) {
-      return;
-    }
+  List<_SalesHistoryPoint> get _allPoints => widget.series.points;
 
-    final clampedDx = dx.clamp(0.0, width);
-    final ratio = clampedDx / width;
-    final nextIndex = (ratio * (widget.salesHistory.length - 1)).round().clamp(
-      0,
-      widget.salesHistory.length - 1,
-    );
+  List<_SalesHistoryPoint> get _visiblePoints {
+    if (_allPoints.isEmpty) return const <_SalesHistoryPoint>[];
+    final start = _viewStart.clamp(0, _allPoints.length - 1);
+    final end = _viewEnd.clamp(start, _allPoints.length - 1);
+    return _allPoints.sublist(start, end + 1);
+  }
 
-    if (nextIndex == _selectedIndex) {
-      return;
-    }
+  List<double> get _activeValues {
+    final filter = widget.currencyFilter;
+    return _visiblePoints
+        .map((point) {
+          if (filter == 'usd_estimate') return point.usdEstimate;
+          if (filter == 'all' || filter == widget.series.preferredCurrency) {
+            return point.amountIn(
+              widget.series.preferredCurrency,
+              unitsPerUsd: widget.series.unitsPerUsd,
+            );
+          }
+          return point.byCurrency[filter] ?? 0.0;
+        })
+        .toList(growable: false);
+  }
 
+  bool get _canZoomIn => (_viewEnd - _viewStart) > 2;
+  bool get _canZoomOut =>
+      _viewStart > 0 || _viewEnd < (_allPoints.length - 1).clamp(0, 9999);
+  bool get _canPanLeft => _viewStart > 0;
+  bool get _canPanRight => _viewEnd < _allPoints.length - 1;
+
+  void _resetView() {
     setState(() {
-      _selectedIndex = nextIndex;
+      _viewStart = 0;
+      _viewEnd = (_allPoints.length - 1).clamp(0, 9999);
     });
+  }
+
+  void _zoom({required bool zoomIn}) {
+    final span = _viewEnd - _viewStart;
+    if (zoomIn) {
+      if (span <= 2) return;
+      final nextSpan = (span * 0.6).ceil().clamp(2, span - 1);
+      final center = ((_viewStart + _viewEnd) / 2).round();
+      var start = (center - nextSpan ~/ 2).clamp(0, _allPoints.length - 1);
+      var end = (start + nextSpan).clamp(0, _allPoints.length - 1);
+      start = (end - nextSpan).clamp(0, end);
+      setState(() {
+        _viewStart = start;
+        _viewEnd = end;
+        _inspectorOpen = false;
+      });
+      return;
+    }
+    final nextSpan = (span * 1.7).ceil().clamp(span + 1, _allPoints.length - 1);
+    final center = ((_viewStart + _viewEnd) / 2).round();
+    var start = (center - nextSpan ~/ 2).clamp(0, _allPoints.length - 1);
+    var end = (start + nextSpan).clamp(0, _allPoints.length - 1);
+    start = (end - nextSpan).clamp(0, end);
+    setState(() {
+      _viewStart = start;
+      _viewEnd = end;
+      _inspectorOpen = false;
+    });
+  }
+
+  void _pan(int direction) {
+    final span = _viewEnd - _viewStart;
+    final step = span < 4 ? 1 : span ~/ 4;
+    var start = _viewStart + direction * step;
+    var end = _viewEnd + direction * step;
+    if (start < 0) {
+      end -= start;
+      start = 0;
+    }
+    if (end > _allPoints.length - 1) {
+      final overflow = end - (_allPoints.length - 1);
+      start = (start - overflow).clamp(0, _allPoints.length - 1);
+      end = _allPoints.length - 1;
+    }
+    setState(() {
+      _viewStart = start;
+      _viewEnd = end;
+      _inspectorOpen = false;
+    });
+  }
+
+  void _selectFromDx(double dx, double width) {
+    final values = _activeValues;
+    if (values.isEmpty || width <= 0) return;
+    final clampedDx = dx.clamp(0.0, width);
+    final ratio = values.length <= 1 ? 0.0 : clampedDx / width;
+    final localIndex = values.length <= 1
+        ? 0
+        : (ratio * (values.length - 1)).round().clamp(0, values.length - 1);
+    setState(() {
+      _selectedIndex = _viewStart + localIndex;
+      _inspectorOpen = true;
+    });
+  }
+
+  void _dismissInspector() {
+    if (!_inspectorOpen) return;
+    setState(() => _inspectorOpen = false);
   }
 
   @override
   void initState() {
     super.initState();
     _selectedIndex = widget.highlightIndex;
+    _viewStart = 0;
+    _viewEnd = (widget.series.points.length - 1).clamp(0, 9999);
   }
 
   @override
   void didUpdateWidget(covariant _SalesSummaryChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.highlightIndex != oldWidget.highlightIndex ||
-        widget.salesHistory.length != oldWidget.salesHistory.length ||
-        widget.labels.length != oldWidget.labels.length ||
-        widget.tooltipLabels.length != oldWidget.tooltipLabels.length) {
+    if (widget.series.points.length != oldWidget.series.points.length ||
+        widget.currencyFilter != oldWidget.currencyFilter) {
+      _selectedIndex = widget.highlightIndex;
+      _inspectorOpen = false;
+      _viewStart = 0;
+      _viewEnd = (widget.series.points.length - 1).clamp(0, 9999);
+    } else if (widget.highlightIndex != oldWidget.highlightIndex) {
       _selectedIndex = widget.highlightIndex;
     }
   }
 
+  List<double> _normalize(List<double> values) {
+    final maxValue = values.fold<double>(0, (m, v) => v > m ? v : m);
+    if (maxValue <= 0) return List<double>.filled(values.length, 0);
+    return values.map((v) => v / maxValue).toList(growable: false);
+  }
+
+  List<({String label, String value})> _inspectorRows(_SalesHistoryPoint point) {
+    final preferred = widget.series.preferredCurrency;
+    final rows = <({String label, String value})>[];
+    final codes = widget.series.currencies.isNotEmpty
+        ? widget.series.currencies
+        : (point.byCurrency.keys.toList()..sort());
+
+    for (final code in codes) {
+      final value = point.byCurrency[code] ?? 0;
+      if (value <= 0) continue;
+      rows.add((
+        label: code,
+        value: formatMerchantMoneyExact(value, code),
+      ));
+    }
+
+    final preferredTotal = point.amountIn(
+      preferred,
+      unitsPerUsd: widget.series.unitsPerUsd,
+    );
+    if (preferredTotal > 0 &&
+        (rows.length > 1 ||
+            (rows.length == 1 && rows.first.label != preferred))) {
+      rows.add((
+        label: '≈ $preferred',
+        value: formatMerchantMoneyExact(preferredTotal, preferred),
+      ));
+    }
+
+    if (point.usdEstimate > 0 && widget.currencyFilter == 'usd_estimate') {
+      rows.add((
+        label: '≈ USD',
+        value: formatMerchantMoneyExact(point.usdEstimate, 'USD'),
+      ));
+    }
+
+    return rows;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final maxY = widget.salesHistory.reduce((a, b) => a > b ? a : b);
-    final safeHighlight = _selectedIndex.clamp(
-      0,
-      widget.salesHistory.length - 1,
-    );
-    final selectedValue = widget.salesHistory[safeHighlight];
-    final selectedLabel = widget.tooltipLabels[safeHighlight];
+    final preferred = widget.series.preferredCurrency;
+    final visible = _visiblePoints;
+    final values = _activeValues.isEmpty
+        ? const <double>[0, 0, 0, 0, 0, 0, 0]
+        : _activeValues;
+    final pointCount = values.length;
+    final localHighlight = (_selectedIndex - _viewStart).clamp(0, pointCount - 1);
+    final selectedPoint = (!_inspectorOpen || _allPoints.isEmpty)
+        ? null
+        : _allPoints[_selectedIndex.clamp(0, _allPoints.length - 1)];
+    final selectedLabel = selectedPoint?.tooltipLabel ?? '';
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isHourlyAxis = widget.labels.every((label) => label.length <= 2);
-        final maxVisibleLabels = isHourlyAxis
-            ? (constraints.maxWidth < 280 ? 6 : 8)
-            : (constraints.maxWidth < 280 ? 4 : 5);
-        final labelStep = widget.labels.length <= maxVisibleLabels
-            ? 1
-            : ((widget.labels.length - 1) / (maxVisibleLabels - 1)).ceil();
-        final xRatio = widget.salesHistory.length <= 1
-            ? 0.5
-            : safeHighlight / (widget.salesHistory.length - 1);
-        final bubbleLeft = (constraints.maxWidth * xRatio) - 38;
+    final showAll = widget.currencyFilter == 'all';
+    final showUsdOnly = widget.currencyFilter == 'usd_estimate';
+    final showPreferred = widget.currencyFilter == preferred || showAll;
+    final lineBars = <LineChartBarData>[];
+    final visibleLabels = visible.map((p) => p.label).toList(growable: false);
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          onHorizontalDragStart: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          onHorizontalDragUpdate: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IgnorePointer(
+    if (showAll) {
+      for (final code in widget.series.currencies) {
+        final raw = visible
+            .map((p) => p.byCurrency[code] ?? 0.0)
+            .toList(growable: false);
+        final normalized = _normalize(raw);
+        final color = widget.currencyColorFor(code);
+        lineBars.add(
+          LineChartBarData(
+            spots: [
+              for (var i = 0; i < normalized.length; i++)
+                FlSpot(i.toDouble(), normalized[i]),
+            ],
+            isCurved: true,
+            color: color,
+            barWidth: 2.2,
+            isStrokeCapRound: true,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                final isHighlight = _inspectorOpen && index == localHighlight;
+                return FlDotCirclePainter(
+                  radius: isHighlight ? 4.2 : 2.0,
+                  color: color,
+                  strokeWidth: isHighlight ? 2 : 0,
+                  strokeColor: Colors.white,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(show: false),
+          ),
+        );
+      }
+    }
+
+    if (showPreferred || showUsdOnly) {
+      final raw = showUsdOnly
+          ? visible.map((p) => p.usdEstimate).toList(growable: false)
+          : values;
+      final color = showUsdOnly
+          ? const Color(0xFF7C3AED)
+          : widget.currencyColorFor(preferred);
+      final normalized = _normalize(raw);
+      lineBars.add(
+        LineChartBarData(
+          spots: [
+            for (var i = 0; i < normalized.length; i++)
+              FlSpot(i.toDouble(), normalized[i]),
+          ],
+          isCurved: true,
+          color: color,
+          barWidth: 2.4,
+          dashArray: const [6, 4],
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: !showAll,
+            getDotPainter: (spot, percent, barData, index) {
+              final isHighlight = _inspectorOpen && index == localHighlight;
+              return FlDotCirclePainter(
+                radius: isHighlight ? 4.8 : 2.2,
+                color: color,
+                strokeWidth: isHighlight ? 2 : 0,
+                strokeColor: Colors.white,
+              );
+            },
+          ),
+          belowBarData: BarAreaData(show: false),
+        ),
+      );
+    } else if (!showAll) {
+      final color = widget.currencyColorFor(widget.currencyFilter);
+      final maxY = values.fold<double>(0, (m, v) => v > m ? v : m);
+      final scale = maxY <= 0 ? 1.0 : maxY;
+      lineBars.add(
+        LineChartBarData(
+          spots: [
+            for (var i = 0; i < values.length; i++)
+              FlSpot(i.toDouble(), values[i] / scale),
+          ],
+          isCurved: true,
+          color: color,
+          barWidth: 2.4,
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, barData, index) {
+              final isHighlight = _inspectorOpen && index == localHighlight;
+              return FlDotCirclePainter(
+                radius: isHighlight ? 4.8 : 2.2,
+                color: color,
+                strokeWidth: isHighlight ? 2 : 0,
+                strokeColor: Colors.white,
+              );
+            },
+          ),
+          belowBarData: BarAreaData(show: false),
+        ),
+      );
+    }
+
+    final inspectorRows =
+        selectedPoint == null ? const <({String label, String value})>[] : _inspectorRows(selectedPoint);
+
+    Widget zoomBtn({
+      required IconData icon,
+      required VoidCallback? onPressed,
+      required String tooltip,
+    }) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        icon: Icon(icon, size: 18),
+        color: onPressed == null
+            ? const Color(0xFFC4C7D8)
+            : const Color(0xFF4B5563),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              _canZoomOut || _canZoomIn
+                  ? 'Zoom ${_viewStart + 1}–${_viewEnd + 1} / ${_allPoints.length}'
+                  : 'Vista completa',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF9CA3AF),
+              ),
+            ),
+            const Spacer(),
+            zoomBtn(
+              icon: Icons.chevron_left_rounded,
+              onPressed: _canPanLeft ? () => _pan(-1) : null,
+              tooltip: 'Desplazar',
+            ),
+            zoomBtn(
+              icon: Icons.remove_rounded,
+              onPressed: _canZoomOut ? () => _zoom(zoomIn: false) : null,
+              tooltip: 'Alejar',
+            ),
+            zoomBtn(
+              icon: Icons.add_rounded,
+              onPressed: _canZoomIn ? () => _zoom(zoomIn: true) : null,
+              tooltip: 'Acercar',
+            ),
+            zoomBtn(
+              icon: Icons.chevron_right_rounded,
+              onPressed: _canPanRight ? () => _pan(1) : null,
+              tooltip: 'Desplazar',
+            ),
+            zoomBtn(
+              icon: Icons.refresh_rounded,
+              onPressed: (_viewStart != 0 ||
+                      _viewEnd != (_allPoints.length - 1).clamp(0, 9999))
+                  ? _resetView
+                  : null,
+              tooltip: 'Reset',
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: widget.isMobile ? 148 : 156,
+          width: double.infinity,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isHourlyAxis =
+                  visibleLabels.every((label) => label.length <= 2);
+              final maxVisibleLabels = isHourlyAxis
+                  ? (constraints.maxWidth < 280 ? 6 : 8)
+                  : (constraints.maxWidth < 280 ? 4 : 5);
+              final labelStep = visibleLabels.length <= maxVisibleLabels
+                  ? 1
+                  : ((visibleLabels.length - 1) / (maxVisibleLabels - 1))
+                        .ceil();
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
+                onHorizontalDragStart: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
+                onHorizontalDragUpdate: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
                 child: LineChart(
                   LineChartData(
                     lineTouchData: const LineTouchData(enabled: false),
-                    gridData: FlGridData(show: false),
+                    gridData: const FlGridData(show: false),
                     titlesData: FlTitlesData(
                       leftTitles: const AxisTitles(
                         sideTitles: SideTitles(showTitles: false),
@@ -4864,24 +6154,19 @@ class _SalesSummaryChartState extends State<_SalesSummaryChart> {
                           interval: 1,
                           getTitlesWidget: (value, meta) {
                             final index = value.toInt();
-                            if (index < 0 || index >= widget.labels.length) {
+                            if (index < 0 || index >= visibleLabels.length) {
                               return const SizedBox.shrink();
                             }
-
-                            final isBoundary =
-                                index == 0 || index == widget.labels.length - 1;
+                            final isBoundary = index == 0 ||
+                                index == visibleLabels.length - 1;
                             final shouldShow =
                                 isBoundary || index % labelStep == 0;
-                            if (!shouldShow) {
-                              return const SizedBox.shrink();
-                            }
-
-                            final text = widget.labels[index];
+                            if (!shouldShow) return const SizedBox.shrink();
                             return SideTitleWidget(
                               meta: meta,
                               space: 6,
                               child: Text(
-                                text,
+                                visibleLabels[index],
                                 style: GoogleFonts.poppins(
                                   fontSize: isHourlyAxis ? 10 : 9,
                                   fontWeight: FontWeight.w500,
@@ -4895,92 +6180,146 @@ class _SalesSummaryChartState extends State<_SalesSummaryChart> {
                     ),
                     borderData: FlBorderData(show: false),
                     minX: 0,
-                    maxX: (widget.salesHistory.length - 1).toDouble(),
+                    maxX: (pointCount - 1).toDouble().clamp(0, double.infinity),
                     minY: 0,
-                    maxY: maxY <= 0 ? 1 : maxY * 1.28,
+                    maxY: 1.15,
                     extraLinesData: ExtraLinesData(
                       verticalLines: [
-                        VerticalLine(
-                          x: safeHighlight.toDouble(),
-                          color: widget.color.withValues(alpha: 0.28),
-                          strokeWidth: 1,
-                          dashArray: const [4, 4],
-                        ),
+                        if (_inspectorOpen)
+                          VerticalLine(
+                            x: localHighlight.toDouble(),
+                            color: widget.purple.withValues(alpha: 0.28),
+                            strokeWidth: 1,
+                            dashArray: const [4, 4],
+                          ),
                       ],
                     ),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: [
-                          for (int i = 0; i < widget.salesHistory.length; i++)
-                            FlSpot(i.toDouble(), widget.salesHistory[i]),
-                        ],
-                        isCurved: true,
-                        color: widget.color,
-                        barWidth: 2.2,
-                        isStrokeCapRound: true,
-                        dotData: FlDotData(
-                          show: true,
-                          getDotPainter: (spot, percent, barData, index) {
-                            final isHighlight = index == safeHighlight;
-                            return FlDotCirclePainter(
-                              radius: isHighlight ? 4.8 : 2.4,
-                              color: widget.color,
-                              strokeWidth: isHighlight ? 2 : 0,
-                              strokeColor: Colors.white,
-                            );
-                          },
-                        ),
-                        belowBarData: BarAreaData(show: false),
-                      ),
-                    ],
+                    lineBarsData: lineBars,
                   ),
                   duration: const Duration(milliseconds: 120),
                 ),
-              ),
-              Positioned(
-                left: bubbleLeft.clamp(0, constraints.maxWidth - 88),
-                top: -8,
-                child: IgnorePointer(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF312E81),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          selectedLabel,
-                          style: GoogleFonts.poppins(
-                            fontSize: 8,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.86),
-                            height: 1,
-                          ),
+              );
+            },
+          ),
+        ),
+        if (selectedPoint != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F7FC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE8EAF2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selectedLabel,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF11183C),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '\$${selectedValue.toStringAsFixed(2)}',
-                          style: GoogleFonts.poppins(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            height: 1,
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                      onPressed: _dismissInspector,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      color: const Color(0xFF6B6F92),
+                      tooltip: 'Cerrar',
+                    ),
+                  ],
+                ),
+                Text(
+                  '${selectedPoint.orderCount} pedido${selectedPoint.orderCount == 1 ? '' : 's'}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF6B6F92),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (inspectorRows.isEmpty)
+                  Text(
+                    'Sin ventas',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF6B6F92),
+                    ),
+                  )
+                else
+                  for (final row in inspectorRows)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 72,
+                            child: Text(
+                              row.label,
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: row.label.startsWith('≈')
+                                    ? widget.purple
+                                    : widget.currencyColorFor(
+                                        row.label.replaceFirst('≈ ', ''),
+                                      ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                          Expanded(
+                            child: Text(
+                              row.value,
+                              style: GoogleFonts.poppins(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF11183C),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => widget.onOpenOrders(selectedPoint),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF6D28D9),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Ver pedidos',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        );
-      },
+        ],
+      ],
     );
   }
 }
@@ -5037,18 +6376,21 @@ class _SalesMiniCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              data.value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                fontSize: 25,
-                height: 0.95,
-                color: const Color(0xFF11183C),
-                fontWeight: FontWeight.w700,
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                data.value,
+                maxLines: 1,
+                softWrap: false,
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  height: 0.95,
+                  color: const Color(0xFF11183C),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -5511,8 +6853,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             businessOnline
-                                ? 'Negocio en línea y visible para tus clientes'
-                                : 'Negocio pausado temporalmente',
+                                ? 'Mostrar al público'
+                                : 'Ocultar al público',
                             style: GoogleFonts.poppins(
                               fontSize: 12.4,
                               fontWeight: FontWeight.w700,
@@ -5557,87 +6899,97 @@ class _CompactRecentOrderTile extends StatelessWidget {
     required this.onTap,
     required this.darkText,
     required this.mutedText,
+    this.onToggleArchive,
+    this.onDeletePermanent,
   });
 
   final PedidoModel pedido;
   final VoidCallback onTap;
+  final VoidCallback? onToggleArchive;
+  final VoidCallback? onDeletePermanent;
   final Color darkText;
   final Color mutedText;
 
-  String get _shortOrderId {
-    final value = (pedido.orderId ?? pedido.id).trim();
-    if (value.length <= 10) {
-      return value;
-    }
-    return '${value.substring(0, 10)}…';
-  }
-
-  String get _hourLabel {
-    final created = pedido.createdAt;
-    if (created == null) {
-      return '--:--';
-    }
-    final local = created.toLocal();
-    final hh = local.hour.toString().padLeft(2, '0');
-    final mm = local.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
+  String get _orderNumber {
+    final value = (pedido.orderId ?? '').trim();
+    if (value.isNotEmpty) return value;
+    return pedido.id.trim();
   }
 
   @override
   Widget build(BuildContext context) {
     final status = pedido.statusBucket;
+    final currency = pedido.currencyForDisplay();
+    final total = pedido.totalForDisplay(currency);
+    final orderNumber = _orderNumber;
 
-    return SizedBox(
-      height: 72,
-      child: Material(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE8EAF2)),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0D0F172A),
-                  blurRadius: 8,
-                  offset: Offset(0, 3),
-                ),
-              ],
+        onTap: onTap,
+        onLongPress: onToggleArchive,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 76),
+          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: pedido.isArchived
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFFE8EAF2),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: status.color.withValues(alpha: 0.14),
-                  ),
-                  child: Icon(status.icon, size: 17, color: status.color),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0D0F172A),
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: status.color.withValues(alpha: 0.14),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _shortOrderId,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: darkText,
-                        ),
+                child: Icon(
+                  pedido.isArchived
+                      ? Icons.inventory_2_outlined
+                      : status.icon,
+                  size: 17,
+                  color: status.color,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      orderNumber,
+                      softWrap: true,
+                      maxLines: 2,
+                      overflow: TextOverflow.visible,
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                        color: darkText,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$_hourLabel · ${status.label}',
+                    ),
+                    const SizedBox(height: 3),
+                    KitchenRelativeTimeTicker(
+                      createdAt: pedido.createdAt,
+                      builder: (context, label) => Text(
+                        '$label · ${status.label}'
+                        '${pedido.isArchived ? ' · Archivado' : ''}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
@@ -5646,24 +6998,59 @@ class _CompactRecentOrderTile extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  pedido.total != null
-                      ? '\$${pedido.total!.toStringAsFixed(2)}'
-                      : '--',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: darkText,
-                  ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                total > 0
+                    ? '$currency ${total.toStringAsFixed(currency == 'COP' ? 0 : 2)}'
+                    : '--',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
                 ),
+              ),
+              if (onToggleArchive != null || onDeletePermanent != null) ...[
+                PopupMenuButton<String>(
+                  tooltip: 'Más opciones',
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.more_vert_rounded,
+                    color: mutedText,
+                    size: 18,
+                  ),
+                  onSelected: (value) {
+                    if (value == 'archive') onToggleArchive?.call();
+                    if (value == 'delete') onDeletePermanent?.call();
+                  },
+                  itemBuilder: (context) => [
+                    if (onToggleArchive != null)
+                      PopupMenuItem<String>(
+                        value: 'archive',
+                        child: Text(
+                          pedido.isArchived
+                              ? 'Recuperar pedido'
+                              : 'Archivar pedido',
+                        ),
+                      ),
+                    if (onDeletePermanent != null)
+                      const PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text(
+                          'Eliminar permanentemente',
+                          style: TextStyle(color: Color(0xFFB91C1C)),
+                        ),
+                      ),
+                  ],
+                ),
+              ] else ...[
                 const SizedBox(width: 6),
                 Icon(Icons.chevron_right_rounded, color: mutedText, size: 18),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -5721,6 +7108,33 @@ extension _SalesRangeUi on _SalesRange {
         return 'Desde el principio';
       case _SalesRange.custom:
         return 'Personalizado';
+    }
+  }
+
+  String get kpiShortLabel {
+    switch (this) {
+      case _SalesRange.today:
+        return 'hoy';
+      case _SalesRange.yesterday:
+        return 'ayer';
+      case _SalesRange.lastWeek:
+        return 'semana';
+      case _SalesRange.lastFortnight:
+        return 'quincena';
+      case _SalesRange.thisMonth:
+        return 'mes';
+      case _SalesRange.lastMonth:
+        return '30d';
+      case _SalesRange.last3Months:
+        return '3m';
+      case _SalesRange.last6Months:
+        return '6m';
+      case _SalesRange.lastYear:
+        return 'año';
+      case _SalesRange.allTime:
+        return 'total';
+      case _SalesRange.custom:
+        return 'rango';
     }
   }
 
@@ -5790,21 +7204,83 @@ class _SalesRangeWindow {
 
   bool contains(DateTime? date) {
     if (date == null) return false;
-    final local = date.toLocal();
-    return !local.isBefore(startInclusive) && local.isBefore(endExclusive);
+    // Compare absolute instants (Caracas business windows are UTC-based).
+    final instant = date.toUtc();
+    return !instant.isBefore(startInclusive.toUtc()) &&
+        instant.isBefore(endExclusive.toUtc());
+  }
+}
+
+class _SalesHistoryPoint {
+  const _SalesHistoryPoint({
+    required this.label,
+    required this.tooltipLabel,
+    required this.orderCount,
+    required this.byCurrency,
+    required this.usdEstimate,
+    required this.startInclusive,
+    required this.endExclusive,
+  });
+
+  final String label;
+  final String tooltipLabel;
+  final int orderCount;
+  final Map<String, double> byCurrency;
+  final double usdEstimate;
+  final DateTime startInclusive;
+  final DateTime endExclusive;
+
+  double amountIn(
+    String currency, {
+    required Map<String, double> unitsPerUsd,
+  }) {
+    return sumAmountsInCurrency(
+      byCurrency: byCurrency,
+      toCurrency: currency,
+      unitsPerUsd: unitsPerUsd,
+      usdEstimate: usdEstimate,
+    );
   }
 }
 
 class _SalesHistorySeries {
   const _SalesHistorySeries({
-    required this.values,
-    required this.labels,
-    required this.tooltipLabels,
+    required this.points,
+    required this.currencies,
+    required this.preferredCurrency,
+    required this.unitsPerUsd,
   });
 
-  final List<double> values;
-  final List<String> labels;
-  final List<String> tooltipLabels;
+  final List<_SalesHistoryPoint> points;
+  final List<String> currencies;
+  final String preferredCurrency;
+  final Map<String, double> unitsPerUsd;
+
+  List<String> get labels =>
+      points.map((point) => point.label).toList(growable: false);
+
+  List<String> get tooltipLabels =>
+      points.map((point) => point.tooltipLabel).toList(growable: false);
+
+  List<double> valuesForFilter(String filter) {
+    if (filter == 'usd_estimate') {
+      return points.map((point) => point.usdEstimate).toList(growable: false);
+    }
+    if (filter == 'all' || filter == preferredCurrency) {
+      // Default / primary: all checkouts expressed in business currency.
+      return points
+          .map(
+            (point) => point.amountIn(
+              preferredCurrency,
+              unitsPerUsd: unitsPerUsd,
+            ),
+          )
+          .toList(growable: false);
+    }
+    return points
+        .map((point) => point.byCurrency[filter] ?? 0)
+        .toList(growable: false);
+  }
 }
 
 class _DashboardSnapshot {
@@ -6108,26 +7584,43 @@ class _CatalogUpdateBanner extends StatelessWidget {
 class _DashboardContentNavObserver extends NavigatorObserver {
   _DashboardContentNavObserver(this.onStackChanged);
 
-  final VoidCallback onStackChanged;
+  final void Function(int overlayDepth) onStackChanged;
+  int _overlayDepth = 0;
+
+  /// Bottom sheets / dialogs must never affect `/panel` history — that was
+  /// the bug that sent users back to Inicio after picking a date range.
+  bool _countsForShell(Route<dynamic> route) => route is! PopupRoute;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (!_countsForShell(route)) return;
+    if (previousRoute != null) {
+      _overlayDepth += 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (!_countsForShell(route)) return;
+    if (_overlayDepth > 0) {
+      _overlayDepth -= 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (!_countsForShell(route)) return;
+    if (_overlayDepth > 0) {
+      _overlayDepth -= 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    onStackChanged();
+    onStackChanged(_overlayDepth);
   }
 }
 

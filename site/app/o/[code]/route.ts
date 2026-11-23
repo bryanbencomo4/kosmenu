@@ -53,6 +53,15 @@ export async function GET(
     request.url,
   );
   publicUrl.searchParams.set('s', shortLink.code);
+  // Preserve actionable intents from email/WhatsApp links (hashes are lost on redirect).
+  const repeat = (request.nextUrl.searchParams.get('repeat') ?? '').trim();
+  if (repeat === '1' || repeat.toLowerCase() === 'true') {
+    publicUrl.searchParams.set('repeat', '1');
+  }
+  const rate = (request.nextUrl.searchParams.get('rate') ?? '').trim();
+  if (rate === '1' || rate.toLowerCase() === 'true') {
+    publicUrl.searchParams.set('rate', '1');
+  }
   const response = redirectNoStore(publicUrl);
   if (audience.clearCourierCookie) {
     response.cookies.set(expiredCourierOrderCookie(shortLink.code));

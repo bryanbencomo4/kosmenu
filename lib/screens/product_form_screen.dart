@@ -3,19 +3,26 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:kosmenu_app/core/commerce_fx.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/product_option_group.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_crop.dart';
+import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
+import 'package:kosmenu_app/services/product_image_variants_client.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
+import 'package:kosmenu_app/widgets/media_crop_editor.dart';
 import 'package:kosmenu_app/widgets/product_options_editor.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -54,11 +61,35 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _selectedCategoryId;
   String? _upsellBadge;
   bool _upsellEnabled = true;
+  bool _ventaPorPeso = false;
+  final TextEditingController _weightPasoController = TextEditingController(
+    text: '0.05',
+  );
+  final TextEditingController _weightMinimoController = TextEditingController(
+    text: '0.1',
+  );
+  final TextEditingController _weightMaximoController = TextEditingController(
+    text: '25',
+  );
+  bool _deliveryExclude = false;
+  bool _deliverySurchargeEnabled = false;
+  /// false = monto fijo; true = monto según opción del menú (como precios dependientes).
+  bool _deliverySurchargeByOption = false;
+  String? _deliverySurchargeGroupId;
+  final Map<String, TextEditingController> _deliveryOptionSurchargeControllers =
+      <String, TextEditingController>{};
+  final TextEditingController _deliverySurchargeController =
+      TextEditingController();
+  final TextEditingController _deliverySurchargeLabelController =
+      TextEditingController(text: 'Empaque');
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
   String? _businessName;
   XFile? _pickedImage;
+  Uint8List? _pickedImageBytes;
+  /// Uncropped source so re-crop can restore pixels outside the last 3:4 frame.
+  Uint8List? _cropMasterBytes;
   bool _isLoadingPricingConfig = false;
   String _baseCurrency = 'USD';
   String _selectedPriceCurrency = 'USD';
@@ -91,6 +122,76 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         : '';
     _upsellBadge = UpsellBadge.normalize(product?.upsellBadge);
     _upsellEnabled = product?.upsellEnabled ?? true;
+    final rawWeight = product?.opcionesMenu?['venta_por_peso'];
+    _ventaPorPeso = rawWeight is Map && rawWeight['activado'] != false;
+    if (rawWeight is Map) {
+      final paso = _readWeightNumber(rawWeight['paso'] ?? rawWeight['step']);
+      final minimo = _readWeightNumber(rawWeight['minimo'] ?? rawWeight['min']);
+      final maximo = _readWeightNumber(rawWeight['maximo'] ?? rawWeight['max']);
+      if (paso != null) {
+        _weightPasoController.text = _formatWeightConfig(paso);
+      }
+      if (minimo != null) {
+        _weightMinimoController.text = _formatWeightConfig(minimo);
+      }
+      if (maximo != null) {
+        _weightMaximoController.text = _formatWeightConfig(maximo);
+      }
+    }
+    final rawDelivery = product?.opcionesMenu?['delivery'];
+    if (rawDelivery is Map) {
+      _deliveryExclude =
+          rawDelivery['exclude'] == true ||
+          rawDelivery['excluido'] == true ||
+          rawDelivery['excluded'] == true;
+      final label =
+          (rawDelivery['surcharge_label'] ??
+                  rawDelivery['surchargeLabel'] ??
+                  rawDelivery['motivo'] ??
+                  rawDelivery['reason'] ??
+                  '')
+              .toString()
+              .trim();
+      if (label.isNotEmpty) {
+        _deliverySurchargeLabelController.text = label;
+      }
+      final rawMap =
+          rawDelivery['surcharge_por_opcion'] ??
+          rawDelivery['surchargePorOpcion'] ??
+          rawDelivery['recargo_por_opcion'];
+      if (rawMap is Map && rawMap.isNotEmpty) {
+        _deliverySurchargeEnabled = true;
+        _deliverySurchargeByOption = true;
+        final groupId =
+            (rawDelivery['surcharge_grupo'] ?? rawDelivery['surchargeGrupo'] ?? '')
+                .toString()
+                .trim();
+        _deliverySurchargeGroupId = groupId.isEmpty ? null : groupId;
+        for (final entry in rawMap.entries) {
+          final optionId = entry.key.toString().trim();
+          if (optionId.isEmpty) continue;
+          final amount = _readWeightNumber(entry.value);
+          if (amount == null || amount <= 0) continue;
+          _deliveryOptionSurchargeControllers[optionId] = TextEditingController(
+            text: amount == amount.roundToDouble()
+                ? amount.toStringAsFixed(0)
+                : amount.toStringAsFixed(2),
+          );
+        }
+      } else {
+        final surcharge = _readWeightNumber(
+          rawDelivery['surcharge'] ??
+              rawDelivery['recargo'] ??
+              rawDelivery['extra'],
+        );
+        _deliverySurchargeEnabled = surcharge != null && surcharge > 0;
+        if (_deliverySurchargeEnabled) {
+          _deliverySurchargeController.text = surcharge!.toStringAsFixed(
+            surcharge == surcharge.roundToDouble() ? 0 : 2,
+          );
+        }
+      }
+    }
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -106,6 +207,32 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
+  static double? _readWeightNumber(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse('$value');
+  }
+
+  static String _formatWeightConfig(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  double _parseWeightConfigField(
+    TextEditingController controller, {
+    required double fallback,
+    required double min,
+    required double max,
+  }) {
+    final parsed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
+    if (parsed == null || !parsed.isFinite) return fallback;
+    return parsed.clamp(min, max).toDouble();
+  }
+
   @override
   void dispose() {
     _aiImagePollTimer?.cancel();
@@ -113,7 +240,34 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _descriptionController.dispose();
     _priceController.dispose();
     _compareAtPriceController.dispose();
+    _weightPasoController.dispose();
+    _weightMinimoController.dispose();
+    _weightMaximoController.dispose();
+    _deliverySurchargeController.dispose();
+    _deliverySurchargeLabelController.dispose();
+    for (final controller in _deliveryOptionSurchargeControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  List<ProductOptionGroup> _deliveryOptionGroups() {
+    final live = _optionsEditorKey.currentState?.groups;
+    if (live != null && live.isNotEmpty) return live;
+    final raw = widget.product?.opcionesMenu;
+    if (raw == null) return const <ProductOptionGroup>[];
+    return ProductOptionGroup.listFromMenuOptions(
+      Map<String, dynamic>.from(raw),
+    );
+  }
+
+  void _ensureDeliveryOptionControllers(ProductOptionGroup group) {
+    for (final option in group.opciones.where((item) => item.activo)) {
+      _deliveryOptionSurchargeControllers.putIfAbsent(
+        option.id,
+        TextEditingController.new,
+      );
+    }
   }
 
   bool get _hasRemoteImage =>
@@ -209,21 +363,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     setState(() => _isLoadingPricingConfig = true);
     try {
-      final comercio = await Supabase.instance.client
-          .from('comercios')
-          .select('moneda, exchange_rate_value, tasa_cambio_pesos')
-          .eq('id', comercioId)
-          .maybeSingle();
-
-      final methods = await Supabase.instance.client
+      final fxFuture = loadCommerceFx(Supabase.instance.client, comercioId);
+      final methodsFuture = Supabase.instance.client
           .from('metodos_pago')
           .select('tipo')
           .eq('comercio_id', comercioId);
 
-      final currencies = <String>{};
-      final dbBase =
-          (comercio?['moneda']?.toString().trim().toUpperCase() ?? 'USD');
-      currencies.add(dbBase.isEmpty ? 'USD' : dbBase);
+      final fx = await fxFuture;
+      final methods = await methodsFuture;
+
+      final currencies = <String>{fx.baseCurrency};
 
       for (final row in methods as List<dynamic>) {
         final tipo = (row['tipo']?.toString().trim().toLowerCase() ?? '');
@@ -236,27 +385,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         }
       }
 
-      final rateRaw =
-          comercio?['exchange_rate_value'] ?? comercio?['tasa_cambio_pesos'];
-      final rate = rateRaw is num
-          ? rateRaw.toDouble()
-          : double.tryParse(
-                  (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
-                ) ??
-                0;
-
       if (currencies.isEmpty) {
         currencies.add('USD');
       }
 
       if (!mounted) return;
       setState(() {
-        _baseCurrency = dbBase.isEmpty ? 'USD' : dbBase;
-        _usdCopRate = rate;
+        _baseCurrency = fx.baseCurrency;
+        _usdCopRate = fx.usdCopRate;
         _availablePriceCurrencies = currencies;
-        if (!_availablePriceCurrencies.contains(_selectedPriceCurrency)) {
-          _selectedPriceCurrency = _baseCurrency;
-        }
+        // Stored product prices are always in the commerce base currency.
+        // Keep the editor on that currency so opening a COP price with USD
+        // selected does not multiply the value by the FX rate on save.
+        _selectedPriceCurrency = _baseCurrency;
       });
     } catch (_) {
       if (!mounted) return;
@@ -288,6 +429,57 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
 
     return value;
+  }
+
+  double _convertFromBaseCurrency({
+    required double value,
+    required String toCurrency,
+  }) {
+    if (toCurrency == _baseCurrency) {
+      return value;
+    }
+
+    if (toCurrency == 'USD' && _baseCurrency == 'COP' && _usdCopRate > 0) {
+      return value / _usdCopRate;
+    }
+    if (toCurrency == 'COP' && _baseCurrency == 'USD' && _usdCopRate > 0) {
+      return value * _usdCopRate;
+    }
+
+    return value;
+  }
+
+  void _onPriceCurrencyChanged(String? value) {
+    if (value == null || value == _selectedPriceCurrency) return;
+
+    void rewrite(TextEditingController controller) {
+      final raw = controller.text.trim().replaceAll(',', '.');
+      if (raw.isEmpty) return;
+      final parsed = double.tryParse(raw);
+      if (parsed == null) return;
+      final inBase = _convertToBaseCurrency(
+        value: parsed,
+        fromCurrency: _selectedPriceCurrency,
+      );
+      final inNew = _convertFromBaseCurrency(
+        value: inBase,
+        toCurrency: value,
+      );
+      controller.text = inNew.toStringAsFixed(2);
+    }
+
+    rewrite(_priceController);
+    rewrite(_compareAtPriceController);
+    if (_deliverySurchargeEnabled) {
+      if (_deliverySurchargeByOption) {
+        for (final controller in _deliveryOptionSurchargeControllers.values) {
+          rewrite(controller);
+        }
+      } else {
+        rewrite(_deliverySurchargeController);
+      }
+    }
+    setState(() => _selectedPriceCurrency = value);
   }
 
   double? _previewBasePrice() {
@@ -323,17 +515,107 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         maxWidth: 1600,
       );
     }
-    if (file == null) return;
+    if (file == null || !mounted) return;
 
+    final masterBytes = await file.readAsBytes();
     if (!mounted) return;
-    setState(() => _pickedImage = file);
+
+    final cropped = await const MediaImageCropService().cropFromBytes(
+      context,
+      sourceBytes: masterBytes,
+      kind: MediaCropKind.product,
+    );
+    if (cropped == null || !mounted) return;
+
+    setState(() {
+      _cropMasterBytes = masterBytes;
+      _pickedImageBytes = cropped.bytes;
+      _pickedImage = XFile.fromData(
+        cropped.bytes,
+        name: cropped.fileName,
+        mimeType: cropped.mimeType,
+      );
+    });
   }
 
   void _removeCurrentImageSelection() {
     if (!_hasLocalImage && !_hasRemoteImage) return;
     setState(() {
       _pickedImage = null;
+      _pickedImageBytes = null;
+      _cropMasterBytes = null;
       _remoteImageUrl = null;
+    });
+  }
+
+  Future<void> _recropCurrentImage() async {
+    if (_isSaving || _isUploadingImage) return;
+
+    Uint8List? sourceBytes = _cropMasterBytes;
+    if (sourceBytes == null || sourceBytes.isEmpty) {
+      final remote = _remoteImageUrl?.trim() ?? '';
+      final masterSibling = mediaMasterSiblingUrl(remote);
+      if (masterSibling != null &&
+          masterSibling.isNotEmpty &&
+          masterSibling != remote) {
+        try {
+          final response = await http
+              .get(Uri.parse(masterSibling))
+              .timeout(const Duration(seconds: 30));
+          if (response.statusCode >= 200 &&
+              response.statusCode < 300 &&
+              response.bodyBytes.isNotEmpty) {
+            sourceBytes = response.bodyBytes;
+          }
+        } catch (_) {
+          sourceBytes = null;
+        }
+      }
+    }
+    if (sourceBytes == null || sourceBytes.isEmpty) {
+      sourceBytes = _pickedImageBytes;
+      if (sourceBytes == null && _pickedImage != null) {
+        sourceBytes = await _pickedImage!.readAsBytes();
+      }
+    }
+    if (sourceBytes == null || sourceBytes.isEmpty) {
+      final url = _remoteImageUrl?.trim() ?? '';
+      if (url.isEmpty) return;
+      try {
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 30));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw StateError('HTTP ${response.statusCode}');
+        }
+        sourceBytes = response.bodyBytes;
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo cargar la imagen para recortar: $error'),
+          ),
+        );
+        return;
+      }
+    }
+    if (sourceBytes.isEmpty || !mounted) return;
+
+    final cropped = await const MediaImageCropService().cropFromBytes(
+      context,
+      sourceBytes: sourceBytes,
+      kind: MediaCropKind.product,
+    );
+    if (cropped == null || !mounted) return;
+
+    setState(() {
+      _cropMasterBytes = sourceBytes;
+      _pickedImageBytes = cropped.bytes;
+      _pickedImage = XFile.fromData(
+        cropped.bytes,
+        name: cropped.fileName,
+        mimeType: cropped.mimeType,
+      );
     });
   }
 
@@ -422,6 +704,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               if (hasImage)
                 ListTile(
                   leading: Icon(
+                    Icons.crop_rounded,
+                    color: colorScheme.onSurface,
+                  ),
+                  title: Text(
+                    'Ajustar encuadre',
+                    style: TextStyle(color: colorScheme.onSurface),
+                  ),
+                  subtitle: Text(
+                    'Recorta la foto actual a 3:4',
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                  onTap: () => Navigator.of(context).pop('recrop'),
+                ),
+              if (hasImage)
+                ListTile(
+                  leading: Icon(
                     Icons.delete_outline_rounded,
                     color: colorScheme.error,
                   ),
@@ -446,6 +744,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         break;
       case 'ai':
         await _generateAiImageForExistingProduct();
+        break;
+      case 'recrop':
+        await _recropCurrentImage();
         break;
       case 'remove':
         _removeCurrentImageSelection();
@@ -890,6 +1191,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() {
       _remoteImageUrl = imageUrl;
       _pickedImage = null;
+      _pickedImageBytes = null;
+      _cropMasterBytes = null;
       _aiImageStatus = status;
       _isGeneratingAiImage = !isAiImageGenerationSettled(status);
     });
@@ -922,6 +1225,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           if (imageUrl.isNotEmpty) {
             _remoteImageUrl = imageUrl;
             _pickedImage = null;
+            _pickedImageBytes = null;
+            _cropMasterBytes = null;
           }
           _aiImageStatus = status;
           _isGeneratingAiImage = false;
@@ -967,6 +1272,55 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return null;
   }
 
+  static double? _parseWeightInput(String? value) {
+    final raw = (value ?? '').trim().replaceAll(',', '.');
+    if (raw.isEmpty) return null;
+    if (!RegExp(r'^\d+(\.\d{1,3})?$').hasMatch(raw)) return null;
+    final parsed = double.tryParse(raw);
+    if (parsed == null || !parsed.isFinite) return null;
+    return parsed;
+  }
+
+  String? _validateWeightPaso(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 0.05)';
+    if (parsed < 0.01) return 'Mínimo 0.01 kg';
+    if (parsed > 1) return 'Máximo 1 kg';
+    return null;
+  }
+
+  String? _validateWeightMinimo(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 0.1)';
+    if (parsed <= 0) return 'Debe ser mayor a 0';
+    if (parsed > 5) return 'Máximo 5 kg';
+    final paso = _parseWeightInput(_weightPasoController.text);
+    if (paso != null && parsed + 1e-9 < paso) {
+      return 'Debe ser ≥ al paso';
+    }
+    return null;
+  }
+
+  String? _validateWeightMaximo(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 25)';
+    if (parsed <= 0) return 'Debe ser mayor a 0';
+    if (parsed > 100) return 'Máximo 100 kg';
+    final minimo = _parseWeightInput(_weightMinimoController.text);
+    if (minimo != null && parsed + 1e-9 < minimo) {
+      return 'Debe ser ≥ al mínimo';
+    }
+    return null;
+  }
+
+  void _revalidateWeightFields() {
+    if (!_ventaPorPeso) return;
+    _formKey.currentState?.validate();
+  }
+
   double _parsePrice() {
     return double.parse(_priceController.text.trim().replaceAll(',', '.'));
   }
@@ -975,24 +1329,51 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _isUploadingImage = true);
 
     try {
-      final uploadBytes = ProductImageOptimizer.compressToJpeg(
-        await sourceImage.readAsBytes(),
-      );
+      final sourceBytes = await sourceImage.readAsBytes();
+      final uploadBytes =
+          await ProductImageOptimizer.compressToJpegAsync(sourceBytes);
 
+      final stamp =
+          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
       final fileName =
-          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+          '${SupabaseConfig.currentComercioId}/product_$stamp.jpg';
+      final storage = Supabase.instance.client.storage.from(_bucketName);
 
-      await Supabase.instance.client.storage
-          .from(_bucketName)
+      await storage
           .uploadBinary(
             fileName,
             uploadBytes,
             fileOptions: FileOptions(upsert: true, contentType: 'image/jpeg'),
+          )
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () => throw TimeoutException(
+              'La subida de la imagen tardó demasiado. Reintenta.',
+            ),
           );
 
-      return Supabase.instance.client.storage
-          .from(_bucketName)
-          .getPublicUrl(fileName);
+      final master = _cropMasterBytes;
+      if (master != null && master.isNotEmpty) {
+        final masterJpeg =
+            await ProductImageOptimizer.compressToJpegAsync(master);
+        await storage
+            .uploadBinary(
+              mediaMasterObjectPath(fileName),
+              masterJpeg,
+              fileOptions:
+                  FileOptions(upsert: true, contentType: 'image/jpeg'),
+            )
+            .timeout(
+              const Duration(seconds: 45),
+              onTimeout: () => throw TimeoutException(
+                'La subida de la imagen tardó demasiado. Reintenta.',
+              ),
+            );
+      }
+
+      final publicUrl = storage.getPublicUrl(fileName);
+      const ProductImageVariantsClient().ensureInBackground(publicUrl);
+      return publicUrl;
     } finally {
       if (mounted) {
         setState(() => _isUploadingImage = false);
@@ -1059,24 +1440,177 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       };
 
       final optionsEditor = _optionsEditorKey.currentState;
-      if (optionsEditor != null) {
-        final current = widget.product?.opcionesMenu;
-        final hadGroups =
-            (current?.containsKey('grupos') ?? false) ||
-            (current?.containsKey('activadas') ?? false);
-        // Simple products that never used options keep their row untouched.
-        if (optionsEditor.active ||
-            hadGroups ||
-            optionsEditor.personalizationChanged) {
+      final current = widget.product?.opcionesMenu;
+      final hadGroups =
+          (current?.containsKey('grupos') ?? false) ||
+          (current?.containsKey('activadas') ?? false);
+      final hadWeight = current?.containsKey('venta_por_peso') ?? false;
+      final hadDelivery = current?.containsKey('delivery') ?? false;
+      final optionsTouched =
+          optionsEditor != null &&
+          (optionsEditor.active ||
+              hadGroups ||
+              optionsEditor.personalizationChanged);
+      final weightTouched = _ventaPorPeso || hadWeight;
+      final deliveryTouched =
+          _deliveryExclude || _deliverySurchargeEnabled || hadDelivery;
+
+      // Leave opciones_menu alone for simple products that never used options
+      // or weight sale — avoids rewriting JSON for every restaurant save.
+      if (optionsTouched || weightTouched || deliveryTouched) {
+        Map<String, dynamic>? menuOptions =
+            current == null ? null : Map<String, dynamic>.from(current);
+        if (optionsTouched) {
           final merged = ProductOptionGroup.mergeIntoMenuOptions(
             current,
-            optionsEditor.groups,
+            optionsEditor!.groups,
             enabled: optionsEditor.active,
           );
-          payload['opciones_menu'] = optionsEditor.personalizationChanged
-              ? {...?merged, 'personalizacion': optionsEditor.personalization}
+          menuOptions = optionsEditor.personalizationChanged
+              ? <String, dynamic>{
+                  ...?merged,
+                  'personalizacion': optionsEditor.personalization,
+                }
               : merged;
         }
+
+        menuOptions = <String, dynamic>{...?menuOptions};
+        if (_ventaPorPeso) {
+          final paso = _parseWeightInput(_weightPasoController.text);
+          final minimo = _parseWeightInput(_weightMinimoController.text);
+          final maximo = _parseWeightInput(_weightMaximoController.text);
+          if (paso == null ||
+              minimo == null ||
+              maximo == null ||
+              paso < 0.01 ||
+              paso > 1 ||
+              minimo <= 0 ||
+              minimo > 5 ||
+              maximo <= 0 ||
+              maximo > 100 ||
+              minimo + 1e-9 < paso ||
+              maximo + 1e-9 < minimo) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Revisa mínimo, paso y máximo de la venta por kilogramo.',
+                ),
+              ),
+            );
+            return;
+          }
+          menuOptions['venta_por_peso'] = <String, dynamic>{
+            'unidad': 'kg',
+            'paso': paso,
+            'minimo': minimo,
+            'maximo': maximo,
+          };
+        } else {
+          menuOptions.remove('venta_por_peso');
+        }
+
+        if (_deliveryExclude || _deliverySurchargeEnabled) {
+          if (_deliveryExclude) {
+            menuOptions['delivery'] = <String, dynamic>{'exclude': true};
+          } else {
+            final label = _deliverySurchargeLabelController.text
+                .trim()
+                .replaceAll(RegExp(r'\s+'), ' ');
+            if (label.isEmpty) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Indica el motivo del recargo (ej. Empaque, Envase).',
+                  ),
+                ),
+              );
+              return;
+            }
+            final labelValue = label.length > 80 ? label.substring(0, 80) : label;
+            if (_deliverySurchargeByOption) {
+              final groups = _deliveryOptionGroups();
+              final groupId = _deliverySurchargeGroupId;
+              ProductOptionGroup? group;
+              for (final item in groups) {
+                if (item.id == groupId) {
+                  group = item;
+                  break;
+                }
+              }
+              if (group == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Elige el grupo de opciones que define el empaque (ej. tamaño/peso).',
+                    ),
+                  ),
+                );
+                return;
+              }
+              final map = <String, dynamic>{};
+              for (final option in group.opciones.where((item) => item.activo)) {
+                final controller =
+                    _deliveryOptionSurchargeControllers[option.id];
+                final parsed = double.tryParse(
+                  (controller?.text ?? '').trim().replaceAll(',', '.'),
+                );
+                if (parsed == null || parsed <= 0) continue;
+                map[option.id] = _convertToBaseCurrency(
+                  value: parsed,
+                  fromCurrency: _selectedPriceCurrency,
+                );
+              }
+              if (map.isEmpty) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Indica al menos un recargo por opción mayor a 0.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              menuOptions['delivery'] = <String, dynamic>{
+                'exclude': false,
+                'surcharge_label': labelValue,
+                'surcharge_grupo': group.id,
+                'surcharge_por_opcion': map,
+              };
+            } else {
+              final surchargeInput = double.tryParse(
+                _deliverySurchargeController.text.trim().replaceAll(',', '.'),
+              );
+              if (surchargeInput == null || surchargeInput <= 0) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Indica un recargo de delivery mayor a 0, o apaga la opción.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              // Same currency rules as product price: store in commerce base.
+              final surcharge = _convertToBaseCurrency(
+                value: surchargeInput,
+                fromCurrency: _selectedPriceCurrency,
+              );
+              menuOptions['delivery'] = <String, dynamic>{
+                'exclude': false,
+                'surcharge': surcharge,
+                'surcharge_label': labelValue,
+              };
+            }
+          }
+        } else {
+          menuOptions.remove('delivery');
+        }
+        payload['opciones_menu'] = menuOptions.isEmpty ? null : menuOptions;
       }
 
       if (widget.isEditing) {
@@ -1234,6 +1768,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
                 final imagePanel = _ImagePanel(
                   localImageFile: _pickedImage,
+                  localImageBytes: _pickedImageBytes,
                   remoteImageUrl: _remoteImageUrl,
                   fallbackImageUrl: _fallbackImageUrl,
                   heroTag: widget.product != null
@@ -1260,10 +1795,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   selectedPriceCurrency: _selectedPriceCurrency,
                   priceHelperText: () {
                     final converted = _previewBasePrice();
-                    if (converted == null) {
-                      return 'El precio se guardara en $_baseCurrency.';
+                    final base = converted == null
+                        ? 'El precio se guardara en $_baseCurrency.'
+                        : 'Se guardara como ${converted.toStringAsFixed(2)} $_baseCurrency.';
+                    if (_ventaPorPeso) {
+                      return '$base Este valor es el precio por 1 kg.';
                     }
-                    return 'Se guardara como ${converted.toStringAsFixed(2)} $_baseCurrency.';
+                    return base;
                   }(),
                   nameController: _nameController,
                   descriptionController: _descriptionController,
@@ -1275,16 +1813,102 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   upsellEnabled: _upsellEnabled,
                   onUpsellEnabledChanged: (value) =>
                       setState(() => _upsellEnabled = value),
+                  ventaPorPeso: _ventaPorPeso,
+                  onVentaPorPesoChanged: (value) =>
+                      setState(() => _ventaPorPeso = value),
+                  weightPasoController: _weightPasoController,
+                  weightMinimoController: _weightMinimoController,
+                  weightMaximoController: _weightMaximoController,
+                  deliveryExclude: _deliveryExclude,
+                  onDeliveryExcludeChanged: (value) => setState(() {
+                    _deliveryExclude = value;
+                    if (value) _deliverySurchargeEnabled = false;
+                  }),
+                  deliverySurchargeEnabled: _deliverySurchargeEnabled,
+                  onDeliverySurchargeEnabledChanged: (value) => setState(() {
+                    _deliverySurchargeEnabled = value;
+                    if (value) _deliveryExclude = false;
+                  }),
+                  deliverySurchargeByOption: _deliverySurchargeByOption,
+                  onDeliverySurchargeByOptionChanged: (value) => setState(() {
+                    _deliverySurchargeByOption = value;
+                    if (value) {
+                      final groups = _deliveryOptionGroups();
+                      if (_deliverySurchargeGroupId == null &&
+                          groups.isNotEmpty) {
+                        _deliverySurchargeGroupId = groups.first.id;
+                      }
+                      final selected = groups
+                          .where((g) => g.id == _deliverySurchargeGroupId)
+                          .toList();
+                      if (selected.isNotEmpty) {
+                        _ensureDeliveryOptionControllers(selected.first);
+                      }
+                    }
+                  }),
+                  deliverySurchargeGroupId: _deliverySurchargeGroupId,
+                  onDeliverySurchargeGroupChanged: (value) => setState(() {
+                    _deliverySurchargeGroupId = value;
+                    final groups = _deliveryOptionGroups();
+                    final selected = groups.where((g) => g.id == value).toList();
+                    if (selected.isNotEmpty) {
+                      _ensureDeliveryOptionControllers(selected.first);
+                    }
+                  }),
+                  deliveryOptionGroups: () {
+                    final groups = _deliveryOptionGroups();
+                    if (_deliverySurchargeByOption) {
+                      final groupId = _deliverySurchargeGroupId ??
+                          (groups.isNotEmpty ? groups.first.id : null);
+                      for (final group in groups) {
+                        if (group.id == groupId) {
+                          _ensureDeliveryOptionControllers(group);
+                          break;
+                        }
+                      }
+                    }
+                    return groups;
+                  }(),
+                  deliveryOptionSurchargeControllers:
+                      _deliveryOptionSurchargeControllers,
+                  deliverySurchargeController: _deliverySurchargeController,
+                  deliverySurchargeLabelController:
+                      _deliverySurchargeLabelController,
+                  onDeliverySurchargeChanged: () => setState(() {}),
+                  deliverySurchargeHelperText: () {
+                    if (!_deliverySurchargeEnabled ||
+                        _deliveryExclude ||
+                        _deliverySurchargeByOption) {
+                      return null;
+                    }
+                    final parsed = double.tryParse(
+                      _deliverySurchargeController.text
+                          .trim()
+                          .replaceAll(',', '.'),
+                    );
+                    if (parsed == null || parsed <= 0) {
+                      return 'Usa la misma moneda del precio ($_selectedPriceCurrency).';
+                    }
+                    final inBase = _convertToBaseCurrency(
+                      value: parsed,
+                      fromCurrency: _selectedPriceCurrency,
+                    );
+                    if (_selectedPriceCurrency == _baseCurrency) {
+                      return 'Se guardará como ${inBase.toStringAsFixed(2)} $_baseCurrency.';
+                    }
+                    return 'Se guardará como ${inBase.toStringAsFixed(2)} $_baseCurrency (ingresado en $_selectedPriceCurrency).';
+                  }(),
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
                   validatePrice: _validatePrice,
+                  validateWeightPaso: _validateWeightPaso,
+                  validateWeightMinimo: _validateWeightMinimo,
+                  validateWeightMaximo: _validateWeightMaximo,
+                  onWeightConfigChanged: _revalidateWeightFields,
                   onCategoryChanged: (value) =>
                       setState(() => _selectedCategoryId = value),
-                  onPriceCurrencyChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedPriceCurrency = value);
-                  },
+                  onPriceCurrencyChanged: _onPriceCurrencyChanged,
                   isGeneratingDescription: _isGeneratingDescription,
                   onGenerateDescription: _onGenerateDescription,
                   onSave: _save,
@@ -1369,6 +1993,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 class _ImagePanel extends StatelessWidget {
   const _ImagePanel({
     required this.localImageFile,
+    required this.localImageBytes,
     required this.remoteImageUrl,
     required this.fallbackImageUrl,
     required this.heroTag,
@@ -1384,6 +2009,7 @@ class _ImagePanel extends StatelessWidget {
   });
 
   final XFile? localImageFile;
+  final Uint8List? localImageBytes;
   final String? remoteImageUrl;
   final String fallbackImageUrl;
   final String? heroTag;
@@ -1453,39 +2079,59 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: FutureBuilder<Uint8List>(
-                        future: localImageFile!.readAsBytes(),
-                        builder: (context, snapshot) {
-                          if (snapshot.hasData) {
-                            return Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.cover,
-                              height: 230,
-                              width: double.infinity,
-                              gaplessPlayback: true,
-                            );
-                          }
+                      child: localImageBytes != null
+                          ? ColoredBox(
+                              color: colorScheme.surfaceContainerHighest,
+                              child: Image.memory(
+                                localImageBytes!,
+                                fit: BoxFit.contain,
+                                height: 230,
+                                width: double.infinity,
+                                gaplessPlayback: true,
+                              ),
+                            )
+                          : FutureBuilder<Uint8List>(
+                              future: localImageFile!.readAsBytes(),
+                              builder: (context, snapshot) {
+                                if (snapshot.hasData) {
+                                  return ColoredBox(
+                                    color:
+                                        colorScheme.surfaceContainerHighest,
+                                    child: Image.memory(
+                                      snapshot.data!,
+                                      fit: BoxFit.contain,
+                                      height: 230,
+                                      width: double.infinity,
+                                      gaplessPlayback: true,
+                                    ),
+                                  );
+                                }
 
-                          return Container(
-                            height: 230,
-                            width: double.infinity,
-                            color: colorScheme.surfaceContainerHighest,
-                            alignment: Alignment.center,
-                            child: const CircularProgressIndicator(),
-                          );
-                        },
-                      ),
+                                return Container(
+                                  height: 230,
+                                  width: double.infinity,
+                                  color:
+                                      colorScheme.surfaceContainerHighest,
+                                  alignment: Alignment.center,
+                                  child:
+                                      const CircularProgressIndicator(),
+                                );
+                              },
+                            ),
                     ),
                   )
                 else if (hasRemoteImage)
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        remoteImageUrl!,
-                        fit: BoxFit.cover,
-                        height: 230,
-                        width: double.infinity,
+                      child: ColoredBox(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Image.network(
+                          remoteImageUrl!,
+                          fit: BoxFit.contain,
+                          height: 230,
+                          width: double.infinity,
+                        ),
                       ),
                     ),
                   )
@@ -1493,15 +2139,18 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        fallbackImageUrl,
-                        fit: BoxFit.cover,
-                        height: 200,
-                        width: double.infinity,
-                        errorBuilder: (_, _, _) => Container(
+                      child: ColoredBox(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Image.network(
+                          fallbackImageUrl,
+                          fit: BoxFit.contain,
                           height: 200,
                           width: double.infinity,
-                          color: colorScheme.surfaceContainerHighest,
+                          errorBuilder: (_, _, _) => Container(
+                            height: 200,
+                            width: double.infinity,
+                            color: colorScheme.surfaceContainerHighest,
+                          ),
                         ),
                       ),
                     ),
@@ -1772,10 +2421,33 @@ class _FormPanel extends StatelessWidget {
     required this.onUpsellBadgeChanged,
     required this.upsellEnabled,
     required this.onUpsellEnabledChanged,
+    required this.ventaPorPeso,
+    required this.onVentaPorPesoChanged,
+    required this.weightPasoController,
+    required this.weightMinimoController,
+    required this.weightMaximoController,
+    required this.deliveryExclude,
+    required this.onDeliveryExcludeChanged,
+    required this.deliverySurchargeEnabled,
+    required this.onDeliverySurchargeEnabledChanged,
+    required this.deliverySurchargeByOption,
+    required this.onDeliverySurchargeByOptionChanged,
+    required this.deliverySurchargeGroupId,
+    required this.onDeliverySurchargeGroupChanged,
+    required this.deliveryOptionGroups,
+    required this.deliveryOptionSurchargeControllers,
+    required this.deliverySurchargeController,
+    required this.deliverySurchargeLabelController,
+    required this.onDeliverySurchargeChanged,
+    this.deliverySurchargeHelperText,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
     required this.validatePrice,
+    required this.validateWeightPaso,
+    required this.validateWeightMinimo,
+    required this.validateWeightMaximo,
+    required this.onWeightConfigChanged,
     required this.onCategoryChanged,
     required this.onPriceCurrencyChanged,
     required this.isGeneratingDescription,
@@ -1801,11 +2473,34 @@ class _FormPanel extends StatelessWidget {
   final ValueChanged<String?> onUpsellBadgeChanged;
   final bool upsellEnabled;
   final ValueChanged<bool> onUpsellEnabledChanged;
+  final bool ventaPorPeso;
+  final ValueChanged<bool> onVentaPorPesoChanged;
+  final TextEditingController weightPasoController;
+  final TextEditingController weightMinimoController;
+  final TextEditingController weightMaximoController;
+  final bool deliveryExclude;
+  final ValueChanged<bool> onDeliveryExcludeChanged;
+  final bool deliverySurchargeEnabled;
+  final ValueChanged<bool> onDeliverySurchargeEnabledChanged;
+  final bool deliverySurchargeByOption;
+  final ValueChanged<bool> onDeliverySurchargeByOptionChanged;
+  final String? deliverySurchargeGroupId;
+  final ValueChanged<String?> onDeliverySurchargeGroupChanged;
+  final List<ProductOptionGroup> deliveryOptionGroups;
+  final Map<String, TextEditingController> deliveryOptionSurchargeControllers;
+  final TextEditingController deliverySurchargeController;
+  final TextEditingController deliverySurchargeLabelController;
+  final VoidCallback onDeliverySurchargeChanged;
+  final String? deliverySurchargeHelperText;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
   final FormFieldValidator<String> validateName;
   final FormFieldValidator<String> validatePrice;
+  final FormFieldValidator<String> validateWeightPaso;
+  final FormFieldValidator<String> validateWeightMinimo;
+  final FormFieldValidator<String> validateWeightMaximo;
+  final VoidCallback onWeightConfigChanged;
   final ValueChanged<String?> onCategoryChanged;
   final ValueChanged<String?> onPriceCurrencyChanged;
   final VoidCallback onGenerateDescription;
@@ -2004,13 +2699,16 @@ class _FormPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              fieldLabel('Precio'),
+              fieldLabel(ventaPorPeso ? 'Precio por kg' : 'Precio'),
               if (isLoadingPricingConfig)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 10),
                   child: LinearProgressIndicator(minHeight: 2),
                 ),
               DropdownButtonFormField<String>(
+                // Rebuild when pricing config finishes so we don't keep the
+                // temporary default (USD) after the base currency loads.
+                key: ValueKey('price-currency-$selectedPriceCurrency'),
                 initialValue: selectedPriceCurrency,
                 isExpanded: true,
                 style: GoogleFonts.manrope(
@@ -2052,13 +2750,14 @@ class _FormPanel extends StatelessWidget {
                   color: colorScheme.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: '0.00',
                   prefixText: '\$ ',
+                  labelText: ventaPorPeso ? 'Precio por 1 kg' : null,
                 ),
                 validator: validatePrice,
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 8),
               Builder(
                 builder: (context) {
                   return Text(
@@ -2072,7 +2771,355 @@ class _FormPanel extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 18),
+              fieldLabel('Delivery'),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: deliveryExclude,
+                onChanged: isSaving ? null : onDeliveryExcludeChanged,
+                title: Text(
+                  'No ofrecer en delivery',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'Sigue disponible para retiro o comer aquí, pero no se puede pedir a domicilio.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: deliverySurchargeEnabled,
+                onChanged: isSaving || deliveryExclude
+                    ? null
+                    : onDeliverySurchargeEnabledChanged,
+                title: Text(
+                  'Recargo si es delivery',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'Costo extra solo en pedidos a domicilio (ej. empaque). Indica el motivo.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (deliverySurchargeEnabled && !deliveryExclude) ...[
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: deliverySurchargeLabelController,
+                  enabled: !isSaving,
+                  maxLength: 80,
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Motivo (lo ve el cliente)',
+                    hintText: 'Empaque, Envase térmico…',
+                    counterText: '',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Tipo de recargo',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: false,
+                  groupValue: deliverySurchargeByOption,
+                  onChanged: isSaving
+                      ? null
+                      : (value) =>
+                          onDeliverySurchargeByOptionChanged(value ?? false),
+                  title: Text(
+                    'Monto fijo',
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                RadioListTile<bool>(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: true,
+                  groupValue: deliverySurchargeByOption,
+                  onChanged: isSaving
+                      ? null
+                      : (value) =>
+                          onDeliverySurchargeByOptionChanged(value ?? false),
+                  title: Text(
+                    'Según opción (ej. 500gr / 1kg)',
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Igual que los precios dependientes: el empaque cambia con la opción elegida.',
+                    style: GoogleFonts.manrope(
+                      fontSize: 11.5,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (!deliverySurchargeByOption) ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: deliverySurchargeController,
+                    enabled: !isSaving,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    onChanged: (_) => onDeliverySurchargeChanged(),
+                    style: GoogleFonts.manrope(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Monto del recargo ($selectedPriceCurrency)',
+                      hintText: selectedPriceCurrency == 'COP'
+                          ? 'Ej. 2000'
+                          : selectedPriceCurrency == 'VES'
+                              ? 'Ej. 50'
+                              : 'Ej. 1.50',
+                      suffixText: selectedPriceCurrency,
+                      helperText: deliverySurchargeHelperText,
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  if (deliveryOptionGroups.isEmpty)
+                    Text(
+                      'Primero configura las opciones del producto más abajo (tamaños, pesos, etc.). Luego vuelve aquí y elige el grupo.',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else ...[
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('delivery-group-$deliverySurchargeGroupId'),
+                      initialValue:
+                          deliveryOptionGroups.any(
+                                (g) => g.id == deliverySurchargeGroupId,
+                              )
+                              ? deliverySurchargeGroupId
+                              : deliveryOptionGroups.first.id,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Grupo que define el empaque',
+                      ),
+                      items: [
+                        for (final group in deliveryOptionGroups)
+                          DropdownMenuItem<String>(
+                            value: group.id,
+                            child: Text(group.nombre),
+                          ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : onDeliverySurchargeGroupChanged,
+                    ),
+                    const SizedBox(height: 10),
+                    for (final option in () {
+                      final groupId =
+                          deliveryOptionGroups.any(
+                                (g) => g.id == deliverySurchargeGroupId,
+                              )
+                              ? deliverySurchargeGroupId
+                              : deliveryOptionGroups.first.id;
+                      for (final item in deliveryOptionGroups) {
+                        if (item.id == groupId) {
+                          return item.opciones
+                              .where((choice) => choice.activo)
+                              .toList();
+                        }
+                      }
+                      return const <ProductOptionChoice>[];
+                    }()) ...[
+                      if (deliveryOptionSurchargeControllers[option.id]
+                          case final controller?) ...[
+                        TextFormField(
+                          controller: controller,
+                          enabled: !isSaving,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: <TextInputFormatter>[
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9.,]'),
+                            ),
+                          ],
+                          onChanged: (_) => onDeliverySurchargeChanged(),
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          decoration: InputDecoration(
+                            labelText:
+                                'Empaque · ${option.nombre} ($selectedPriceCurrency)',
+                            hintText: selectedPriceCurrency == 'COP'
+                                ? 'Ej. 1000'
+                                : 'Ej. 1.50',
+                            suffixText: selectedPriceCurrency,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
+                  ],
+                ],
+              ],
+              const SizedBox(height: 18),
               optionsSection,
+              const SizedBox(height: 8),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: ventaPorPeso,
+                onChanged: isSaving ? null : onVentaPorPesoChanged,
+                title: Text(
+                  'Vender por kilogramo',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'Para verduras, frutas u otros productos a granel. El cliente elige el peso y el total se calcula solo.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (ventaPorPeso) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Ajustes del selector (en kg)',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightMinimoController,
+                        enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Mínimo',
+                          hintText: '0.1',
+                          suffixText: 'kg',
+                          errorMaxLines: 2,
+                        ),
+                        validator: validateWeightMinimo,
+                        onChanged: (_) => onWeightConfigChanged(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightPasoController,
+                        enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Paso (+/−)',
+                          hintText: '0.05',
+                          suffixText: 'kg',
+                          errorMaxLines: 2,
+                        ),
+                        validator: validateWeightPaso,
+                        onChanged: (_) => onWeightConfigChanged(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightMaximoController,
+                        enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Máximo',
+                          hintText: '25',
+                          suffixText: 'kg',
+                          errorMaxLines: 2,
+                        ),
+                        validator: validateWeightMaximo,
+                        onChanged: (_) => onWeightConfigChanged(),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Solo números. Mínimo ≥ paso, máximo ≥ mínimo. Ej.: 0,1 / 0,05 / 25.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               fieldLabel('Upselling'),
               DropdownButtonFormField<String?>(

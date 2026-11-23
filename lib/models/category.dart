@@ -6,6 +6,7 @@ class CategoryModel {
   final int orden;
   final bool activo;
   final String? icono;
+  final String? imagenUrl;
   final bool? creadoPorIa;
   final double? confianzaIa;
   final String? rol;
@@ -18,6 +19,7 @@ class CategoryModel {
     required this.orden,
     this.activo = true,
     this.icono,
+    this.imagenUrl,
     this.creadoPorIa,
     this.confianzaIa,
     this.rol,
@@ -85,6 +87,7 @@ class CategoryModel {
       orden: ordenValue is int ? ordenValue : int.tryParse('$ordenValue') ?? 0,
       activo: map['activo'] is bool ? map['activo'] as bool : true,
       icono: map['icono']?.toString(),
+      imagenUrl: map['imagen_url']?.toString(),
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
@@ -106,13 +109,19 @@ class CategoryModel {
       'orden': orden,
       'activo': activo,
       'icono': icono,
+      'imagen_url': imagenUrl,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
       'rol': rol,
     };
   }
 
-  CategoryModel copyWith({String? rol, bool clearRol = false}) {
+  CategoryModel copyWith({
+    String? rol,
+    bool clearRol = false,
+    String? imagenUrl,
+    bool clearImagenUrl = false,
+  }) {
     return CategoryModel(
       id: id,
       comercioId: comercioId,
@@ -121,6 +130,7 @@ class CategoryModel {
       orden: orden,
       activo: activo,
       icono: icono,
+      imagenUrl: clearImagenUrl ? null : (imagenUrl ?? this.imagenUrl),
       creadoPorIa: creadoPorIa,
       confianzaIa: confianzaIa,
       rol: clearRol ? null : (rol ?? this.rol),

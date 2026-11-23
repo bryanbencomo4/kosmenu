@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cashTenderValidity,
+  currencyPrefix,
   describeCashBills,
+  formatCashAmountDisplay,
+  formatCashAmountInputValue,
   parseCashAmountInput,
+  snapCashAmountUp,
   suggestCashTenders,
+  toCashAmountCanonical,
 } from '../app/_lib/cash-tender';
 
 describe('cash tender', () => {
@@ -12,6 +17,15 @@ describe('cash tender', () => {
     expect(parseCashAmountInput('14.80', 'USD')).toBe('14.80');
     expect(parseCashAmountInput('15.000', 'COP')).toBe('15000');
     expect(parseCashAmountInput('abc', 'USD')).toBe('');
+  });
+
+  it('parses LATAM currency formatting without duplicating symbols', () => {
+    expect(parseCashAmountInput('Bs 32.370,00', 'VES')).toBe('32370.00');
+    expect(parseCashAmountInput('32.370,00', 'VES')).toBe('32370.00');
+    expect(parseCashAmountInput('32.370', 'VES')).toBe('32370');
+    expect(formatCashAmountDisplay(32370, 'VES')).toBe('32.370,00');
+    expect(formatCashAmountInputValue('32370.00', 'VES')).toBe('32.370,00');
+    expect(formatCashAmountInputValue('15000', 'COP')).toBe('15.000');
   });
 
   it('accepts only sums of real bills and computes change', () => {
@@ -36,5 +50,16 @@ describe('cash tender', () => {
     expect(suggestCashTenders(12, 'VES')).toEqual([15, 20, 50, 100, 200]);
     expect(suggestCashTenders(19000, 'COP')).toEqual([19000, 20000, 50000, 100000]);
     expect(suggestCashTenders(150, 'COP')).toEqual([200, 500, 1000, 2000, 5000]);
+  });
+
+  it('snaps typed amounts up to makeable cash without changing valid bills', () => {
+    expect(snapCashAmountUp(14.8, 'USD')).toBe(15);
+    expect(snapCashAmountUp(15, 'USD')).toBe(15);
+    expect(snapCashAmountUp(12, 'VES')).toBe(15);
+    expect(snapCashAmountUp(14950, 'COP')).toBe(15000);
+    expect(snapCashAmountUp(150000, 'COP')).toBe(150000);
+    expect(toCashAmountCanonical(150000, 'COP')).toBe('150000');
+    expect(currencyPrefix('COP')).toBe('$');
+    expect(formatCashAmountInputValue('150000', 'COP')).toBe('150.000');
   });
 });

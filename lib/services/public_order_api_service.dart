@@ -36,6 +36,8 @@ class PublicOrderCreateRequest {
     required this.items,
     required this.delivery,
     this.comercioNombre,
+    this.clientEmail,
+    this.mesa,
     this.paymentMethod,
     this.paymentProofUrl,
     this.orderNotes,
@@ -50,6 +52,8 @@ class PublicOrderCreateRequest {
   final List<PublicOrderItemDto> items;
   final PublicOrderDeliveryDto delivery;
   final String? comercioNombre;
+  final String? clientEmail;
+  final String? mesa;
   final PublicOrderPaymentMethodDto? paymentMethod;
   final String? paymentProofUrl;
   final String? orderNotes;
@@ -61,6 +65,9 @@ class PublicOrderCreateRequest {
         'comercioNombre': comercioNombre!.trim(),
       'clientName': clientName.trim(),
       'clientWhatsapp': clientWhatsapp.trim(),
+      if (clientEmail != null && clientEmail!.trim().isNotEmpty)
+        'clientEmail': clientEmail!.trim().toLowerCase(),
+      if (mesa != null && mesa!.trim().isNotEmpty) 'mesa': mesa!.trim(),
       'currency': currency,
       'exchangeRate': exchangeRate,
       'costoDelivery': costoDelivery,
@@ -192,10 +199,31 @@ class ComprobanteSignedUrlResult {
   const ComprobanteSignedUrlResult({
     required this.url,
     required this.expiresInSec,
+    this.previewUrl,
+    this.downloadUrl,
+    this.publicUrl,
   });
 
   final String url;
   final int expiresInSec;
+
+  /// Small transformed image. Null for PDFs and older API responses.
+  final String? previewUrl;
+
+  /// Original file with a download filename. Falls back to [url] in the UI.
+  final String? downloadUrl;
+
+  /// Same public `/p/{code}` page shared on WhatsApp (all proofs).
+  final String? publicUrl;
+}
+
+String? _optionalHttpUrl(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return null;
+  final uri = Uri.tryParse(text);
+  if (uri == null || uri.host.isEmpty) return null;
+  if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+  return text;
 }
 
 /// Cryptographically random idempotency key (UUID v4 style). No PII / timestamp-only.
@@ -258,6 +286,7 @@ class PublicOrderApiService {
   Future<PublicOrderCreateResult> createOrder({
     required PublicOrderCreateRequest request,
     required String idempotencyKey,
+    String? accessToken,
   }) async {
     final key = idempotencyKey.trim();
     if (key.isEmpty || key.length < 8 || key.length > 128) {
@@ -268,6 +297,7 @@ class PublicOrderApiService {
     }
 
     final uri = ElmenuxfaApiConfig.uri('/api/orders');
+    final token = (accessToken ?? '').trim();
     late http.Response response;
     try {
       response = await _client
@@ -277,6 +307,7 @@ class PublicOrderApiService {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
               'X-Idempotency-Key': key,
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
             },
             body: jsonEncode(request.toJson()),
           )
@@ -291,14 +322,21 @@ class PublicOrderApiService {
     return _parseCreateOrderResponse(response);
   }
 
-  Future<String> _issueComprobantePermit(String comercioId) async {
+  Future<String> _issueComprobantePermit(
+    String comercioId, {
+    String? accessToken,
+  }) async {
     final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes/permit');
+    final token = (accessToken ?? '').trim();
     late http.Response response;
     try {
       response = await _client
           .post(
             uri,
-            headers: const {'Content-Type': 'application/json'},
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+            },
             body: jsonEncode({'comercioId': comercioId, 'slug': comercioId}),
           )
           .timeout(_timeout);
@@ -333,6 +371,7 @@ class PublicOrderApiService {
     required String fileName,
     required String mimeType,
     required Uint8List bytes,
+    String? accessToken,
     void Function(double progress)? onProgress,
   }) async {
     final validationError = ComprobanteClientValidator.validate(
@@ -344,7 +383,10 @@ class PublicOrderApiService {
       throw PublicOrderApiException(message: validationError, statusCode: 422);
     }
 
-    final permit = await _issueComprobantePermit(comercioId.trim());
+    final permit = await _issueComprobantePermit(
+      comercioId.trim(),
+      accessToken: accessToken,
+    );
     final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes');
     final request = http.MultipartRequest('POST', uri)
       ..fields['comercioId'] = comercioId.trim()
@@ -444,7 +486,13 @@ class PublicOrderApiService {
           statusCode: 404,
         );
       }
-      return ComprobanteSignedUrlResult(url: url, expiresInSec: expiresInSec);
+      return ComprobanteSignedUrlResult(
+        url: url,
+        expiresInSec: expiresInSec,
+        previewUrl: _optionalHttpUrl(map['previewUrl']),
+        downloadUrl: _optionalHttpUrl(map['downloadUrl']),
+        publicUrl: _optionalHttpUrl(map['publicUrl']),
+      );
     }
 
     if (response.statusCode == 401) {

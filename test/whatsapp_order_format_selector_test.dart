@@ -62,22 +62,23 @@ void main() {
   );
 
   for (final width in [320.0, 390.0, 768.0]) {
-    testWidgets('selector defaults to summary and fits at $width pixels', (
-      tester,
-    ) async {
-      tester.view.physicalSize = Size(width, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(selector());
-      expect(
-        tester
-            .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
-            .groupValue,
-        'summary',
-      );
-      expect(tester.takeException(), isNull);
-    });
+    testWidgets(
+      'selector defaults to comanda (detailed) and fits at $width pixels',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(selector());
+        expect(
+          tester
+              .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+              .groupValue,
+          'detailed',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   testWidgets('detailed requires selection and can return to summary', (
@@ -90,6 +91,7 @@ void main() {
           body: StatefulBuilder(
             builder: (context, update) => WhatsappOrderFormatSelector(
               value: value,
+              managementMode: 'platform',
               onChanged: (next) => update(() => value = next),
               titleColor: Colors.black,
               descriptionColor: Colors.grey,
@@ -109,13 +111,13 @@ void main() {
 
   testWidgets('read-only selector cannot opt in', (tester) async {
     await tester.pumpWidget(selector());
-    await tester.tap(find.text('Comanda por WhatsApp'));
+    await tester.tap(find.text('Resumen + enlace'));
     await tester.pump();
     expect(
       tester
           .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
           .groupValue,
-      'summary',
+      'detailed',
     );
     expect(
       tester

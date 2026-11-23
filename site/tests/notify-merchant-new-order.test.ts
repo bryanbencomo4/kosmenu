@@ -6,11 +6,18 @@ const sendMerchantNewOrderEmail = vi.fn(async (_input: unknown) => ({
   ok: true as const,
   skipped: false as const,
 }));
-const sendMerchantNewOrderWhatsapp = vi.fn(async (_input: unknown) => ({
-  ok: true as const,
-  skipped: false as const,
-  recipient: '+584121234567',
-}));
+const sendMerchantNewOrderWhatsapp = vi.fn(
+  async (
+    _input: unknown,
+  ): Promise<
+    | { ok: true; skipped: false; recipient: string }
+    | { ok: false; skipped: true; reason: string }
+  > => ({
+    ok: true as const,
+    skipped: false as const,
+    recipient: '+584121234567',
+  }),
+);
 const canSendMerchantNewOrderEmail = vi.fn(() => true);
 const canSendMerchantNewOrderWhatsapp = vi.fn(() => true);
 

@@ -133,12 +133,19 @@ class _KioskHomeSettingsScreenState extends State<KioskHomeSettingsScreen> {
                   value: _config.verMenu,
                   onChanged: (value) => _save(_config.copyWith(verMenu: value)),
                 ),
-                _switchCard(
-                  title: 'Catálogo',
-                  subtitle: 'El cliente ve los productos, los suma y mira el total y los métodos de pago.',
-                  value: _config.catalogo,
-                  onChanged: (value) => _save(_config.copyWith(catalogo: value)),
+                _card(
+                  child: Text(
+                    _config.catalogo
+                        ? 'Catálogo está activo. Se administra en Operación y WhatsApp (incluye el enlace QR con ?catalogo=1).'
+                        : 'Catálogo se activa en Operación y WhatsApp. Úsalo si quieres suma de productos sin enviar el pedido por WhatsApp.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      color: const Color(0xFF6B7280),
+                      height: 1.4,
+                    ),
+                  ),
                 ),
+                const SizedBox(height: 10),
                 _switchCard(
                   title: 'Comer aquí',
                   subtitle: 'Pedido para mesa',

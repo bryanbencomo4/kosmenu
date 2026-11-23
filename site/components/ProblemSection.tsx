@@ -1,11 +1,5 @@
 import Image from 'next/image';
-import { Caveat } from 'next/font/google';
 import { Clock3, FileText, ImageIcon, Lightbulb, DollarSign } from 'lucide-react';
-
-const handwriting = Caveat({
-  subsets: ['latin'],
-  weight: ['600', '700'],
-});
 
 const problems = [
   {
@@ -89,7 +83,7 @@ export function ProblemSection() {
 
           <div className="relative mx-auto max-w-[16.5rem] text-center lg:mx-0 lg:justify-self-end lg:pt-2 lg:rotate-[8deg] lg:text-right">
             <p
-              className={`${handwriting.className} text-[1.55rem] font-semibold leading-[1.12] text-violet-100 sm:text-[1.7rem]`}
+              className={`italic font-extrabold text-[1.55rem] font-semibold leading-[1.12] text-violet-100 sm:text-[1.7rem]`}
             >
               Más costos,
               <br />

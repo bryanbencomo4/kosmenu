@@ -1,21 +1,16 @@
 'use client';
 
-import { Caveat } from 'next/font/google';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CreditCard, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import type { PreCheckoutSuggestionGroup } from '../../../../_lib/pre-checkout-upsell';
+import { KioskImage } from '../kiosk/KioskImage';
 import {
   UpsellOptionConfigurator,
   type UpsellConfigurableProduct,
 } from './UpsellOptionConfigurator';
-
-const hintFont = Caveat({
-  subsets: ['latin'],
-  weight: ['500', '600'],
-});
 
 const VISIBLE_PRODUCTS = 4;
 
@@ -46,6 +41,9 @@ export type CatalogPaymentMethod = {
   id: string;
   label: string;
   details: string;
+  /** Structured copy rows (same model as public checkout). */
+  fields?: Array<{ label: string; value: string; type?: string; kind?: 'phone' | 'document' | 'text' }>;
+  note?: string | null;
 };
 
 export type CatalogPaymentGroup = {
@@ -65,6 +63,8 @@ type PreCheckoutUpsellSheetProps = {
   onRemove?: (cartKey: string) => void;
   onKeepShopping: () => void;
   onContinue: () => void;
+  /** Catalog mode: finish suggested sales → order summary. */
+  onCatalogReady?: () => void;
   resolveConfigurableProduct: (productId: string) => UpsellConfigurableProduct | null;
   onConfirmConfigured: (productId: string, selection: CartLineSelection, quantity: number) => void;
   canConfigure?: boolean;
@@ -173,12 +173,12 @@ function ProductCard({
           style={{ backgroundColor: 'var(--menu-background)' }}
         >
           {product.imagen_url ? (
-            <img
+            <KioskImage
               src={product.imagen_url}
               alt=""
-              loading="lazy"
-              decoding="async"
-              className="absolute inset-0 h-full w-full object-contain p-1.5"
+              className="absolute inset-0 h-full w-full"
+              fit="contain"
+              showBlurFill
             />
           ) : (
             <span className="grid h-full place-items-center text-2xl" aria-hidden>
@@ -360,6 +360,7 @@ export function PreCheckoutUpsellSheet({
   onRemove,
   onKeepShopping,
   onContinue,
+  onCatalogReady,
   resolveConfigurableProduct,
   onConfirmConfigured,
   canConfigure = true,
@@ -397,6 +398,8 @@ export function PreCheckoutUpsellSheet({
     '';
   const activePaymentMethods =
     payableGroups.find((group) => group.currency === activePaymentCurrency)?.methods ?? [];
+  // Catalog no longer uses the intermediate payment-methods step.
+  const paymentsView = showPayments && !catalogMode;
 
   if (!open) return null;
 
@@ -458,9 +461,9 @@ export function PreCheckoutUpsellSheet({
               <div className="mb-3 flex items-start justify-between gap-3">
                 <h2
                   id="pre-checkout-upsell-title"
-                  className={`${hintFont.className} max-w-[22rem] text-[30px] font-semibold leading-[1.12] sm:max-w-[30rem] sm:text-[36px] lg:text-[40px]`}
+                  className={`italic font-extrabold max-w-[22rem] text-[30px] font-semibold leading-[1.12] sm:max-w-[30rem] sm:text-[36px] lg:text-[40px]`}
                 >
-                  {showPayments ? (
+                  {paymentsView ? (
                     <>
                       Métodos de pago{' '}
                       <span style={{ color: 'var(--menu-primary)' }}>por moneda</span>
@@ -483,7 +486,7 @@ export function PreCheckoutUpsellSheet({
                 </button>
               </div>
               <p className="text-[13px]" style={{ color: 'var(--menu-text-muted)' }}>
-                {showPayments
+                {paymentsView
                   ? 'Elige la moneda para ver cómo pagar.'
                   : 'Completa tu pedido con estas deliciosas opciones'}
               </p>
@@ -503,7 +506,7 @@ export function PreCheckoutUpsellSheet({
                 </div>
               </section>
 
-              {showPayments ? (
+              {paymentsView ? (
                 <div className="mt-5 space-y-3">
                   {payableGroups.length === 0 ? (
                     <p className="text-[13px]" style={{ color: 'var(--menu-text-muted)' }}>
@@ -613,12 +616,8 @@ export function PreCheckoutUpsellSheet({
           <button
             type="button"
             onClick={() => {
-              if (showPayments) {
-                setShowPayments(false);
-                return;
-              }
               if (catalogMode) {
-                setShowPayments(true);
+                onCatalogReady?.();
                 return;
               }
               onContinue();
@@ -628,20 +627,16 @@ export function PreCheckoutUpsellSheet({
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             <span className="inline-flex items-center gap-1 text-[13px] font-black">
-              {showPayments ? (
-                <ArrowLeft className="h-4 w-4" />
-              ) : catalogMode ? (
-                <CreditCard className="h-4 w-4" />
+              {catalogMode ? (
+                <Check className="h-4 w-4" strokeWidth={2.6} />
               ) : (
                 <ShoppingBag className="h-4 w-4" />
               )}
-              {catalogMode && !showPayments ? 'Ver métodos de pago' : showPayments ? 'Volver' : 'Ir a pagar'}
+              {catalogMode ? 'Listo' : 'Ir a pagar'}
             </span>
-            {catalogMode && !showPayments ? null : (
-              <span className="mt-0.5 text-[10px] font-medium opacity-80">
-                {showPayments ? 'Regresar a las sugerencias' : 'Continuar con el checkout'}
-              </span>
-            )}
+            <span className="mt-0.5 text-[10px] font-medium opacity-80">
+              {catalogMode ? 'Ver resumen del pedido' : 'Continuar con el checkout'}
+            </span>
           </button>
         </div>
 

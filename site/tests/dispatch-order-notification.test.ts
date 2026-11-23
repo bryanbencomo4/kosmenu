@@ -30,6 +30,9 @@ describe('dispatchOrderNotification', () => {
 
   it('skips when service role config is missing', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    // .env.local may preload SUPABASE_SERVICE_ROLE_KEY into the worker; clear it
+    // so this case actually exercises the missing-config path (no network hang).
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     const result = await dispatchOrderNotification({
       type: 'INSERT',
@@ -69,7 +72,10 @@ describe('dispatchOrderNotification', () => {
     expect(result.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
     expect(url).toBe('https://example.supabase.co/functions/v1/notify-order');
     expect(init.method).toBe('POST');
     expect(init.headers).toMatchObject({
@@ -122,6 +128,18 @@ describe('merchantWhatsappDelivered', () => {
 
 describe('customerWhatsappFallbackUrl', () => {
   it('returns the customer fallback only after a failed WhatsApp send', () => {
+    expect(
+      customerWhatsappFallbackUrl({
+        ok: true,
+        body: {
+          whatsapp: {
+            ok: false,
+            skipped: false,
+            fallbackUrl: 'https://api.whatsapp.com/send?phone=584121234567&text=Pedido',
+          },
+        },
+      }),
+    ).toBe('https://api.whatsapp.com/send?phone=584121234567&text=Pedido');
     expect(
       customerWhatsappFallbackUrl({
         ok: true,
