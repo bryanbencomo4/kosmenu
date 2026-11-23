@@ -44,6 +44,7 @@ import {
 } from '../../_lib/panel-chat-messages';
 import { usePanelSession } from '../../_lib/usePanelSession';
 import { useConversationRealtime } from '../../_lib/useConversationRealtime';
+import { PanelStaffActions } from './PanelStaffActions';
 
 const STAFF_MEDIA_MAX_BYTES = 1_200_000;
 
@@ -651,54 +652,16 @@ function ConversationDetailInner({
           </div>
         ) : null}
 
-        {humanTakeoverEnabled && (showTake || showReturn || showClose) ? (
-          <div
-            className="shrink-0 border-b px-3 py-2"
-            style={{
-              backgroundColor: 'var(--chat-header)',
-              borderColor: 'var(--chat-header-border)',
-            }}
-            data-panel-staff-actions="1"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              {showTake ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  data-testid="take-conversation-visible"
-                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-[var(--chat-send-fg)] disabled:opacity-50 sm:flex-none"
-                  style={{ backgroundColor: 'var(--chat-send)' }}
-                  onClick={() => void act('take')}
-                >
-                  Unirse al chat
-                </button>
-              ) : null}
-              {showReturn ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  data-testid="return-assistant-visible"
-                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-lg border px-3 text-[13px] font-semibold text-[var(--chat-text)] disabled:opacity-50 sm:flex-none"
-                  style={{ borderColor: 'var(--chat-header-border)' }}
-                  onClick={() => void act('return')}
-                >
-                  Devolver al asistente
-                </button>
-              ) : null}
-              {showClose ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  data-testid="close-conversation-visible"
-                  className="inline-flex min-h-10 items-center justify-center rounded-lg border px-3 text-[13px] font-medium text-[var(--chat-text-muted)] disabled:opacity-50"
-                  style={{ borderColor: 'var(--chat-header-border)' }}
-                  onClick={() => void act('close')}
-                >
-                  Cerrar chat
-                </button>
-              ) : null}
-            </div>
-          </div>
+        {humanTakeoverEnabled ? (
+          <PanelStaffActions
+            busy={busy}
+            showTake={showTake}
+            showReturn={showReturn}
+            showClose={showClose}
+            onTake={() => void act('take')}
+            onReturn={() => void act('return')}
+            onClose={() => void act('close')}
+          />
         ) : null}
 
         <div className="flex min-h-0 flex-1 flex-col" data-testid="message-list">
