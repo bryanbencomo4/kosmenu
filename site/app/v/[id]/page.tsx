@@ -2,7 +2,7 @@
 
 import Head from 'next/head';
 import { ArrowRight, ArrowUp, Banknote, Bike, Bitcoin, Building2, Camera, Check, ChevronDown, ChevronLeft, Clock, CreditCard, Facebook, Flame, ImageIcon, Info, Instagram, Layers, Mail, MapPin, Menu, MessageCircle, Music2, Pencil, Phone, Search, Share2, Shield, ShoppingCart, Smartphone, Store, Truck, User, Wallet, X, Youtube } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
@@ -8525,10 +8525,10 @@ export default function PublicMenuPage() {
               onNext: checkoutStep === 3 ? openOrderReview : goToNextStep,
             };
             // One children tree for both surfaces — avoids duplicating ~1k lines of steps.
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- shared step body; shells differ only on chrome props
+            // Shells share step chrome props; fulfillment vs theme is surface-specific.
             const CheckoutSurface = (
               checkoutFromChat ? ChatCheckoutShell : KioskCheckout
-            ) as any;
+            ) as ComponentType<Record<string, unknown>>;
             return (
           <CheckoutSurface
             fulfillment={kioskFulfillment}
