@@ -51,6 +51,11 @@ if (pull.status !== 0) {
 }
 const prod = loadEnv(pullPath);
 unlinkSync(pullPath);
+const local = {
+  ...loadEnv(join(root, '.env.local')),
+  ...loadEnv(join(site, '.env.local')),
+  ...loadEnv(join(site, '.env.staging.local')),
+};
 
 const sbUrl = (preview.NEXT_PUBLIC_SUPABASE_URL || preview.SUPABASE_URL || '').trim();
 const anon = (
@@ -59,7 +64,12 @@ const anon = (
   ''
 ).trim();
 const service = (preview.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-const gemini = (prod.GEMINI_API_KEY || preview.GEMINI_API_KEY || '').trim();
+const gemini = (
+  prod.GEMINI_API_KEY ||
+  preview.GEMINI_API_KEY ||
+  local.GEMINI_API_KEY ||
+  ''
+).trim();
 
 if (!sbUrl.includes(PREVIEW) || sbUrl.includes(PROD)) {
   console.error('Refused: preview Supabase URL is not gsfxqzv');
@@ -96,30 +106,35 @@ const pairs = {
   DISCOVERY_ASSISTANT_RATE_LIMIT_PER_IP_PER_MIN: '15',
 };
 
+const PREVIEW_BRANCH = 'feature/discovery-assistant';
+
 function setPreviewEnv(name, value) {
-  const tmp = join(site, `.env.set.${name}.tmp`);
-  writeFileSync(tmp, value, 'utf8');
-  // Remove existing Preview value if present (ignore errors).
-  spawnSync('npx', ['vercel', 'env', 'rm', name, 'preview', '-y'], {
-    cwd: site,
-    encoding: 'utf8',
-    shell: true,
-  });
+  // Preview + this branch only (never Production).
   const add = spawnSync(
     'npx',
-    ['vercel', 'env', 'add', name, 'preview', '--force'],
+    [
+      'vercel',
+      'env',
+      'add',
+      name,
+      'preview',
+      PREVIEW_BRANCH,
+      '--value',
+      value,
+      '--yes',
+      '--force',
+    ],
     {
       cwd: site,
       encoding: 'utf8',
       shell: true,
-      input: value + '\n',
     },
   );
-  unlinkSync(tmp);
-  if (add.status !== 0) {
-    throw new Error(`Failed to set ${name}: ${add.stderr || add.stdout}`);
+  const out = `${add.stdout || ''}\n${add.stderr || ''}`;
+  if (add.status !== 0 || !/Overrode Environment Variable|Saved/i.test(out)) {
+    throw new Error(`Failed to set ${name}: ${out}`);
   }
-  console.log(`SET preview ${name} len=${value.length}`);
+  console.log(`SET preview/${PREVIEW_BRANCH} ${name} len=${value.length}`);
 }
 
 for (const [k, v] of Object.entries(pairs)) {

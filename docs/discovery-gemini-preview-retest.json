@@ -1,0 +1,18 @@
+[
+    {
+        "id":  "2b",
+        "model":  "gemini-3.1-flash-lite",
+        "http":  2,
+        "n":  11,
+        "text":  "¡Hola! Encontré varios lugares con hamburguesas en el directorio. Aquí tienes algunas opciones:\n\n*   **Alegría** (Caraca",
+        "slugs":  "alegria,edwburguer,la-tribu-cafe,meal4fit,paquekomais,torobravo,el-parche-del-gato,el-parche-del-gato-arepas,flavorandfood,hamburgueseria-bladi-jaiper,nelsonburger"
+    },
+    {
+        "id":  "4b",
+        "model":  "gemini-3.1-flash-lite",
+        "http":  2,
+        "n":  5,
+        "text":  "Aquí tienes el enlace al menú de **Auto Pizzas Nápoles**:\n\n[Ver menú de Auto Pizzas Nápoles](https://elmenuxfa.com/v/aut",
+        "slugs":  "arroz-chino-maicol,meal4fit,sushideliverycoro,auto-pizzas-napoles,flavorandfood"
+    }
+]

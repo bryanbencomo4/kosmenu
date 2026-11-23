@@ -1,0 +1,151 @@
+{
+  "deployment": "https://kosmenu-nl4r882z2-bryanbencomo4s-projects.vercel.app",
+  "sessionId": "preview-gemini-live-1795457479895",
+  "startedAt": "2026-11-23T18:11:19.895Z",
+  "preflight": {
+    "ok": true,
+    "enabled": true,
+    "simulate": false,
+    "liveGemini": true,
+    "liveReason": null,
+    "quotaBackend": "postgres",
+    "pageSize": 24,
+    "maxGeminiHttpCallsPerRequest": 3,
+    "geminiHttpBudget": 15,
+    "maxOutputTokens": 512,
+    "maxToolRounds": 2
+  },
+  "directoryProbe": {
+    "total": 15,
+    "sample": [
+      {
+        "slug": "arroz-chino-maicol",
+        "nombre": "Arroz Chino Maicol"
+      },
+      {
+        "slug": "la-tribu-cafe",
+        "nombre": "LA TRIBU CAFÉ"
+      },
+      {
+        "slug": "edwburguer",
+        "nombre": "Edw Burguer SC"
+      }
+    ]
+  },
+  "queries": [
+    {
+      "id": 1,
+      "prompt": "Quiero comer pizza cerca de mí",
+      "note": "Táriba/Táchira coords near Nápoles",
+      "ms": 6344,
+      "model": "gemini-3.1-flash-lite",
+      "text": "Para poder ayudarte a encontrar una pizzería cerca, ¿podrías decirme en qué ciudad o zona te encuentras? Así podré buscar las opciones disponibles para ti.",
+      "toolCalls": 0,
+      "skippedLlm": false,
+      "fallback": false,
+      "stopReason": null,
+      "geminiHttpCalls": 1,
+      "tokensInput": 608,
+      "tokensOutput": 36,
+      "estimatedCostUsd": 0.00007520000000000001,
+      "requestId": "r_7c8b0be7f1d74639a46a",
+      "restaurants": [],
+      "cumulativeHttp": 1,
+      "parseOk": true,
+      "rawTail": null
+    },
+    {
+      "id": 2,
+      "prompt": "¿Qué restaurantes tienen hamburguesas?",
+      "note": null,
+      "ms": 7845,
+      "model": "gemini-3.1-flash-lite",
+      "text": "¡Hola! Parece que estoy teniendo un pequeño problema técnico para listar las hamburgueserías en este momento. \n\n¿Podrías indicarme en qué **región o ciudad** te encuentras? Así podré intentar buscar nuevamente de forma más específica para ti.",
+      "toolCalls": 2,
+      "skippedLlm": false,
+      "fallback": false,
+      "stopReason": null,
+      "geminiHttpCalls": 3,
+      "tokensInput": 1992,
+      "tokensOutput": 93,
+      "estimatedCostUsd": 0.0002364,
+      "requestId": "r_bf4c40f1a6b14b52a9d4",
+      "restaurants": [],
+      "cumulativeHttp": 4,
+      "parseOk": true,
+      "rawTail": null
+    },
+    {
+      "id": 3,
+      "prompt": "Busco un restaurante económico",
+      "note": null,
+      "ms": 6523,
+      "model": "gemini-3.1-flash-lite",
+      "text": "¡Claro! Con gusto te ayudo a encontrar opciones económicas.\n\nPara poder darte recomendaciones precisas, ¿podrías indicarme en qué **ciudad o región** te encuentras? También, si tienes preferencia por algún tipo de comida (ej. hamburguesas, pizzas, comida criolla), házmelo saber para filtrar mejor los resultados.",
+      "toolCalls": 0,
+      "skippedLlm": false,
+      "fallback": false,
+      "stopReason": null,
+      "geminiHttpCalls": 1,
+      "tokensInput": 606,
+      "tokensOutput": 73,
+      "estimatedCostUsd": 0.0000898,
+      "requestId": "r_5472bc13ea8a4c6dbd09",
+      "restaurants": [],
+      "cumulativeHttp": 5,
+      "parseOk": true,
+      "rawTail": null
+    },
+    {
+      "id": 4,
+      "prompt": "Muéstrame el menú de Auto Pizzas Nápoles",
+      "note": null,
+      "ms": 7550,
+      "model": "gemini-3.1-flash-lite",
+      "text": "Lo siento, no pude encontrar un restaurante con el nombre \"Auto Pizzas Nápoles\" en el directorio. ¿Podrías verificar el nombre o indicarme en qué ciudad o zona se encuentra para intentar ayudarte mejor?",
+      "toolCalls": 2,
+      "skippedLlm": false,
+      "fallback": false,
+      "stopReason": null,
+      "geminiHttpCalls": 3,
+      "tokensInput": 2004,
+      "tokensOutput": 81,
+      "estimatedCostUsd": 0.00023280000000000002,
+      "requestId": "r_4175f4e2ad3b480b8712",
+      "restaurants": [],
+      "cumulativeHttp": 8,
+      "parseOk": true,
+      "rawTail": null
+    },
+    {
+      "id": 5,
+      "prompt": "xyznoexiste999discovery",
+      "note": null,
+      "ms": 6563,
+      "model": "gemini-3.1-flash-lite",
+      "text": "No encontré ningún restaurante o comercio con ese nombre. ¿Te gustaría buscar por alguna categoría (como hamburguesas, tacos, sushi, etc.) o en alguna región específica? Estoy aquí para ayudarte a encontrar opciones disponibles.",
+      "toolCalls": 0,
+      "skippedLlm": false,
+      "fallback": false,
+      "stopReason": null,
+      "geminiHttpCalls": 1,
+      "tokensInput": 608,
+      "tokensOutput": 45,
+      "estimatedCostUsd": 0.0000788,
+      "requestId": "r_58a9a1c539924129bf3e",
+      "restaurants": [],
+      "cumulativeHttp": 9,
+      "parseOk": true,
+      "rawTail": null
+    }
+  ],
+  "totals": {
+    "http": 9,
+    "tokensIn": 5818,
+    "tokensOut": 328,
+    "estimatedCostUsd": 0.000713
+  },
+  "aborted": null,
+  "ok": true,
+  "finishedAt": "2026-11-23T18:12:00.495Z"
+}
