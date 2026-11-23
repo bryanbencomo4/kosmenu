@@ -768,8 +768,8 @@ export const KioskMenuExperience = forwardRef<
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Portrait Meta-style tile: taller frame + contain so vertical covers stay complete. */}
-                  <div className="relative aspect-[2/3] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
+                  {/* Full-bleed cover in a 3:4 tile — avoids letterboxed product photos (e.g. drinks on black). */}
+                  <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
                         <KioskImage
@@ -777,7 +777,7 @@ export const KioskMenuExperience = forwardRef<
                           sourceUrl={category.coverSourceUrl || category.coverUrl}
                           displayWidth={360}
                           alt=""
-                          fit="contain"
+                          fit="cover"
                           priority={index < 4}
                           className="h-full w-full"
                         />
@@ -788,10 +788,10 @@ export const KioskMenuExperience = forwardRef<
                       )}
                     </div>
                     <div
-                      className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-t from-black/70 via-black/25 to-transparent"
+                      className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[42%] bg-gradient-to-t from-black/70 via-black/25 to-transparent"
                       aria-hidden
                     />
-                    <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 px-3 pb-3 pt-8">
+                    <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 px-3 pb-3 pt-8">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-extrabold uppercase tracking-wide text-white drop-shadow-sm">
                           {category.name}

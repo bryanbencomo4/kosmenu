@@ -49,21 +49,21 @@ export function ChatCategoryCarousel({
                 displayWidth={VARIANT_WIDTHS.card}
                 priority={index < 3}
                 fallbackLetter={c.name}
-                className="h-full w-full object-contain object-center"
+                className="h-full w-full object-cover object-center"
               />
             </span>
             {/* Soft vignette so titles stay readable (Meta catalog feel). */}
             <span
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/75 via-black/35 to-transparent"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[48%] bg-gradient-to-t from-black/75 via-black/35 to-transparent"
               aria-hidden
             />
             <span
-              className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-4 text-white backdrop-blur-[2px]"
+              className="pointer-events-none absolute right-2 top-2 z-10 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-4 text-white backdrop-blur-[2px]"
               aria-hidden
             >
               {c.productCount}
             </span>
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 px-2.5 pb-2.5 pt-6">
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-2.5 pb-2.5 pt-6">
               <span className="line-clamp-2 text-[12.5px] font-semibold leading-tight tracking-wide text-white drop-shadow-sm">
                 {c.name}
               </span>
