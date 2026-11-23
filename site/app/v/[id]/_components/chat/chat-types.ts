@@ -146,10 +146,14 @@ export type ChatMessage = {
   welcomeVersion?: number;
   /** Soft name/WhatsApp capture prompt (persist so remounts do not re-ask wrongly). */
   isIdentityAsk?: boolean;
+  /** “¿Qué te provoca?” prompt — may carry category carousel. */
+  isMenuPrompt?: boolean;
   /** User-message delivery ticks (grey / blue). */
   deliveryStatus?: ChatDeliveryStatus;
   /** Optional voice note attached to a user bubble. */
   voiceUrl?: string | null;
+  /** Assistant TTS script when there is no recorded audio file. */
+  voiceTtsText?: string | null;
   voiceDurationMs?: number;
   /**
    * True while the voice note is uploading / being transcribed.

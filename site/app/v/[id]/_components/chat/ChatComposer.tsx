@@ -78,6 +78,8 @@ type ChatComposerProps = {
   onRecordingChange?: (recording: boolean) => void;
   /** Optional: notify parent that the user is typing (presence). */
   onTypingActivity?: () => void;
+  /** Fires when the text field is focused (mobile keyboard → pin chat to bottom). */
+  onComposerFocus?: () => void;
   /** Override textarea data-testid (merchant panel uses staff-draft). */
   inputTestId?: string;
   /** Override send button data-testid (merchant panel uses staff-send). */
@@ -141,6 +143,7 @@ export function ChatComposer({
   replyAuthorFallback,
   onRecordingChange,
   onTypingActivity,
+  onComposerFocus,
   inputTestId = 'chat-composer-input',
   sendTestId = 'chat-composer-send',
   placeholder = 'Escribe un mensaje',
@@ -1124,6 +1127,7 @@ export function ChatComposer({
                 onFocus={() => {
                   setEmojiOpen(false);
                   setAttachOpen(false);
+                  onComposerFocus?.();
                 }}
                 placeholder={placeholder}
                 className="max-h-[7.5rem] min-h-[36px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-5 text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"

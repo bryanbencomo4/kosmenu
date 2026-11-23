@@ -61,6 +61,22 @@ import {
   writeChatConsumerIdentity,
 } from './chat-consumer-identity';
 import {
+  buildHumanHelpVoiceScript,
+  buildIdentityAskText,
+  buildIdentityDeclinedAck,
+  buildIdentityThanks,
+  buildOnboardingHello,
+  buildReturnGreeting,
+  buildWhatDoYouFeelLike,
+  consumeChatAfterOrder,
+  estimateTtsDurationMs,
+  markChatAfterOrder,
+  ORDER_COMPLETED_NOTICE,
+  readChatLastActive,
+  RETURN_GREETING_IDLE_MS,
+  writeChatLastActive,
+} from './chat-onboarding';
+import {
   ChatMediaLightbox,
   type ChatMediaLightboxState,
 } from './ChatMediaLightbox';
@@ -218,6 +234,9 @@ export type ChatAssistantViewProps = {
   /** Sheet already added to cart — show notice, no second confirm. */
   incomingAppliedNotice?: ChatAppliedAddNotice | null;
   onIncomingAppliedNoticeConsumed?: () => void;
+  /** Parent signals a finished order so the chat can mark the thread. */
+  orderCompletedSignal?: { orderId: string; at: number } | null;
+  onOrderCompletedSignalConsumed?: () => void;
 };
 
 function createMessage(
@@ -230,6 +249,7 @@ function createMessage(
     cartActions?: ChatCartActionData[];
     deliveryStatus?: ChatDeliveryStatus;
     voiceUrl?: string | null;
+    voiceTtsText?: string | null;
     voiceDurationMs?: number;
     voicePending?: boolean;
     attachments?: ChatAttachment[];
@@ -246,6 +266,7 @@ function createMessage(
     senderLabel?: string;
     id?: string;
     isIdentityAsk?: boolean;
+    isMenuPrompt?: boolean;
   },
 ): ChatMessage {
   return {
@@ -258,6 +279,7 @@ function createMessage(
     demo: options?.demo,
     isWelcome: options?.isWelcome,
     isIdentityAsk: options?.isIdentityAsk,
+    isMenuPrompt: options?.isMenuPrompt,
     senderLabel: options?.senderLabel,
     welcomeVersion: options?.isWelcome ? CHATBOT_WELCOME_VERSION : undefined,
     productCards: options?.productCards,
@@ -265,6 +287,7 @@ function createMessage(
     deliveryStatus:
       options?.deliveryStatus ?? (role === 'user' ? 'sent' : undefined),
     voiceUrl: options?.voiceUrl,
+    voiceTtsText: options?.voiceTtsText,
     voiceDurationMs: options?.voiceDurationMs,
     voicePending: options?.voicePending,
     attachments: options?.attachments,
@@ -437,6 +460,8 @@ export function ChatAssistantView({
   onIncomingProposalConsumed,
   incomingAppliedNotice = null,
   onIncomingAppliedNoticeConsumed,
+  orderCompletedSignal = null,
+  onOrderCompletedSignalConsumed,
 }: ChatAssistantViewProps) {
   const [serverAuthorized, setServerAuthorized] = useState(chatRuntimeEnabled);
   const [authReason, setAuthReason] = useState<string | null>(null);
@@ -475,20 +500,16 @@ export function ChatAssistantView({
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const stored = loadChatHistory(comercioId);
-    const base =
-      stored && stored.length > 0
-        ? stored
-        : [
-            createMessage('assistant', welcome, {
-              demo: !live,
-              isWelcome: true,
-              catalogCategories: welcomeCategories(catalog),
-            }),
-          ];
-    return refreshWelcomeInHistory(base, welcome, {
-      runtimeEnabled: live,
-    }) as ChatMessage[];
+    if (stored && stored.length > 0) {
+      return refreshWelcomeInHistory(stored, welcome, {
+        runtimeEnabled: live,
+      }) as ChatMessage[];
+    }
+    // Fresh thread — onboarding sequence fills messages with typing.
+    return [];
   });
+  const onboardingRanRef = useRef(false);
+  const menuPromptSentRef = useRef(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
@@ -542,6 +563,7 @@ export function ChatAssistantView({
   const [isTyping, setIsTyping] = useState(false);
   /** Mic recording in progress (hides suggested replies). */
   const [recording, setRecording] = useState(false);
+  const [composerFocusTick, setComposerFocusTick] = useState(0);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [cartBusy, setCartBusy] = useState(false);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
@@ -736,12 +758,11 @@ export function ChatAssistantView({
     );
   }, [welcome, live]);
 
-  // Categories are not persisted in history; (re)attach them to the welcome
-  // bubble whenever the live catalog is available or changes.
+  // Categories attach to the “¿qué te provoca?” prompt — not the first hello.
   useEffect(() => {
     const categories = welcomeCategories(catalog);
     setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.isWelcome);
+      const idx = prev.findIndex((m) => m.isMenuPrompt);
       if (idx < 0) return prev;
       if (sameCategoryIds(prev[idx].catalogCategories, categories)) return prev;
       const next = prev.slice();
@@ -749,6 +770,10 @@ export function ChatAssistantView({
       return next;
     });
   }, [catalog]);
+
+  useEffect(() => {
+    writeChatLastActive(comercioId);
+  }, [comercioId, messages.length]);
 
   // Resume feed watch after reload when a feed token was already issued.
   useEffect(() => {
@@ -1117,61 +1142,180 @@ export function ChatAssistantView({
     [comercioId],
   );
 
-  /**
-   * Inject soft identity ask into the thread when needed.
-   * Anchored to message history (isIdentityAsk) — never mark asked without a bubble.
-   */
-  const ensureIdentityAskInThread = useCallback(
-    (prev: ChatMessage[]): { next: ChatMessage[]; ask: ChatMessage | null } => {
-      const identity = readChatConsumerIdentity(comercioId);
-      if (!needsIdentityCapture(identity)) {
-        return { next: prev, ask: null };
-      }
-      if (prev.some((m) => m.isIdentityAsk)) {
-        identityAwaitingRef.current = true;
-        return { next: prev, ask: null };
-      }
-      const ask = createMessage('assistant', buildSoftIdentityAskText(), {
-        isIdentityAsk: true,
+  const appendAssistantLocal = useCallback(
+    (msg: ChatMessage) => {
+      setMessages((prev) => [...prev, msg]);
+      playAssistantReceivedOnce(msg);
+      void syncLocalSupervisionTurn({
+        comercioId,
+        businessName,
+        refs: {
+          feedTokenRef: supervisionFeedTokenRef,
+          conversationIdRef: supervisionConversationIdRef,
+        },
+        assistant: msg,
+        consumerLabel: currentConsumerLabel(),
+        onWatch: () => setSupervisionWatchActive(true),
       });
-      identityAwaitingRef.current = true;
-      writeChatConsumerIdentity(comercioId, {
-        askedAt: new Date().toISOString(),
-      });
-      return { next: [...prev, ask], ask };
     },
-    [comercioId],
+    [comercioId, businessName, currentConsumerLabel, playAssistantReceivedOnce],
   );
 
-  /** Soft one-shot ask for name + WhatsApp — sync, remount-safe. */
+  const sendMenuPrompt = useCallback(
+    async (guestName?: string | null) => {
+      if (menuPromptSentRef.current) return;
+      if (messagesRef.current.some((m) => m.isMenuPrompt)) {
+        menuPromptSentRef.current = true;
+        return;
+      }
+      menuPromptSentRef.current = true;
+      setIsTyping(true);
+      await sleep(humanLocalReplyMs());
+      const prompt = createMessage(
+        'assistant',
+        buildWhatDoYouFeelLike(guestName),
+        {
+          isMenuPrompt: true,
+          catalogCategories: welcomeCategories(catalog),
+        },
+      );
+      appendAssistantLocal(prompt);
+      setIsTyping(false);
+    },
+    [appendAssistantLocal, catalog],
+  );
+
+  /**
+   * First open: typing + 2–3 brief natural bubbles (hello → identity → voice note).
+   * Return visit after idle/order: typing + contextual greeting.
+   */
   useEffect(() => {
+    if (onboardingRanRef.current) return;
+    onboardingRanRef.current = true;
+    let cancelled = false;
+
     const existing = readChatConsumerIdentity(comercioId);
     const knownLabel = buildConsumerLabel(existing || {});
-    if (knownLabel) {
-      syncConsumerLabelToServer(knownLabel);
-    }
-    if (!needsIdentityCapture(existing)) return;
-    setMessages((prev) => {
-      const { next, ask } = ensureIdentityAskInThread(prev);
-      if (ask) {
-        queueMicrotask(() => {
-          playAssistantReceivedOnce(ask);
-          void syncLocalSupervisionTurn({
-            comercioId,
+    if (knownLabel) syncConsumerLabelToServer(knownLabel);
+
+    const run = async () => {
+      const hasHistory = messagesRef.current.length > 0;
+      const afterOrder = consumeChatAfterOrder(comercioId);
+      const lastActive = readChatLastActive(comercioId);
+      const idleMs = lastActive ? Date.now() - lastActive : 0;
+      const needsReturn =
+        hasHistory &&
+        (afterOrder || idleMs >= RETURN_GREETING_IDLE_MS);
+
+      if (needsReturn) {
+        setIsTyping(true);
+        await sleep(humanLocalReplyMs());
+        if (cancelled) return;
+        const greet = createMessage(
+          'assistant',
+          buildReturnGreeting({
             businessName,
-            refs: {
-              feedTokenRef: supervisionFeedTokenRef,
-              conversationIdRef: supervisionConversationIdRef,
-            },
-            assistant: ask,
-            onWatch: () => setSupervisionWatchActive(true),
-          });
-        });
+            guestName: existing?.name,
+            idleMinutes: Math.round(idleMs / 60000),
+            afterOrder,
+          }),
+        );
+        appendAssistantLocal(greet);
+        setIsTyping(false);
+        writeChatLastActive(comercioId);
+        return;
       }
-      return next;
+
+      if (hasHistory) {
+        // Existing short session — don't re-run first-open sequence.
+        if (messagesRef.current.some((m) => m.isMenuPrompt)) {
+          menuPromptSentRef.current = true;
+        }
+        if (messagesRef.current.some((m) => m.isIdentityAsk)) {
+          identityAwaitingRef.current = needsIdentityCapture(existing);
+        }
+        return;
+      }
+
+      // —— First open ——
+      setIsTyping(true);
+      await sleep(humanTypingMinMs(36));
+      if (cancelled) return;
+      const hello = createMessage(
+        'assistant',
+        buildOnboardingHello(businessName, existing?.name),
+        { demo: !live, isWelcome: true },
+      );
+      appendAssistantLocal(hello);
+      setIsTyping(false);
+
+      await sleep(480 + Math.floor(Math.random() * 220));
+      if (cancelled) return;
+
+      if (needsIdentityCapture(existing)) {
+        setIsTyping(true);
+        await sleep(humanTypingMinMs(52));
+        if (cancelled) return;
+        const ask = createMessage('assistant', buildIdentityAskText(), {
+          isIdentityAsk: true,
+        });
+        identityAwaitingRef.current = true;
+        writeChatConsumerIdentity(comercioId, {
+          askedAt: new Date().toISOString(),
+        });
+        appendAssistantLocal(ask);
+        setIsTyping(false);
+
+        await sleep(520 + Math.floor(Math.random() * 240));
+        if (cancelled) return;
+      }
+
+      setIsTyping(true);
+      await sleep(humanTypingMinMs(70));
+      if (cancelled) return;
+      const script = buildHumanHelpVoiceScript(businessName);
+      const voice = createMessage('assistant', '', {
+        voiceTtsText: script,
+        voiceDurationMs: estimateTtsDurationMs(script),
+      });
+      appendAssistantLocal(voice);
+      setIsTyping(false);
+
+      // Always offer the menu — identity is soft; never leave the user stuck.
+      await sleep(420);
+      if (cancelled) return;
+      await sendMenuPrompt(existing?.name);
+
+      writeChatLastActive(comercioId);
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  }, [comercioId]);
+
+  // Order completed divider (from in-chat checkout).
+  useEffect(() => {
+    if (!orderCompletedSignal) return;
+    markChatAfterOrder(comercioId);
+    const notice = createMessage('system', ORDER_COMPLETED_NOTICE);
+    setMessages((prev) => {
+      if (
+        prev.some(
+          (m) =>
+            m.role === 'system' &&
+            m.text === ORDER_COMPLETED_NOTICE &&
+            Date.now() - m.createdAt < 10_000,
+        )
+      ) {
+        return prev;
+      }
+      return [...prev, notice];
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per commerce mount
-  }, [comercioId, ensureIdentityAskInThread]);
+    onOrderCompletedSignalConsumed?.();
+  }, [orderCompletedSignal, comercioId, onOrderCompletedSignalConsumed]);
 
   /** Mirror deterministic UI turns so the merchant panel sees the same cards. */
   const mirrorLocalTurn = useCallback(
@@ -2178,7 +2322,7 @@ export function ChatAssistantView({
           await sleep(humanLocalReplyMs());
           const ack = createMessage(
             'assistant',
-            'Perfecto, sin problema. Cuando quieras pedimos; aquí estoy para ayudarte con el menú.',
+            `${buildIdentityDeclinedAck()} ${buildWhatDoYouFeelLike()}`,
           );
           setMessages((prev) => [...markLatestUserMessage(prev, 'read'), ack]);
           playAssistantReceivedOnce(ack);
@@ -2188,6 +2332,8 @@ export function ChatAssistantView({
             assistant: ack,
           });
           setIsTyping(false);
+          // Don't block — show categories so they can keep ordering.
+          void sendMenuPrompt();
           return;
         }
         if (parsedId.name || parsedId.whatsapp) {
@@ -2198,10 +2344,7 @@ export function ChatAssistantView({
           });
           const label = buildConsumerLabel(saved);
           syncConsumerLabelToServer(label);
-          const first = (saved.name || '').split(/\s+/)[0] || '';
-          const thanks = first
-            ? `Gracias, ${first}. Ya te tengo anotado para el pedido.`
-            : 'Gracias, ya guardé tus datos para el pedido.';
+          const thanks = buildIdentityThanks(saved.name);
           const phoneNote =
             saved.name && !saved.whatsapp
               ? ` ${buildSoftPhoneReminderText(saved.name)}`
@@ -2218,7 +2361,7 @@ export function ChatAssistantView({
             await sleep(humanLocalReplyMs());
             const ack = createMessage(
               'assistant',
-              `${thanks}${phoneNote ? `\n\n${phoneNote.trim()}` : ''} ¿Qué se te antoja?`,
+              `${thanks}${phoneNote ? `\n\n${phoneNote.trim()}` : ''} ${buildWhatDoYouFeelLike(saved.name)}`,
             );
             if (phoneNote) {
               writeChatConsumerIdentity(comercioId, {
@@ -2324,6 +2467,7 @@ export function ChatAssistantView({
       syncConsumerLabelToServer,
       ensureIdentityAskInThread,
       runAssistantTurn,
+      sendMenuPrompt,
       answerCatalogIntent,
       answerLocationIntent,
       answerHoursIntent,
@@ -3035,6 +3179,7 @@ export function ChatAssistantView({
         onRefresh={refreshConversation}
         voiceAvatarUrl={logoUrl}
         voiceAvatarLetter={initialLetter}
+        composerFocusTick={composerFocusTick}
       />
 
       <ChatSuggestedReplies
@@ -3089,6 +3234,7 @@ export function ChatAssistantView({
           onTypingActivity={
             humanSupervisionActive ? () => onConsumerTypingActivity() : undefined
           }
+          onComposerFocus={() => setComposerFocusTick((t) => t + 1)}
           onChange={setDraft}
           onSend={() => {
             void sendMessage();

@@ -156,8 +156,8 @@ export function saveChatHistory(
       isWelcome: m.isWelcome,
       welcomeVersion: m.welcomeVersion,
       isIdentityAsk: m.isIdentityAsk,
+      isMenuPrompt: m.isMenuPrompt,
       deliveryStatus: m.deliveryStatus,
-      voiceDurationMs: m.voiceDurationMs,
       // Keep proposal cards across remounts so confirm UI does not vanish.
       productCards: m.productCards,
       cartActions: m.cartActions,
@@ -190,6 +190,9 @@ export function saveChatHistory(
           analysis: a.analysis ?? null,
         })),
       // voiceUrl is a blob: URL — do not persist across reloads.
+      // TTS scripts are safe to persist for assistant welcome notes.
+      voiceTtsText: m.voiceTtsText || undefined,
+      voiceDurationMs: m.voiceTtsText ? m.voiceDurationMs : undefined,
     }));
     sessionStorage.setItem(storageKey(comercioId), JSON.stringify(slim));
   } catch {

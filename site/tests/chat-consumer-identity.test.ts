@@ -15,7 +15,7 @@ import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
 describe('chat consumer identity', () => {
   it('asks softly and personalizes welcome when name is known', () => {
     expect(buildSoftIdentityAskText()).toMatch(/WhatsApp/i);
-    expect(buildSoftIdentityAskText()).toMatch(/si prefieres no/i);
+    expect(buildSoftIdentityAskText()).toMatch(/nombre/i);
     expect(buildChatbotWelcomeMessage('Trueno', { guestName: 'María' })).toMatch(
       /Hola, María/,
     );
@@ -25,12 +25,17 @@ describe('chat consumer identity', () => {
   it('parses name, phone and declines', () => {
     expect(extractNameFromText('Me llamo Bryan')).toBe('Bryan');
     expect(extractNameFromText('María López')).toBe('María López');
+    expect(extractNameFromText('no')).toBe(null);
+    expect(extractNameFromText('luego')).toBe(null);
     expect(extractWhatsappFromText('04141234567')).toMatch(/^\+58414/);
     expect(extractWhatsappFromText('mi wa es +58 414 1234567')).toMatch(
       /^\+58414/,
     );
+    expect(matchIdentityDecline('no')).toBe(true);
     expect(matchIdentityDecline('luego, gracias')).toBe(true);
     expect(matchIdentityDecline('quiero una hawaiana')).toBe(false);
+    expect(parseIdentityReply('no').declined).toBe(true);
+    expect(parseIdentityReply('no').name).toBe(null);
     expect(matchGreetingOnly('Hola')).toBe(true);
     expect(matchGreetingOnly('Menu')).toBe(false);
 

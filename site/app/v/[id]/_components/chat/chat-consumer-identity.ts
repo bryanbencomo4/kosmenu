@@ -126,26 +126,70 @@ export function buildConsumerLabel(identity: {
 }
 
 export function buildSoftIdentityAskText(): string {
-  return [
-    'Si te parece bien, ¿me compartes tu *nombre* y un *WhatsApp*?',
-    'Así el restaurante te reconoce en el chat y no se pierde el hilo del pedido.',
-    'Es solo para atenderte aquí; si prefieres no decirlo ahora, no hay problema — pedimos cuando quieras.',
-  ].join(' ');
+  // Prefer chat-onboarding copy; kept for older imports/tests.
+  return 'No te tenemos registrado todavía. ¿Nos regalas tu nombre y WhatsApp para mantenerte al tanto del pedido?';
 }
 
 export function buildSoftPhoneReminderText(name: string): string {
   const first = clean(name).split(/\s+/)[0] || '';
   const hi = first ? `${first}, ` : '';
-  return `${hi}si más adelante quieres dejar un WhatsApp para no perder el contacto del pedido, con gusto lo guardo. Si no, seguimos igual.`;
+  return `${hi}si más adelante quieres dejar un WhatsApp para el pedido, me avisas.`;
 }
 
+/** Words that are never a personal name. */
+const NAME_BLOCKLIST = new Set([
+  'no',
+  'nop',
+  'nope',
+  'nah',
+  'nel',
+  'si',
+  'sí',
+  'ok',
+  'okay',
+  'hola',
+  'buenas',
+  'menu',
+  'menú',
+  'pizza',
+  'gracias',
+  'nada',
+  'luego',
+  'despues',
+  'después',
+  'ya',
+  'claro',
+  'dale',
+  'listo',
+  'bueno',
+  'bien',
+  'mal',
+  'tal',
+  'vez',
+  'pasar',
+  'omitir',
+  'skip',
+]);
+
 const DECLINE_RE =
-  /\b(no gracias|ahora no|luego|despues|después|prefiero no|mejor no|no quiero|omitir|pasar|skip|sin datos|no doy|no paso)\b/i;
+  /^(no|nop|nope|nah|nel|nope\.|no gracias|ahora no|mejor no|prefiero no|no quiero|no doy|no paso|sin datos|omitir|pasar|luego|despues|después|skip)([.!]?|\s+gracias)?$/i;
 
 export function matchIdentityDecline(text: string | null | undefined): boolean {
   const norm = fold(text ?? '');
-  if (!norm || norm.split(' ').length > 14) return false;
-  return DECLINE_RE.test(norm);
+  if (!norm || norm.split(' ').length > 8) return false;
+  if (DECLINE_RE.test(norm)) return true;
+  // "no, gracias" / "no gracias por ahora"
+  if (/^no\b/.test(norm) && norm.split(' ').length <= 5) {
+    if (
+      /\b(gracias|ahora|luego|despues|después|quiero|doy|paso|prefiero|mejor)\b/.test(
+        norm,
+      ) ||
+      norm === 'no'
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Extract VE / international phone from free text. */
@@ -188,7 +232,12 @@ export function extractNameFromText(text: string): string | null {
     /(?:me llamo|soy|mi nombre (?:es|:)|nombre[:\s]+)\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]{1,40})/i,
   );
   if (named?.[1]) {
-    return clean(named[1]).replace(/\b\w/g, (c) => c.toUpperCase());
+    const candidate = clean(named[1]);
+    const first = fold(candidate.split(/\s+/)[0] || '');
+    if (NAME_BLOCKLIST.has(first) || matchIdentityDecline(candidate)) {
+      return null;
+    }
+    return candidate.replace(/\b\w/g, (c) => c.toUpperCase());
   }
   // Short reply that looks like a bare name (1–3 words, letters only).
   const words = withoutPhone.split(/\s+/).filter(Boolean);
@@ -196,10 +245,15 @@ export function extractNameFromText(text: string): string | null {
     words.length >= 1 &&
     words.length <= 3 &&
     words.every((w) => /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+$/.test(w)) &&
-    !DECLINE_RE.test(withoutPhone) &&
+    !matchIdentityDecline(withoutPhone) &&
     withoutPhone.length <= 40
   ) {
-    return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    const first = fold(words[0] || '');
+    if (NAME_BLOCKLIST.has(first)) return null;
+    if (words.every((w) => NAME_BLOCKLIST.has(fold(w)))) return null;
+    return words
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
   }
   return null;
 }

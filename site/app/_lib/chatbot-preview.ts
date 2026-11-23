@@ -87,7 +87,7 @@ export function shouldOpenChatbotFromQuery(params: {
 }
 
 /** Bump when welcome copy changes so persisted chats refresh the first bubble. */
-export const CHATBOT_WELCOME_VERSION = 7;
+export const CHATBOT_WELCOME_VERSION = 8;
 
 export function buildChatbotWelcomeMessage(
   restaurantName: string,
@@ -95,14 +95,8 @@ export function buildChatbotWelcomeMessage(
 ): string {
   const name = restaurantName.trim() || 'nuestro restaurante';
   const guest = (options?.guestName || '').trim().split(/\s+/)[0] || '';
-  const hello = guest ? `¡Hola, ${guest}! 👋` : '¡Hola! 👋';
-  return [
-    `${hello} Bienvenido a ${name} 🍕`,
-    '',
-    '¿Qué se te antoja hoy? Mira nuestro menú o dime qué te gustaría pedir.',
-    '',
-    '_Esta conversación puede ser revisada por personal autorizado del restaurante y procesada por IA para atenderte mejor._',
-  ].join('\n');
+  const hello = guest ? `¡Hola, ${guest}!` : '¡Hola!';
+  return `${hello} Bienvenido a ${name}.`;
 }
 
 /**
@@ -123,18 +117,9 @@ export function refreshWelcomeInHistory(
   options?: { runtimeEnabled?: boolean },
 ): typeof messages {
   const live = Boolean(options?.runtimeEnabled);
+  // Empty thread is owned by the onboarding sequencer (typing + multi-bubble).
   if (messages.length === 0) {
-    return [
-      {
-        id: `assistant-welcome-${Date.now()}`,
-        role: 'assistant',
-        text: welcome,
-        createdAt: Date.now(),
-        demo: !live,
-        isWelcome: true,
-        welcomeVersion: CHATBOT_WELCOME_VERSION,
-      },
-    ];
+    return messages;
   }
   const [first, ...rest] = messages;
   // First assistant bubble is the welcome slot (including legacy histories).

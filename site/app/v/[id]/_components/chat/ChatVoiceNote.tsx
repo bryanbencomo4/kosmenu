@@ -10,7 +10,9 @@ import {
 } from 'react';
 
 type ChatVoiceNoteProps = {
-  src: string | null | undefined;
+  src?: string | null | undefined;
+  /** Browser TTS script when there is no recorded audio file. */
+  ttsText?: string | null;
   durationMs?: number;
   pending?: boolean;
   /** Incoming = left bubble avatar; outgoing = no avatar. */
@@ -42,8 +44,19 @@ function waveformBars(seed: string, count: number): number[] {
   return out;
 }
 
+function pickSpanishVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((v) => /^es(-|_|$)/i.test(v.lang) && /venezuela|mexico|us|españa|spain/i.test(v.name + v.lang)) ||
+    voices.find((v) => /^es(-|_|$)/i.test(v.lang)) ||
+    null
+  );
+}
+
 export function ChatVoiceNote({
-  src,
+  src = null,
+  ttsText = null,
   durationMs = 0,
   pending = false,
   incoming = false,
@@ -54,19 +67,22 @@ export function ChatVoiceNote({
   const [playing, setPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [knownDurationMs, setKnownDurationMs] = useState(durationMs);
+  const ttsTimerRef = useRef<number | null>(null);
+  const ttsStartedAtRef = useRef(0);
+  const canPlay = Boolean(src) || Boolean((ttsText || '').trim());
 
   const bars = useMemo(
-    () => waveformBars(src || String(durationMs), BAR_COUNT),
-    [src, durationMs],
+    () => waveformBars(src || ttsText || String(durationMs), BAR_COUNT),
+    [src, ttsText, durationMs],
   );
 
   useEffect(() => {
     setKnownDurationMs(durationMs > 0 ? durationMs : 0);
-  }, [durationMs, src]);
+  }, [durationMs, src, ttsText]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !src) return;
     const onTime = () => setCurrentMs(audio.currentTime * 1000);
     const onMeta = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -94,15 +110,76 @@ export function ChatVoiceNote({
     };
   }, [src]);
 
-  const toggle = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !src) return;
-    if (audio.paused) {
-      void audio.play().catch(() => setPlaying(false));
-    } else {
-      audio.pause();
+  useEffect(() => {
+    return () => {
+      if (ttsTimerRef.current) window.clearInterval(ttsTimerRef.current);
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const stopTts = useCallback(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
     }
-  }, [src]);
+    if (ttsTimerRef.current) {
+      window.clearInterval(ttsTimerRef.current);
+      ttsTimerRef.current = null;
+    }
+    setPlaying(false);
+    setCurrentMs(0);
+  }, []);
+
+  const playTts = useCallback(() => {
+    const text = (ttsText || '').trim();
+    if (!text || typeof window === 'undefined' || !window.speechSynthesis) {
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'es-VE';
+    utter.rate = 1.02;
+    const voice = pickSpanishVoice();
+    if (voice) utter.voice = voice;
+    const total = durationMs > 0 ? durationMs : Math.max(3000, text.length * 55);
+    setKnownDurationMs(total);
+    ttsStartedAtRef.current = Date.now();
+    setCurrentMs(0);
+    setPlaying(true);
+    if (ttsTimerRef.current) window.clearInterval(ttsTimerRef.current);
+    ttsTimerRef.current = window.setInterval(() => {
+      const elapsed = Date.now() - ttsStartedAtRef.current;
+      setCurrentMs(Math.min(total, elapsed));
+    }, 80);
+    utter.onend = () => {
+      if (ttsTimerRef.current) window.clearInterval(ttsTimerRef.current);
+      ttsTimerRef.current = null;
+      setPlaying(false);
+      setCurrentMs(0);
+    };
+    utter.onerror = () => stopTts();
+    window.speechSynthesis.speak(utter);
+  }, [ttsText, durationMs, stopTts]);
+
+  const toggle = useCallback(() => {
+    if (src) {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (audio.paused) {
+        void audio.play().catch(() => setPlaying(false));
+      } else {
+        audio.pause();
+      }
+      return;
+    }
+    if (!ttsText) return;
+    if (playing) {
+      stopTts();
+    } else {
+      playTts();
+    }
+  }, [src, ttsText, playing, playTts, stopTts]);
 
   const totalMs = knownDurationMs > 0 ? knownDurationMs : durationMs;
   const progress = totalMs > 0 ? Math.min(1, currentMs / totalMs) : 0;
@@ -139,13 +216,16 @@ export function ChatVoiceNote({
       className="flex w-full min-w-[14rem] max-w-[17.5rem] items-center gap-2"
       data-chat-voice="1"
       data-chat-voice-incoming={incoming ? '1' : '0'}
+      data-chat-voice-tts={ttsText && !src ? '1' : '0'}
     >
-      <audio ref={audioRef} src={src || undefined} preload="metadata" className="hidden" />
+      {src ? (
+        <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
+      ) : null}
 
       <button
         type="button"
         onClick={toggle}
-        disabled={!src}
+        disabled={!canPlay}
         className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] transition enabled:hover:bg-[color-mix(in_srgb,var(--chat-text)_10%,transparent)] disabled:opacity-40"
         aria-label={playing ? 'Pausar nota de voz' : 'Reproducir nota de voz'}
         data-chat-voice-play="1"

@@ -447,7 +447,7 @@ export function ChatMessageBubble({
     catalogProducts.length > 0 &&
     (!closeSale || closeSale.status === 'answered_more');
   const hasCartActions = Boolean(message.cartActions?.length);
-  const hasVoice = Boolean(message.voiceUrl);
+  const hasVoice = Boolean(message.voiceUrl || message.voiceTtsText);
   const hasLocation = Boolean(message.location);
   const hasText = Boolean(message.text.trim());
 
@@ -617,6 +617,7 @@ export function ChatMessageBubble({
             <div className="mb-1">
               <ChatVoiceNote
                 src={message.voiceUrl}
+                ttsText={message.voiceTtsText}
                 durationMs={message.voiceDurationMs}
                 pending={message.voicePending}
                 incoming={!isUser}

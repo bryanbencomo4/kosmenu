@@ -62,6 +62,11 @@ type ChatMessageListProps = {
   /** Avatar for incoming voice notes (business logo). */
   voiceAvatarUrl?: string | null;
   voiceAvatarLetter?: string;
+  /**
+   * Bumped when the composer gains focus (mobile keyboard).
+   * Forces the thread to the latest message above the keyboard.
+   */
+  composerFocusTick?: number;
 };
 
 export function ChatMessageList({
@@ -87,6 +92,7 @@ export function ChatMessageList({
   onRefresh,
   voiceAvatarUrl = null,
   voiceAvatarLetter = '?',
+  composerFocusTick = 0,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +143,79 @@ export function ChatMessageList({
     nearBottomRef.current = true;
     setShowJumpLatest(false);
   }, []);
+
+  /**
+   * Keyboard / viewport shrink: keep the latest bubbles above the soft keyboard.
+   * Runs twice on rAF because iOS applies visualViewport then layout one frame later.
+   */
+  const pinBottomForKeyboard = useCallback(() => {
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      nearBottomRef.current = true;
+      setShowJumpLatest(false);
+      try {
+        endRef.current?.scrollIntoView({ block: 'end', inline: 'nearest' });
+      } catch {
+        /* ignore */
+      }
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  }, []);
+
+  // Soft keyboard: list height shrinks with the visual viewport — pin to bottom.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let prevH = el.clientHeight;
+    const onListResize = () => {
+      const h = el.clientHeight;
+      if (h < prevH - 20) {
+        pinBottomForKeyboard();
+      } else if (nearBottomRef.current && Math.abs(h - prevH) > 2) {
+        pinBottomForKeyboard();
+      }
+      prevH = h;
+    };
+    const ro = new ResizeObserver(onListResize);
+    ro.observe(el);
+
+    const vv = window.visualViewport;
+    let prevVvH = vv?.height ?? window.innerHeight;
+    const onVv = () => {
+      const h = vv?.height ?? window.innerHeight;
+      if (h < prevVvH - 24) {
+        pinBottomForKeyboard();
+      } else if (nearBottomRef.current && Math.abs(h - prevVvH) > 8) {
+        pinBottomForKeyboard();
+      }
+      prevVvH = h;
+    };
+    vv?.addEventListener('resize', onVv);
+    vv?.addEventListener('scroll', onVv);
+    return () => {
+      ro.disconnect();
+      vv?.removeEventListener('resize', onVv);
+      vv?.removeEventListener('scroll', onVv);
+    };
+  }, [pinBottomForKeyboard]);
+
+  useEffect(() => {
+    if (!composerFocusTick) return;
+    pinBottomForKeyboard();
+    // iOS often finishes keyboard animation ~250–350ms after focus.
+    const t1 = window.setTimeout(pinBottomForKeyboard, 120);
+    const t2 = window.setTimeout(pinBottomForKeyboard, 320);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [composerFocusTick, pinBottomForKeyboard]);
 
   // --- Bottom-first on mount / empty→nonempty / append ------------------------
   useLayoutEffect(() => {
