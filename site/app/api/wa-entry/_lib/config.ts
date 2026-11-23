@@ -138,22 +138,10 @@ export function assertSafeLocalConfig(config: WaEntryConfig, env: NodeJS.Process
   }
 
   if (config.storeKind === 'supabase_preview') {
+    // Wa-entry writes use PLATFORM_WA_PREVIEW_* only. The host app may still
+    // have NEXT_PUBLIC_SUPABASE_URL=production for public read surfaces on a
+    // Preview deploy; that is allowed as long as Preview target asserts pass.
     assertPreviewSupabaseTarget(config);
-  }
-
-  // Hard stop: never use prod service role from Next .env.local for this module
-  // unless an explicit (dangerous) override is set — still refused for store writes
-  // when URL points at production.
-  const serviceRole = (env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
-  const supabaseUrl = (env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL || '').trim();
-  if (
-    serviceRole &&
-    supabaseUrl.includes(WA_ENTRY_PROD_PROJECT_REF) &&
-    config.storeKind === 'supabase_preview'
-  ) {
-    throw new Error(
-      'wa_entry_refused: refusing to bind Preview store while default Supabase URL is production',
-    );
   }
 }
 

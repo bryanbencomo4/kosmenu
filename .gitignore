@@ -105,3 +105,6 @@ supabase/functions/deno.lock
 # WaSender universal entry local state
 site/.wa-entry-local/
 site/.env.wa-entry.local
+
+# Wa-entry Preview deploy secrets
+site/.wa-entry-preview-deploy/
