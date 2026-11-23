@@ -822,7 +822,10 @@ async function enqueueNewConversationNotify(input: {
     return;
   }
 
-  const link = merchantConversationHref(input.conversationId);
+  const link = merchantConversationHref(
+    input.conversationId,
+    input.comercioId,
+  );
   const text = [
     '🔔 *Nueva conversación en El Menú XFA*',
     '',
@@ -913,7 +916,10 @@ async function enqueueNeedsAttentionNotify(input: {
     }
     return;
   }
-  const link = merchantConversationHref(input.conversationId);
+  const link = merchantConversationHref(
+    input.conversationId,
+    input.comercioId,
+  );
   const text = [
     '🟠 *Conversación requiere atención*',
     '',
@@ -1010,7 +1016,10 @@ export async function retryFailedSupervisionNotifies(comercioId: string) {
       continue;
     }
 
-    const link = merchantConversationHref(String(row.conversation_id));
+    const link = merchantConversationHref(
+      String(row.conversation_id),
+      comercioId,
+    );
     const text =
       row.event_type === 'needs_attention'
         ? [

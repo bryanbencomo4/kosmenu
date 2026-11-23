@@ -95,6 +95,12 @@ describe('chat supervision helpers', () => {
     expect(href).toMatch(/elmenuxfa\.com|localhost|127\.0\.0\.1/);
     expect(href).not.toMatch(/^https:\/\/app\.elmenuxfa\.com\//);
     expect(href).not.toMatch(/service_role|apikey|Bearer/i);
+    const withCommerce = merchantConversationHref(
+      '11111111-1111-4111-8111-111111111111',
+      COMERCIO,
+    );
+    expect(withCommerce).toContain(`comercioId=${encodeURIComponent(COMERCIO)}`);
+    expect(withCommerce).not.toMatch(/service_role|apikey|Bearer/i);
   });
 
   it('sanitizes panel login next redirects', () => {

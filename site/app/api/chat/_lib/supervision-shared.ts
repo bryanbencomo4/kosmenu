@@ -24,9 +24,16 @@ export function hashConsumerSession(
  * WaSender deep link → Next merchant panel (same deploy as chat APIs).
  * Flutter native inbox remains available via Settings / app.elmenuxfa.com.
  */
-export function merchantConversationHref(conversationId: string) {
+export function merchantConversationHref(
+  conversationId: string,
+  comercioId?: string | null,
+) {
   const base = publicSiteUrl.replace(/\/$/, '');
-  return `${base}/panel/conversaciones/${encodeURIComponent(conversationId)}`;
+  const path = `${base}/panel/conversaciones/${encodeURIComponent(conversationId)}`;
+  const cid = String(comercioId || '').trim();
+  if (!cid) return path;
+  // comercioId speeds panel Realtime subscribe + multi-commerce context; not a secret.
+  return `${path}?comercioId=${encodeURIComponent(cid)}`;
 }
 
 export const ESCALATION_RE =
