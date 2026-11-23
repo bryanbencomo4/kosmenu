@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "base": "http://127.0.0.1:3011",
+  "simulated": true,
+  "geminiBillable": false,
+  "steps": [
+    {
+      "name": "welcome",
+      "ok": true
+    },
+    {
+      "name": "chip_pizzas",
+      "ok": true,
+      "cards": 24
+    },
+    {
+      "name": "empty_search",
+      "ok": true,
+      "threadSnippet": "o\n\nPalmira, Táchira\n\nVer menú\n\nLocal 47\n\nPizza\n\nCerrado\n\nPalmira, Táchira\n\nVer menú\nVer más\n\nxyznoexiste\n\nNo encontré restaurantes para “xyznoexiste”. Prueba otra categoría o zona."
+    },
+    {
+      "name": "gemini_fail_fallback",
+      "ok": true
+    },
+    {
+      "name": "geo_deny",
+      "ok": true
+    },
+    {
+      "name": "pagination_ver_mas",
+      "ok": true,
+      "before": 24,
+      "after": 40
+    },
+    {
+      "name": "ref_wa_ready",
+      "ok": true,
+      "note": "share param supported on entry"
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\01-welcome.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\02-pizzas.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\03-empty.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\04-gemini-fail.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\05-geo-deny.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\06-pagination.png"
+  ],
+  "errors": []
+}

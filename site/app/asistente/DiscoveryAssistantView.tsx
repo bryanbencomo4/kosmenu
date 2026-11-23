@@ -16,7 +16,6 @@ import {
   canOfferDiscoveryChatLink,
 } from '../_lib/discovery-assistant';
 import { DIRECTORY_CATEGORY_CHIPS } from '../api/_lib/public-directory-geo';
-import { ChatComposer } from '../v/[id]/_components/chat/ChatComposer';
 import {
   chatThemeVars,
   loadStoredChatTheme,
@@ -24,6 +23,7 @@ import {
   saveChatTheme,
   type ChatThemeMode,
 } from '../v/[id]/_components/chat/chat-theme';
+import { DiscoveryComposer } from './DiscoveryComposer';
 import {
   DiscoveryRestaurantCarousel,
   type DiscoveryUiRestaurant,
@@ -148,10 +148,17 @@ export function DiscoveryAssistantView({
   apiEnabled = false,
 }: DiscoveryAssistantViewProps) {
   const listId = useId();
+  const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<ChatThemeMode>('light');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  const [messages, setMessages] = useState<ThreadMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      text: '¡Hola! ¿Qué se te antoja comer hoy?',
+    },
+  ]);
   const [geo, setGeo] = useState<{ lat: number; lng: number } | null>(null);
   const [regionHint, setRegionHint] = useState<string | null>(null);
   const [lastSearch, setLastSearch] = useState<{
@@ -165,6 +172,7 @@ export function DiscoveryAssistantView({
   const sessionIdRef = useRef('ssr');
 
   useEffect(() => {
+    setMounted(true);
     setTheme(resolvePreferredChatTheme(loadStoredChatTheme()));
     sessionIdRef.current = ensureSessionId();
     // Persist non-sensitive share origin for future analytics (e.g. ?ref=wa).
@@ -175,13 +183,6 @@ export function DiscoveryAssistantView({
         /* ignore */
       }
     }
-    setMessages([
-      {
-        id: 'welcome',
-        role: 'assistant',
-        text: '¡Hola! ¿Qué se te antoja comer hoy?',
-      },
-    ]);
   }, [shareRef]);
 
   useEffect(() => {
@@ -333,19 +334,21 @@ export function DiscoveryAssistantView({
           restaurants?: DiscoveryUiRestaurant[];
           fallback?: boolean;
         };
-        if (!res.ok || !json.text) {
+        if (!res.ok) {
+          await runDirectorySearch({ q: userText, userLabel: userText });
+          return;
+        }
+        const restaurants = json.restaurants || [];
+        if (restaurants.length === 0 && json.fallback) {
+          // Conventional directory search continues when the agent cannot help.
           await runDirectorySearch({ q: userText, userLabel: userText });
           return;
         }
         pushAssistant({
-          text: json.text,
-          restaurants: json.restaurants || [],
+          text: json.text || 'Aquí tienes lo que encontré.',
+          restaurants,
           hasMore: false,
         });
-        // If agent returned empty and fallback, still try directory.
-        if ((json.restaurants || []).length === 0 && json.fallback) {
-          await runDirectorySearch({ q: userText, userLabel: userText });
-        }
       } catch {
         await runDirectorySearch({ q: userText, userLabel: userText });
       } finally {
@@ -424,6 +427,18 @@ export function DiscoveryAssistantView({
   }, [busy, lastSearch, runDirectorySearch]);
 
   const vars = chatThemeVars(theme) as CSSProperties;
+
+  if (!mounted) {
+    return (
+      <div
+        className="flex h-[100dvh] w-full items-center justify-center text-sm text-slate-500"
+        data-discovery-assistant="1"
+        data-discovery-loading="1"
+      >
+        Cargando asistente…
+      </div>
+    );
+  }
 
   return (
     <div
@@ -549,14 +564,12 @@ export function DiscoveryAssistantView({
           borderColor: 'var(--chat-header-border)',
         }}
       >
-        <ChatComposer
+        <DiscoveryComposer
           value={draft}
           disabled={busy}
           onChange={setDraft}
           onSend={() => void onSend()}
           placeholder="Pizza, hamburguesa, zona…"
-          inputTestId="discovery-composer-input"
-          sendTestId="discovery-composer-send"
         />
         <p className="px-2 pb-1 text-center text-[10px] text-[var(--chat-text-muted)]">
           <Link href="/" className="underline-offset-2 hover:underline">

@@ -18,6 +18,7 @@ export type SimulatedDiscoveryResult = {
   model: 'simulated';
   restaurants: DiscoveryRestaurantCard[];
   toolCalls: number;
+  geminiHttpCalls: 0;
   skippedLlm: true;
   fallback?: boolean;
 };
@@ -42,6 +43,7 @@ export async function runSimulatedDiscoveryAgent(params: {
       model: 'simulated',
       restaurants: [],
       toolCalls: 0,
+      geminiHttpCalls: 0,
       skippedLlm: true,
     };
   }
@@ -95,6 +97,10 @@ export async function runSimulatedDiscoveryAgent(params: {
     model: 'simulated',
     restaurants,
     toolCalls: 1,
+    geminiHttpCalls: 0,
     skippedLlm: true,
   };
 }
+
+/** Alias used by Vitest / Playwright harnesses. */
+export const runSimulatedDiscovery = runSimulatedDiscoveryAgent;
