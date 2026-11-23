@@ -768,8 +768,8 @@ export const KioskMenuExperience = forwardRef<
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Uniform 3:4 frame — cover fills card (no white letterbox / no blur). */}
-                  <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
+                  {/* Portrait Meta-style tile: taller frame + contain so vertical covers stay complete. */}
+                  <div className="relative aspect-[2/3] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
                         <KioskImage
@@ -777,7 +777,7 @@ export const KioskMenuExperience = forwardRef<
                           sourceUrl={category.coverSourceUrl || category.coverUrl}
                           displayWidth={360}
                           alt=""
-                          fit="cover"
+                          fit="contain"
                           priority={index < 4}
                           className="h-full w-full"
                         />
@@ -787,34 +787,33 @@ export const KioskMenuExperience = forwardRef<
                         </div>
                       )}
                     </div>
-                  </div>
-                  <div className="flex shrink-0 items-end justify-between gap-2 px-3 pb-3 pt-2.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-extrabold uppercase tracking-wide text-[var(--menu-text)]">
-                        {category.name}
-                      </p>
-                      <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
-                        <Package
-                          className="h-3.5 w-3.5 shrink-0"
-                          style={{ color: 'color-mix(in srgb, var(--menu-primary) 78%, #8a6a3a)' }}
-                          aria-hidden
-                        />
-                        <span className="truncate">
-                          {category.productCount}{' '}
-                          {category.productCount === 1 ? 'producto' : 'productos'}
-                        </span>
-                      </p>
-                    </div>
-                    <span
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
-                      style={{
-                        background: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))',
-                        color: 'color-mix(in srgb, var(--menu-primary) 78%, #8a6a3a)',
-                      }}
+                    <div
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-t from-black/70 via-black/25 to-transparent"
                       aria-hidden
-                    >
-                      <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
-                    </span>
+                    />
+                    <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 px-3 pb-3 pt-8">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-extrabold uppercase tracking-wide text-white drop-shadow-sm">
+                          {category.name}
+                        </p>
+                        <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-white/85">
+                          <Package
+                            className="h-3.5 w-3.5 shrink-0"
+                            aria-hidden
+                          />
+                          <span className="truncate">
+                            {category.productCount}{' '}
+                            {category.productCount === 1 ? 'producto' : 'productos'}
+                          </span>
+                        </p>
+                      </div>
+                      <span
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/18 text-white backdrop-blur-[2px]"
+                        aria-hidden
+                      >
+                        <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      </span>
+                    </div>
                   </div>
                 </button>
               ))}
