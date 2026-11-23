@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "base": "https://elmenuxfa.com",
+  "forceClicks": false,
+  "geminiBillable": false,
+  "steps": [
+    {
+      "name": "01_open_mobile",
+      "ok": true,
+      "wa": 0
+    },
+    {
+      "name": "02_chip_pizzas_real",
+      "ok": true,
+      "cards": 1,
+      "apiTotal": 1
+    },
+    {
+      "name": "03_menu_hit",
+      "ok": true,
+      "href": "https://elmenuxfa.com/v/auto-pizzas-napoles",
+      "hit": "https://elmenuxfa.com/v/auto-pizzas-napoles"
+    },
+    {
+      "name": "04_ver_mas",
+      "ok": true,
+      "before": 11,
+      "note": "no_more_needed"
+    },
+    {
+      "name": "05_text_search",
+      "ok": true,
+      "textCards": 1,
+      "snippet": "¡Hola! ¿Qué se te antoja comer hoy?\n\nnapoles\n\nEncontré estas opciones: Auto Pizzas Nápoles.\n\nAuto Pizzas Nápoles\n\nRestaurante\n\nAbre hoy a las 4:00 p. m.\n\nVer menú"
+    },
+    {
+      "name": "06_empty",
+      "ok": true
+    },
+    {
+      "name": "07_geo_deny",
+      "ok": true,
+      "geo": 1
+    },
+    {
+      "name": "08_no_gemini_http",
+      "ok": true,
+      "geminiHits": 0
+    },
+    {
+      "name": "09_no_wa_overlay",
+      "ok": true,
+      "wa": 0
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-paso-b-screenshots\\01-open.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-paso-b-screenshots\\02-pizzas.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-paso-b-screenshots\\03-pagination.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-paso-b-screenshots\\04-text-search.png"
+  ],
+  "errors": []
+}

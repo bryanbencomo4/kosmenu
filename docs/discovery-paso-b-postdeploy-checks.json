@@ -1,0 +1,67 @@
+[
+    {
+        "name":  "flags_get",
+        "ok":  true,
+        "detail":  "{\"ok\":true,\"enabled\":true,\"simulate\":false,\"liveGemini\":false,\"liveReason\":\"production_blocked\",\"quotaBackend\":\"none\",\"pageSize\":24}"
+    },
+    {
+        "name":  "asistente_open",
+        "ok":  true,
+        "detail":  "status=200 shell=True unavailable=False"
+    },
+    {
+        "name":  "post_pizza_real",
+        "ok":  true,
+        "detail":  "count=1 model=directory-fallback skipped=True first=Auto Pizzas Nápoles slug=auto-pizzas-napoles"
+    },
+    {
+        "name":  "post_name_trueno",
+        "ok":  true,
+        "detail":  "count=0 names="
+    },
+    {
+        "name":  "post_empty",
+        "ok":  true,
+        "detail":  "text=No encontré restaurantes con eso. Prueba otra categoría (pizzas, hamburguesas, pollo) o una zona."
+    },
+    {
+        "name":  "dir_pagination",
+        "ok":  true,
+        "detail":  "p1=8 p2=3 overlap=0 total=11 hasMore=True"
+    },
+    {
+        "name":  "menu_link",
+        "ok":  true,
+        "detail":  "slug=auto-pizzas-napoles status=200"
+    },
+    {
+        "name":  "traditional_menus",
+        "ok":  true,
+        "detail":  "trueno=200 other=200"
+    },
+    {
+        "name":  "checkout_surface",
+        "ok":  true,
+        "detail":  "trueno_len=25969"
+    },
+    {
+        "name":  "supervision_trueno",
+        "ok":  true,
+        "detail":  "{\"ok\":true,\"pathComercioId\":\"0aa8c53b-07f1-446e-8b88-66c2b7ae89ea\",\"authorized\":true,\"reason\":null,\"allowlistConfigured\":true,\"requireCommerceFlag\":true,\"quotaB"
+    },
+    {
+        "name":  "wasender",
+        "ok":  true,
+        "detail":  "status=405"
+    },
+    {
+        "name":  "health",
+        "ok":  true,
+        "detail":  "version=f63d84a4735c7b0b6488a35c4fd4ca244d1c8864 supabase=healthy"
+    },
+    {
+        "name":  "gemini_off",
+        "ok":  true,
+        "detail":  "live=False model=directory-fallback"
+    }
+]
