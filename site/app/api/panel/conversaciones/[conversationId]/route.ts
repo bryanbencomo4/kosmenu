@@ -283,7 +283,7 @@ export async function POST(
         conversationId,
         comercioId: access.comercioId,
         role: 'system',
-        text: 'Esta conversación fue archivada por el restaurante. Si escribes de nuevo, el asistente virtual te atenderá.',
+        text: 'Esta conversación fue archivada por el restaurante.',
         senderUserId: access.user.id,
         clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
       });
@@ -314,7 +314,7 @@ export async function POST(
       conversationId,
       comercioId: access.comercioId,
       role: 'system',
-      text: 'Esta conversación fue archivada por el restaurante. Si escribes de nuevo, el asistente virtual te atenderá.',
+      text: 'Esta conversación fue archivada por el restaurante.',
       senderUserId: access.user.id,
       clientMessageId: `sys_close_${conversationId}_${closeVersion}`,
     });

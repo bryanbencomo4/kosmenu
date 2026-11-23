@@ -2536,14 +2536,6 @@ export function ChatAssistantView({
           <p className="mx-auto max-w-5xl text-center text-[13.5px] leading-snug text-[var(--chat-text-muted)]">
             No puedes enviar mensajes porque esta conversación está archivada.
           </p>
-          <button
-            type="button"
-            className="mx-auto mt-2 block text-[13px] font-semibold text-[var(--chat-send)]"
-            onClick={() => setSupervisionClosed(false)}
-            data-chat-reopen="1"
-          >
-            Escribir de nuevo
-          </button>
         </div>
       ) : (
         <ChatComposer
