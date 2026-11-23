@@ -862,8 +862,14 @@ export async function listClientDirectory(options: {
   lat?: number;
   lng?: number;
   limit?: number;
+  /** 0-based index into the filtered/sorted pool (not inventable client-side alone). */
+  offset?: number;
 }) {
   const limit = Math.min(Math.max(options.limit ?? 48, 1), 120);
+  const offset = Math.min(
+    Math.max(Number.isFinite(options.offset as number) ? Math.floor(options.offset as number) : 0, 0),
+    10_000,
+  );
   const normalizedQuery = normalizeDirectoryQuery(options.query ?? '');
   const region = normalizeDirectoryQuery(options.region ?? '');
   const category = (options.category ?? '').trim().toLowerCase();
@@ -965,12 +971,17 @@ export async function listClientDirectory(options: {
     })
     .slice(0, 12);
 
+  const total = publicResults.length;
+  const page = publicResults.slice(offset, offset + limit);
   return {
-    results: publicResults.slice(0, limit),
+    results: page,
     promoted: promoted.slice(0, 12),
     topRated,
-    total: publicResults.length,
+    total,
     regions,
+    offset,
+    limit,
+    hasMore: offset + page.length < total,
   };
 }
 

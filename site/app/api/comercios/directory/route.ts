@@ -21,6 +21,7 @@ export async function GET(request: Request) {
 
     if (mode === 'clientes') {
       const rawLimit = Number(url.searchParams.get('limit') ?? 60);
+      const rawOffset = Number(url.searchParams.get('offset') ?? 0);
       const lat = Number(url.searchParams.get('lat'));
       const lng = Number(url.searchParams.get('lng'));
       const payload = await listClientDirectory({
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
         lat: Number.isFinite(lat) ? lat : undefined,
         lng: Number.isFinite(lng) ? lng : undefined,
         limit: Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 120) : 60,
+        offset: Number.isFinite(rawOffset) ? Math.max(Math.floor(rawOffset), 0) : 0,
       });
 
       return NextResponse.json(

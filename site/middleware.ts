@@ -15,6 +15,7 @@ import {
 
 const EXCLUDED_PREFIXES = [
   '/api',
+  '/asistente',
   '/business',
   '/kit',
   '/d',
