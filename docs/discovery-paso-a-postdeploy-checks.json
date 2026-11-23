@@ -1,0 +1,62 @@
+[
+    {
+        "name":  "01_vercel_ready",
+        "ok":  true,
+        "detail":  "node.exe : npm warn Unknown env config \"devdir\". This will stop working in the next major version of npm. At line:1 char:1 + \u0026 \"C:\\nvm4w\\nodejs/node.exe\" \"C:\\nvm4w\\nodejs/node_modules/npm/bin/np ..."
+    },
+    {
+        "name":  "02_trueno_menu",
+        "ok":  true,
+        "detail":  "status=200 len=25969"
+    },
+    {
+        "name":  "03_other_restaurant",
+        "ok":  true,
+        "detail":  "slug=arroz-chino-maicol status=200"
+    },
+    {
+        "name":  "04_directory_api",
+        "ok":  true,
+        "detail":  "count=12 total=15 offset=0 hasMore=True"
+    },
+    {
+        "name":  "05_search_pagination",
+        "ok":  true,
+        "detail":  "page1=2 page2=0 overlap=0 total=2"
+    },
+    {
+        "name":  "06_checkout_surface",
+        "ok":  true,
+        "detail":  "menu=200 health={\"ok\":true,\"supabase\":\"healthy\",\"latencyMs\":79,\"timestamp\":\"2026-11-23T16:55:11.134Z\",\"version\":\"41789d05b5eefd2cb20b8b755d6274ff8d4d8717\",\"service\":\"kosmenu-site\",\"checks\":{\"site\":\"ok\",\"supabaseRest\":\"ok\",\"supabaseAuth\":\"ok\",\"egress\":\"ok\"},\"timingsMs\":{\"supabaseRest\":79,\"supabaseAuth\":47,\"egress\":45},\"errors\":{\"supabaseRest\":null,\"supabaseAuth\":null,\"egress\":null}}"
+    },
+    {
+        "name":  "07_panel_auth",
+        "ok":  true,
+        "detail":  "status=200"
+    },
+    {
+        "name":  "08_supervision_intact",
+        "ok":  false,
+        "detail":  "A parameter cannot be found that matches parameter name \u0027SkipHttpErrorCheck\u0027."
+    },
+    {
+        "name":  "09_wasender_route",
+        "ok":  false,
+        "detail":  "A parameter cannot be found that matches parameter name \u0027SkipHttpErrorCheck\u0027."
+    },
+    {
+        "name":  "10_asistente_public_off",
+        "ok":  false,
+        "detail":  "A parameter cannot be found that matches parameter name \u0027SkipHttpErrorCheck\u0027."
+    },
+    {
+        "name":  "11_api_no_gemini",
+        "ok":  false,
+        "detail":  "A parameter cannot be found that matches parameter name \u0027SkipHttpErrorCheck\u0027."
+    },
+    {
+        "name":  "12_no_critical_sample",
+        "ok":  true,
+        "detail":  "health=200"
+    }
+]
