@@ -4,10 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 
 import { commerceChatChannelName } from '../../_lib/chat-supervision-realtime';
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
-import {
-  CHAT_THEME_LIGHT,
-  chatThemeVars,
-} from '../../v/[id]/_components/chat/chat-theme';
+import { chatThemeVars } from '../../v/[id]/_components/chat/chat-theme';
 import { usePanelSession } from '../_lib/usePanelSession';
 
 type ConversationRow = {
@@ -27,7 +24,7 @@ type ComercioOption = {
   supervision_enabled: boolean;
 };
 
-const THEME_VARS = chatThemeVars('light');
+const THEME_VARS = chatThemeVars('dark');
 
 function statusLabel(status: string) {
   switch (status) {
@@ -237,7 +234,10 @@ function ConversationsInboxInner({
 
   if (!ready) {
     return (
-      <p className="p-4 text-sm" style={{ color: CHAT_THEME_LIGHT.textMuted }}>
+      <p
+        className="p-4 text-sm"
+        style={{ ...THEME_VARS, color: 'var(--chat-text-muted)' }}
+      >
         Comprobando sesión…
       </p>
     );
@@ -247,26 +247,49 @@ function ConversationsInboxInner({
 
   return (
     <div
-      className="mx-auto flex min-h-[calc(100dvh-3.5rem)] max-w-lg flex-col overflow-hidden bg-white shadow-sm md:min-h-[70vh] md:rounded-xl md:border"
+      className="mx-auto flex min-h-[100dvh] max-w-lg flex-col overflow-hidden md:min-h-[70vh] md:rounded-xl md:border"
       style={{
         ...THEME_VARS,
+        backgroundColor: 'var(--chat-card)',
+        color: 'var(--chat-text)',
         borderColor: 'var(--chat-card-border)',
       }}
+      data-chat-theme="dark"
     >
       <div
         className="flex items-center justify-between gap-3 px-4 py-3"
-        style={{ backgroundColor: '#008069', color: '#fff' }}
+        style={{
+          backgroundColor: 'var(--chat-header)',
+          borderBottom: '1px solid var(--chat-header-border)',
+        }}
       >
         <div className="min-w-0">
           <p className="truncate text-[17px] font-semibold">Chats</p>
           {email ? (
-            <p className="truncate text-[12px] text-white/80">{email}</p>
+            <p
+              className="truncate text-[12px]"
+              style={{ color: 'var(--chat-text-muted)' }}
+            >
+              {email}
+            </p>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href="https://app.elmenuxfa.com"
+            className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--chat-text) 8%, transparent)',
+            }}
+          >
+            Panel
+          </a>
           <button
             type="button"
-            className="rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+            className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--chat-text) 8%, transparent)',
+            }}
             disabled={!token || !comercioId.trim() || loading}
             onClick={() => void loadInbox()}
           >
@@ -274,7 +297,10 @@ function ConversationsInboxInner({
           </button>
           <button
             type="button"
-            className="rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold"
+            className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--chat-text) 8%, transparent)',
+            }}
             onClick={() => void signOut()}
           >
             Salir
@@ -351,8 +377,11 @@ function ConversationsInboxInner({
                 data-testid="conversation-row"
               >
                 <div
-                  className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[17px] font-semibold text-white"
-                  style={{ backgroundColor: '#00A884' }}
+                  className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[17px] font-semibold"
+                  style={{
+                    backgroundColor: 'var(--chat-input)',
+                    color: 'var(--chat-text)',
+                  }}
                 >
                   {initial}
                 </div>

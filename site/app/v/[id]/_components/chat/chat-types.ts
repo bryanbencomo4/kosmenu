@@ -115,6 +115,11 @@ export type ChatMessage = {
   role: ChatRole;
   text: string;
   createdAt: number;
+  /**
+   * Optional WA-group style name above incoming bubbles.
+   * Used by the merchant supervision panel (Cliente / Asistente); consumer chat leaves unset.
+   */
+  senderLabel?: string;
   /** Quoted message this bubble replies to (rendered as a mini quote above the text). */
   replyTo?: ChatReplyRef | null;
   /** Marks demo / non-AI copy so UI can style it without pretending it is live AI. */

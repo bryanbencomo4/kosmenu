@@ -388,6 +388,20 @@ export function ChatMessageBubble({
               </button>
             </>
           ) : null}
+          {!isUser && message.senderLabel ? (
+            <p
+              className="mb-0.5 text-[12.5px] font-semibold leading-tight"
+              style={{
+                color:
+                  message.senderLabel === 'Cliente'
+                    ? 'var(--chat-link)'
+                    : 'var(--chat-send)',
+              }}
+              data-chat-sender-label="1"
+            >
+              {message.senderLabel}
+            </p>
+          ) : null}
           {message.replyTo ? (
             <div
               className="mb-1 max-w-full overflow-hidden rounded-md border-l-[3px] border-[var(--chat-send)] bg-[color-mix(in_srgb,var(--chat-text)_7%,transparent)] px-2 py-1"

@@ -17,6 +17,14 @@ import {
   unlockChatSounds,
 } from './chat-sound-manager';
 
+type ChatHeaderMenuAction = {
+  id: string;
+  label: string;
+  onSelect: () => void;
+  disabled?: boolean;
+  testId?: string;
+};
+
 type ChatHeaderProps = {
   businessName: string;
   logoUrl: string | null;
@@ -39,6 +47,17 @@ type ChatHeaderProps = {
   onOpenAvatar?: () => void;
   /** Tap name → business profile info. */
   onOpenProfile?: () => void;
+  /** Override idle subtitle (default: "Asistente virtual"). */
+  subtitle?: string;
+  /** Attributes for merchant status probes (data-testid / data-status). */
+  subtitleTestId?: string;
+  subtitleStatus?: string;
+  /** Hide cart + traditional-menu icons (merchant supervision panel). */
+  hideCommerceActions?: boolean;
+  /** Hide "Nueva conversación" in the overflow menu. */
+  hideNewConversation?: boolean;
+  /** Extra overflow actions (take / return / close in merchant panel). */
+  extraMenuActions?: ChatHeaderMenuAction[];
 };
 
 export function ChatHeader({
@@ -61,6 +80,12 @@ export function ChatHeader({
   onToggleSounds,
   onOpenAvatar,
   onOpenProfile,
+  subtitle,
+  subtitleTestId,
+  subtitleStatus,
+  hideCommerceActions = false,
+  hideNewConversation = false,
+  extraMenuActions,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [soundsOn, setSoundsOn] = useState(true);
@@ -148,39 +173,45 @@ export function ChatHeader({
         <p
           className="truncate text-[12px] leading-tight text-[var(--chat-text-muted)]"
           data-chat-subtitle={isTyping ? 'typing' : 'idle'}
+          data-testid={subtitleTestId}
+          data-status={subtitleStatus}
         >
-          {isTyping ? 'escribiendo…' : 'Asistente virtual'}
+          {isTyping ? 'escribiendo…' : subtitle || 'Asistente virtual'}
         </p>
       </button>
 
-      <button
-        type="button"
-        data-open-cart="1"
-        data-chat-cart-button="1"
-        onClick={onOpenCart}
-        className={`${iconBtn} relative`}
-        aria-label={
-          cartCount > 0
-            ? `Abrir carrito, ${cartCount} productos, total ${cartTotalLabel}`
-            : 'Abrir carrito'
-        }
-      >
-        <ShoppingBag className="h-[20px] w-[20px]" strokeWidth={2} aria-hidden />
-        {cartCount > 0 ? (
-          <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--chat-send)] px-0.5 text-[9px] font-bold text-[var(--chat-send-fg)]">
-            {cartCount > 99 ? '99+' : cartCount}
-          </span>
-        ) : null}
-      </button>
+      {!hideCommerceActions ? (
+        <>
+          <button
+            type="button"
+            data-open-cart="1"
+            data-chat-cart-button="1"
+            onClick={onOpenCart}
+            className={`${iconBtn} relative`}
+            aria-label={
+              cartCount > 0
+                ? `Abrir carrito, ${cartCount} productos, total ${cartTotalLabel}`
+                : 'Abrir carrito'
+            }
+          >
+            <ShoppingBag className="h-[20px] w-[20px]" strokeWidth={2} aria-hidden />
+            {cartCount > 0 ? (
+              <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--chat-send)] px-0.5 text-[9px] font-bold text-[var(--chat-send-fg)]">
+                {cartCount > 99 ? '99+' : cartCount}
+              </span>
+            ) : null}
+          </button>
 
-      <button
-        type="button"
-        onClick={onOpenMenu}
-        className={iconBtn}
-        aria-label="Ver menú tradicional"
-      >
-        <LayoutGrid className="h-[20px] w-[20px]" strokeWidth={2} aria-hidden />
-      </button>
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            className={iconBtn}
+            aria-label="Ver menú tradicional"
+          >
+            <LayoutGrid className="h-[20px] w-[20px]" strokeWidth={2} aria-hidden />
+          </button>
+        </>
+      ) : null}
 
       <div className="relative" ref={menuRef}>
         <button
@@ -199,17 +230,36 @@ export function ChatHeader({
             role="menu"
             className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-[11.5rem] overflow-hidden rounded-xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] py-1 shadow-lg"
           >
-            <button
-              type="button"
-              role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)]"
-              onClick={() => {
-                setMenuOpen(false);
-                onNewConversation();
-              }}
-            >
-              Nueva conversación
-            </button>
+            {!hideNewConversation ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)]"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNewConversation();
+                }}
+              >
+                Nueva conversación
+              </button>
+            ) : null}
+            {(extraMenuActions || []).map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                role="menuitem"
+                disabled={action.disabled}
+                data-testid={action.testId}
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_6%,transparent)] disabled:opacity-50"
+                onClick={() => {
+                  if (action.disabled) return;
+                  setMenuOpen(false);
+                  action.onSelect();
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
             {showCheckoutHint && onOpenCheckout ? (
               <button
                 type="button"

@@ -72,6 +72,12 @@ type ChatComposerProps = {
   onClearReply?: () => void;
   /** Fires when mic recording starts/stops (e.g. to hide suggested replies). */
   onRecordingChange?: (recording: boolean) => void;
+  /** Override textarea data-testid (merchant panel uses staff-draft). */
+  inputTestId?: string;
+  /** Override send button data-testid (merchant panel uses staff-send). */
+  sendTestId?: string;
+  /** Input placeholder (default WhatsApp-like copy). */
+  placeholder?: string;
 };
 
 /** Live state of a mic press, kept in a ref so pointer handlers never go stale. */
@@ -127,6 +133,9 @@ export function ChatComposer({
   replyTo = null,
   onClearReply,
   onRecordingChange,
+  inputTestId = 'chat-composer-input',
+  sendTestId = 'chat-composer-send',
+  placeholder = 'Escribe un mensaje',
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1038,7 +1047,7 @@ export function ChatComposer({
               </label>
               <textarea
                 id="chatbot-composer-input"
-                data-testid="chat-composer-input"
+                data-testid={inputTestId}
                 ref={textareaRef}
                 rows={1}
                 value={value}
@@ -1051,7 +1060,7 @@ export function ChatComposer({
                   setEmojiOpen(false);
                   setAttachOpen(false);
                 }}
-                placeholder="Escribe un mensaje"
+                placeholder={placeholder}
                 className="max-h-[7.5rem] min-h-[36px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-5 text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
                 style={{ outline: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                 enterKeyHint="send"
@@ -1134,7 +1143,7 @@ export function ChatComposer({
                 key="send"
                 type="submit"
                 disabled={!canSend}
-                data-testid="chat-composer-send"
+                data-testid={sendTestId}
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--chat-send)]"
                 style={{ backgroundColor: 'var(--chat-send)' }}
                 aria-label="Enviar mensaje"
