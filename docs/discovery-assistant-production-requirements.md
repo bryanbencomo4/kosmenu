@@ -1,7 +1,9 @@
 # Discovery Assistant — requisitos exactos para producción
 
 **Estado:** código listo en `feature/discovery-assistant`.  
-**Migración preparada, NO aplicada:** `supabase/migrations/20261123160000_ai_discovery_assistant_quota.sql`
+**Migración:** aplicada y smoke OK en **Preview** (`gsfxqzvmyzjjgpigrste`).  
+**Producción:** NO aplicada — pendiente de autorización.  
+**Informe GO:** `docs/discovery-assistant-production-go-report.md`
 
 ## 1. Kill switches / flags (orden de activación)
 

@@ -29,6 +29,17 @@ create table if not exists public.ai_discovery_usage (
 alter table public.ai_discovery_sessions enable row level security;
 alter table public.ai_discovery_usage enable row level security;
 
+-- Defense in depth: no direct table access for anon/authenticated (RLS has zero policies).
+-- Mutations only via security-definer RPCs granted to service_role.
+revoke all on table public.ai_discovery_sessions from public;
+revoke all on table public.ai_discovery_sessions from anon;
+revoke all on table public.ai_discovery_sessions from authenticated;
+revoke all on table public.ai_discovery_usage from public;
+revoke all on table public.ai_discovery_usage from anon;
+revoke all on table public.ai_discovery_usage from authenticated;
+grant all on table public.ai_discovery_sessions to service_role;
+grant all on table public.ai_discovery_usage to service_role;
+
 create or replace function public.reserve_ai_discovery_quota(
   p_session_id text,
   p_max_session_requests integer,
@@ -164,6 +175,12 @@ $$;
 revoke all on function public.reserve_ai_discovery_quota(
   text, integer, text, integer, bigint, text
 ) from public;
+revoke all on function public.reserve_ai_discovery_quota(
+  text, integer, text, integer, bigint, text
+) from anon;
+revoke all on function public.reserve_ai_discovery_quota(
+  text, integer, text, integer, bigint, text
+) from authenticated;
 grant execute on function public.reserve_ai_discovery_quota(
   text, integer, text, integer, bigint, text
 ) to service_role;
@@ -171,6 +188,12 @@ grant execute on function public.reserve_ai_discovery_quota(
 revoke all on function public.increment_ai_discovery_tokens(
   text, bigint, bigint, numeric, text
 ) from public;
+revoke all on function public.increment_ai_discovery_tokens(
+  text, bigint, bigint, numeric, text
+) from anon;
+revoke all on function public.increment_ai_discovery_tokens(
+  text, bigint, bigint, numeric, text
+) from authenticated;
 grant execute on function public.increment_ai_discovery_tokens(
   text, bigint, bigint, numeric, text
 ) to service_role;

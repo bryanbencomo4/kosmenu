@@ -4,63 +4,202 @@
   "simulated": true,
   "geminiBillable": false,
   "forceClicks": false,
-  "steps": [
+  "viewports": [
     {
-      "name": "wa_widget_hidden",
-      "ok": true,
-      "waCount": 0
-    },
-    {
-      "name": "welcome",
+      "label": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
       "ok": true
     },
     {
-      "name": "chip_pizzas",
+      "label": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "ok": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "01_open_wa_hidden",
       "ok": true,
-      "cards": 15,
-      "apiCount": 15
+      "viewport": "mobile",
+      "waCount": 0
     },
     {
-      "name": "navigate_menu",
+      "name": "02_pizzas",
       "ok": true,
+      "viewport": "mobile",
+      "pizzaCards": 8
+    },
+    {
+      "name": "08_carousel",
+      "ok": true,
+      "viewport": "mobile"
+    },
+    {
+      "name": "10_menu_link",
+      "ok": true,
+      "viewport": "mobile",
       "href": "/v/pizzas-el-trueno",
       "hit": {
-        "testid": "discovery-menu-pizzas-el-trueno",
         "href": "/v/pizzas-el-trueno",
         "tag": "A"
       }
     },
     {
-      "name": "empty_search",
-      "ok": true
-    },
-    {
-      "name": "gemini_fail_fallback",
-      "ok": true
-    },
-    {
-      "name": "geo_deny",
-      "ok": true
-    },
-    {
-      "name": "pagination_ver_mas",
+      "name": "11_chat_link",
       "ok": true,
+      "viewport": "mobile",
+      "chatHref": "/v/pizzas-el-trueno?chatbot=1"
+    },
+    {
+      "name": "03_hamburguesas",
+      "ok": true,
+      "viewport": "mobile",
+      "before": 24
+    },
+    {
+      "name": "09_ver_mas",
+      "ok": true,
+      "viewport": "mobile",
       "before": 24,
       "after": 40
     },
     {
-      "name": "ref_wa_ready",
-      "ok": true
+      "name": "04_search_by_name",
+      "ok": true,
+      "viewport": "mobile",
+      "nameCards": 1
+    },
+    {
+      "name": "07_show_results",
+      "ok": true,
+      "viewport": "mobile"
+    },
+    {
+      "name": "05_search_location",
+      "ok": true,
+      "viewport": "mobile",
+      "locCards": 6
+    },
+    {
+      "name": "06_geo_deny",
+      "ok": true,
+      "viewport": "mobile",
+      "geoAsk": 1
+    },
+    {
+      "name": "12_gemini_fail",
+      "ok": true,
+      "viewport": "mobile"
+    },
+    {
+      "name": "13_conventional_after_fail",
+      "ok": true,
+      "viewport": "mobile"
+    },
+    {
+      "name": "empty_search",
+      "ok": true,
+      "viewport": "mobile"
+    },
+    {
+      "name": "01_open_wa_hidden",
+      "ok": true,
+      "viewport": "desktop",
+      "waCount": 0
+    },
+    {
+      "name": "02_pizzas",
+      "ok": true,
+      "viewport": "desktop",
+      "pizzaCards": 8
+    },
+    {
+      "name": "08_carousel",
+      "ok": true,
+      "viewport": "desktop"
+    },
+    {
+      "name": "10_menu_link",
+      "ok": true,
+      "viewport": "desktop",
+      "href": "/v/pizzas-el-trueno",
+      "hit": {
+        "href": "/v/pizzas-el-trueno",
+        "tag": "A"
+      }
+    },
+    {
+      "name": "11_chat_link",
+      "ok": true,
+      "viewport": "desktop",
+      "chatHref": "/v/pizzas-el-trueno?chatbot=1"
+    },
+    {
+      "name": "03_hamburguesas",
+      "ok": true,
+      "viewport": "desktop",
+      "before": 24
+    },
+    {
+      "name": "09_ver_mas",
+      "ok": true,
+      "viewport": "desktop",
+      "before": 24,
+      "after": 40
+    },
+    {
+      "name": "04_search_by_name",
+      "ok": true,
+      "viewport": "desktop",
+      "nameCards": 1
+    },
+    {
+      "name": "07_show_results",
+      "ok": true,
+      "viewport": "desktop"
+    },
+    {
+      "name": "05_search_location",
+      "ok": true,
+      "viewport": "desktop",
+      "locCards": 6
+    },
+    {
+      "name": "06_geo_deny",
+      "ok": true,
+      "viewport": "desktop",
+      "geoAsk": 1
+    },
+    {
+      "name": "12_gemini_fail",
+      "ok": true,
+      "viewport": "desktop"
+    },
+    {
+      "name": "13_conventional_after_fail",
+      "ok": true,
+      "viewport": "desktop"
+    },
+    {
+      "name": "empty_search",
+      "ok": true,
+      "viewport": "desktop"
     }
   ],
   "screenshots": [
     "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\01-welcome.png",
     "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\02-pizzas.png",
     "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\07-menu-nav.png",
-    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\03-empty.png",
-    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\04-gemini-fail.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\06-pagination.png",
     "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\05-geo-deny.png",
-    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\06-pagination.png"
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\04-gemini-fail.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\discovery-assistant-screenshots\\03-empty.png"
   ],
   "errors": []
 }

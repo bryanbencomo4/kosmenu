@@ -99,10 +99,9 @@ export function getDiscoveryAssistantConfig(
  * Live Gemini authorization. Fail-closed in production without persistent quota.
  * Filesystem backend never authorizes live Gemini in production.
  *
- * NOTE: Postgres RPCs are not shipped yet — even with quotaBackend=postgres,
- * production live Gemini stays off until DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY=1
- * is set after migrations exist. Today that means isDiscoveryGeminiLiveAllowed
- * returns false in production always for practical deploys.
+ * Postgres RPCs: supabase/migrations/20261123160000_ai_discovery_assistant_quota.sql
+ * (validated on Preview). Production stays off until migration is authorized AND
+ * DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY=1 + ALLOW_GEMINI are set explicitly.
  */
 export function isDiscoveryGeminiLiveAllowed(
   config: DiscoveryAssistantConfig,
