@@ -63,10 +63,17 @@ async function main() {
   console.log(`Comercio: ${COMERCIO}`);
 
   // 1) Opening chat page alone must not create inbox rows (API probe before message).
-  const before = await api(
-    `/api/panel/conversaciones?comercioId=${encodeURIComponent(COMERCIO)}`,
-    { headers: { Authorization: `Bearer ${BEARER}` } },
-  );
+  // Retry briefly — cold Next compiles can return 404/500 for a moment.
+  let before = null;
+  for (let i = 0; i < 20; i++) {
+    before = await api(
+      `/api/panel/conversaciones?comercioId=${encodeURIComponent(COMERCIO)}`,
+      { headers: { Authorization: `Bearer ${BEARER}` } },
+    );
+    if (before.res.status === 401) break;
+    if (before.res.ok) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
   if (before.res.status === 401) {
     fail(
       'panel_auth',

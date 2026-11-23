@@ -28,3 +28,32 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+
+  supervision-e2e:
+    name: supervision dual e2e
+    runs-on: ubuntu-latest
+    needs: site
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install site deps
+        working-directory: site
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: site
+        run: npx playwright install chromium --with-deps
+      - name: Dual Playwright (MEMORY)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CHAT_SUPERVISION_CI_SKIP_IF_NO_SECRETS: "1"
+          CHAT_SUPERVISION_E2E_BEARER: e2e-supervision-token
+          CHAT_SUPERVISION_E2E_COMERCIO_ID: 0aa8c53b-07f1-446e-8b88-66c2b7ae89ea
+          NEXT_PUBLIC_CHAT_SUPERVISION_E2E_BEARER: e2e-supervision-token
+        run: node site/scripts/chat-supervision-ci-e2e.mjs

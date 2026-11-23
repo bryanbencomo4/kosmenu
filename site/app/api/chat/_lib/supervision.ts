@@ -1075,22 +1075,22 @@ export async function publishConversationEvent(
 ) {
   try {
     const sb = getServiceSupabaseClient();
-    // Public topic name + light payload (ids/types only). Message bodies stay in DB;
-    // merchants still authorize via session + RLS/REST. Avoid private:true until
-    // Realtime Authorization policies exist for this project.
+    // Public topic + light payload (ids/types only). Prefer httpSend so serverless
+    // does not open a websocket just to emit one hint.
     const channel = sb.channel(commerceChatChannelName(comercioId));
-    await channel.subscribe();
-    await channel.send({
-      type: 'broadcast',
-      event: 'chat',
-      payload: {
-        conversationId,
-        v: 1,
-        at: new Date().toISOString(),
-        ...event,
-      },
-    });
-    await sb.removeChannel(channel);
+    const payload = {
+      conversationId,
+      v: 1,
+      at: new Date().toISOString(),
+      ...event,
+    };
+    if (typeof channel.httpSend === 'function') {
+      await channel.httpSend('chat', payload);
+    } else {
+      await channel.subscribe();
+      await channel.send({ type: 'broadcast', event: 'chat', payload });
+      await sb.removeChannel(channel);
+    }
   } catch {
     // non-fatal
   }
