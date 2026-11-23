@@ -46,7 +46,8 @@ export async function fileToPersistedDataUrl(
   }
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
+/** Any blob → data URL (images, audio, PDF). Prefer `fileToPersistedDataUrl` for photos. */
+export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));

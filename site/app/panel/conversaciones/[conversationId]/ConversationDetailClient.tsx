@@ -10,13 +10,21 @@ import {
   type CSSProperties,
 } from 'react';
 
-import { ChatComposer } from '../../../v/[id]/_components/chat/ChatComposer';
+import {
+  ChatComposer,
+  type ChatFilePayload,
+  type ChatVoicePayload,
+} from '../../../v/[id]/_components/chat/ChatComposer';
 import { ChatHeader } from '../../../v/[id]/_components/chat/ChatHeader';
 import { ChatMessageList } from '../../../v/[id]/_components/chat/ChatMessageList';
 import {
   ChatSuggestedReplies,
   type ChatSuggestedChip,
 } from '../../../v/[id]/_components/chat/ChatSuggestedReplies';
+import {
+  blobToDataUrl,
+  fileToPersistedDataUrl,
+} from '../../../v/[id]/_components/chat/chat-media-persist';
 import {
   chatThemeVars,
   saveChatTheme,
@@ -28,6 +36,7 @@ import {
   setChatSoundsEnabled,
   unlockChatSounds,
 } from '../../../v/[id]/_components/chat/chat-sound-manager';
+import type { ChatAttachment } from '../../../v/[id]/_components/chat/chat-types';
 import {
   mergePanelMessages,
   toPanelChatMessages,
@@ -35,6 +44,8 @@ import {
 } from '../../_lib/panel-chat-messages';
 import { usePanelSession } from '../../_lib/usePanelSession';
 import { useConversationRealtime } from '../../_lib/useConversationRealtime';
+
+const STAFF_MEDIA_MAX_BYTES = 1_200_000;
 
 type MessageRow = PanelMessageRow;
 
@@ -72,9 +83,13 @@ function friendlyPanelError(code: string, status?: number) {
     supervision_disabled: 'La supervisión no está activa para este comercio.',
     unauthorized: 'Sesión expirada. Vuelve a iniciar sesión.',
     not_found: 'No encontramos esta conversación.',
+    empty_message: 'Escribe un mensaje o adjunta un archivo.',
+    payload_too_large:
+      'El archivo es demasiado grande. Prueba una foto más liviana o un audio más corto.',
   };
   if (map[code]) return map[code];
   if (status === 429) return map.rate_limited;
+  if (status === 413) return map.payload_too_large;
   return code || 'No se pudo completar la acción.';
 }
 
@@ -291,7 +306,11 @@ function ConversationDetailInner({
     };
   }, [load]);
 
-  async function act(action: string, text?: string) {
+  async function act(
+    action: string,
+    text?: string,
+    payload?: Record<string, unknown>,
+  ) {
     if (!token || !conversationId) return;
     setBusy(true);
     setError(null);
@@ -303,7 +322,7 @@ function ConversationDetailInner({
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ action, text }),
+        body: JSON.stringify({ action, text, payload }),
       },
     );
     const data = await res.json().catch(() => ({}));
@@ -321,8 +340,91 @@ function ConversationDetailInner({
     await load(lastSeqRef.current > 0 ? lastSeqRef.current : 0, {
       silent: true,
     });
-    // Full refresh keeps status / assignee / chips in sync after take/return/close.
+    // Full refresh keeps status / assignee in sync after take/return/close.
     if (action !== 'message') await load(0);
+  }
+
+  async function sendStaffVoice(payload: ChatVoicePayload) {
+    if (!canCompose) return;
+    if (payload.blob.size > STAFF_MEDIA_MAX_BYTES) {
+      setError('La nota de voz es demasiado larga. Graba un audio más corto.');
+      return;
+    }
+    const secs = Math.max(1, Math.round(payload.durationMs / 1000));
+    let dataUrl = payload.url;
+    try {
+      dataUrl = await blobToDataUrl(payload.blob);
+    } catch {
+      setError('No se pudo preparar la nota de voz.');
+      return;
+    }
+    if (dataUrl.length > STAFF_MEDIA_MAX_BYTES * 1.4) {
+      setError('La nota de voz es demasiado larga. Graba un audio más corto.');
+      return;
+    }
+    const attachment: ChatAttachment = {
+      id: `audio-${Date.now()}`,
+      kind: 'audio',
+      name: 'Nota de voz',
+      mime: payload.blob.type || 'audio/webm',
+      size: payload.blob.size,
+      url: dataUrl,
+      analysis: payload.transcript || null,
+    };
+    unlockChatSounds();
+    playChatSound('voiceSent');
+    await act(
+      'message',
+      payload.transcript?.trim() || `🎤 Nota de voz (${secs}s)`,
+      {
+        attachments: [attachment],
+        voiceUrl: dataUrl,
+        voiceDurationMs: payload.durationMs,
+      },
+    );
+  }
+
+  async function sendStaffFile(payload: ChatFilePayload) {
+    if (!canCompose) return;
+    if (payload.file.size > STAFF_MEDIA_MAX_BYTES) {
+      setError('El archivo es demasiado grande (máx. ~1,2 MB).');
+      return;
+    }
+    let persistedUrl = payload.url;
+    try {
+      if (payload.kind === 'image' || payload.file.type.startsWith('image/')) {
+        persistedUrl = await fileToPersistedDataUrl(payload.file);
+      } else {
+        persistedUrl = await blobToDataUrl(payload.file);
+      }
+    } catch {
+      setError('No se pudo preparar el archivo.');
+      return;
+    }
+    if (persistedUrl.length > STAFF_MEDIA_MAX_BYTES * 1.4) {
+      setError('El archivo es demasiado grande después de comprimirlo.');
+      return;
+    }
+    const kind =
+      payload.kind === 'image' || payload.file.type.startsWith('image/')
+        ? 'image'
+        : 'file';
+    const label =
+      kind === 'image'
+        ? `📷 ${payload.file.name || 'Imagen'}`
+        : `📎 ${payload.file.name || 'Archivo'}`;
+    const attachment: ChatAttachment = {
+      id: `file-${Date.now()}`,
+      kind,
+      name: payload.file.name || label,
+      mime: payload.file.type || (kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+      size: payload.file.size,
+      url: persistedUrl,
+      analysis: null,
+    };
+    unlockChatSounds();
+    playChatSound('messageSent');
+    await act('message', label, { attachments: [attachment] });
   }
 
   const canCompose =
@@ -341,72 +443,51 @@ function ConversationDetailInner({
   );
   const themeStyle = useMemo(() => chatThemeVars(theme), [theme]);
 
-  const actionChips = useMemo((): ChatSuggestedChip[] => {
+  // Real quick replies only — take/return/close live in the staff action bar.
+  const quickReplyChips = useMemo((): ChatSuggestedChip[] => {
     if (!humanTakeoverEnabled) return [];
-    const chips: ChatSuggestedChip[] = [];
-    const status = conversation?.status || '';
-    if (status !== 'human_handling' && status !== 'closed') {
-      chips.push({
-        id: 'take',
-        label: 'Unirse al chat',
-        action: { type: 'text', text: '__take__' },
-      });
-    }
-    if (status === 'human_handling') {
-      chips.push({
-        id: 'return',
-        label: 'Devolver al asistente',
-        action: { type: 'text', text: '__return__' },
-      });
-      chips.push({
+    if (conversation?.status !== 'human_handling') return [];
+    return [
+      {
         id: 'quick-ok',
         label: 'En un momento te atiendo',
         action: {
           type: 'text',
           text: 'En un momento te atiendo 😊',
         },
-      });
-      chips.push({
+      },
+      {
         id: 'quick-help',
         label: '¿En qué te ayudo?',
         action: { type: 'text', text: '¿En qué te puedo ayudar?' },
-      });
-    }
-    chips.push({
-      id: 'close',
-      label: 'Cerrar chat',
-      action: { type: 'text', text: '__close__' },
-    });
-    return chips.slice(0, 5);
+      },
+      {
+        id: 'quick-thanks',
+        label: '¡Listo, gracias!',
+        action: { type: 'text', text: '¡Listo! Gracias por tu paciencia 🙏' },
+      },
+    ];
   }, [conversation?.status, humanTakeoverEnabled]);
 
   const onPickChip = useCallback(
     (chip: ChatSuggestedChip) => {
-      if (busy) return;
-      const text =
-        chip.action.type === 'text' ? chip.action.text : '';
-      if (text === '__take__') {
-        void act('take');
-        return;
-      }
-      if (text === '__return__') {
-        void act('return');
-        return;
-      }
-      if (text === '__close__') {
-        void act('close');
-        return;
-      }
-      if (canCompose && text) {
-        unlockChatSounds();
-        playChatSound('messageSent');
-        void act('message', text);
-      }
+      if (busy || !canCompose) return;
+      const text = chip.action.type === 'text' ? chip.action.text : '';
+      if (!text) return;
+      unlockChatSounds();
+      playChatSound('messageSent');
+      void act('message', text);
     },
     // act closes over latest state; chips only need canCompose/busy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [busy, canCompose, conversationId, token],
   );
+
+  const status = conversation?.status || '';
+  const showTake =
+    humanTakeoverEnabled && status !== 'human_handling' && status !== 'closed';
+  const showReturn = humanTakeoverEnabled && status === 'human_handling';
+  const showClose = humanTakeoverEnabled && status !== 'closed';
 
   const subtitle = conversation
     ? [
@@ -570,6 +651,56 @@ function ConversationDetailInner({
           </div>
         ) : null}
 
+        {humanTakeoverEnabled && (showTake || showReturn || showClose) ? (
+          <div
+            className="shrink-0 border-b px-3 py-2"
+            style={{
+              backgroundColor: 'var(--chat-header)',
+              borderColor: 'var(--chat-header-border)',
+            }}
+            data-panel-staff-actions="1"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {showTake ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-testid="take-conversation-visible"
+                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-[var(--chat-send-fg)] disabled:opacity-50 sm:flex-none"
+                  style={{ backgroundColor: 'var(--chat-send)' }}
+                  onClick={() => void act('take')}
+                >
+                  Unirse al chat
+                </button>
+              ) : null}
+              {showReturn ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-testid="return-assistant-visible"
+                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-lg border px-3 text-[13px] font-semibold text-[var(--chat-text)] disabled:opacity-50 sm:flex-none"
+                  style={{ borderColor: 'var(--chat-header-border)' }}
+                  onClick={() => void act('return')}
+                >
+                  Devolver al asistente
+                </button>
+              ) : null}
+              {showClose ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-testid="close-conversation-visible"
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border px-3 text-[13px] font-medium text-[var(--chat-text-muted)] disabled:opacity-50"
+                  style={{ borderColor: 'var(--chat-header-border)' }}
+                  onClick={() => void act('close')}
+                >
+                  Cerrar chat
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex min-h-0 flex-1 flex-col" data-testid="message-list">
           <ChatMessageList
             messages={chatMessages}
@@ -582,28 +713,15 @@ function ConversationDetailInner({
         </div>
 
         <ChatSuggestedReplies
-          chips={actionChips}
-          hidden={busy || !humanTakeoverEnabled}
+          chips={quickReplyChips}
+          hidden={busy || !canCompose}
           onPick={onPickChip}
         />
-
-        {conversation?.status === 'human_handling' ? (
-          <div
-            className="shrink-0 border-t px-3 py-1.5 text-[12px] text-[var(--chat-text-muted)]"
-            style={{
-              backgroundColor: 'var(--chat-header)',
-              borderColor: 'var(--chat-header-border)',
-            }}
-          >
-            Estás atendiendo. Por ahora solo texto — voz y archivos del cliente
-            no llegan aquí.
-          </div>
-        ) : null}
 
         {humanTakeoverEnabled ? (
           <ChatComposer
             value={draft}
-            disabled={!canCompose}
+            disabled={!canCompose || busy}
             onChange={setDraft}
             inputTestId="staff-draft"
             sendTestId="staff-send"
@@ -616,6 +734,20 @@ function ConversationDetailInner({
               if (!canCompose || !draft.trim()) return;
               void act('message', draft.trim());
             }}
+            onSendVoice={
+              canCompose
+                ? (payload) => {
+                    void sendStaffVoice(payload);
+                  }
+                : undefined
+            }
+            onSendFile={
+              canCompose
+                ? (payload) => {
+                    void sendStaffFile(payload);
+                  }
+                : undefined
+            }
           />
         ) : null}
       </div>

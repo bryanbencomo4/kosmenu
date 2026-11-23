@@ -904,24 +904,28 @@ export function ChatComposer({
           className="mx-auto mb-2 flex max-w-5xl flex-wrap gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] p-2 shadow-lg"
           data-chat-attach-panel="1"
         >
-          <button
-            type="button"
-            className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-            onClick={() => imageInputRef.current?.click()}
-            data-chat-attach-image="1"
-          >
-            <ImagePlus className="h-4 w-4" aria-hidden />
-            Imagen
-          </button>
-          <button
-            type="button"
-            className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-            onClick={() => fileInputRef.current?.click()}
-            data-chat-attach-file="1"
-          >
-            <Paperclip className="h-4 w-4" aria-hidden />
-            Archivo
-          </button>
+          {onSendFile ? (
+            <>
+              <button
+                type="button"
+                className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                onClick={() => imageInputRef.current?.click()}
+                data-chat-attach-image="1"
+              >
+                <ImagePlus className="h-4 w-4" aria-hidden />
+                Imagen
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-[13px] font-medium text-[var(--chat-text)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                onClick={() => fileInputRef.current?.click()}
+                data-chat-attach-file="1"
+              >
+                <Paperclip className="h-4 w-4" aria-hidden />
+                Archivo
+              </button>
+            </>
+          ) : null}
           {onShareLocation ? (
             <button
               type="button"
@@ -933,6 +937,11 @@ export function ChatComposer({
               <MapPin className="h-4 w-4" aria-hidden />
               {locating ? 'Obteniendo…' : 'Ubicación'}
             </button>
+          ) : null}
+          {!onSendFile && !onShareLocation ? (
+            <p className="w-full px-2 py-2 text-center text-[12px] text-[var(--chat-text-muted)]">
+              Únete al chat para enviar fotos o archivos.
+            </p>
           ) : null}
         </div>
       ) : null}

@@ -41,6 +41,7 @@ import { ChatBusinessProfileSheet } from './ChatBusinessProfileSheet';
 import { ChatCatalogSheet } from './ChatCatalogSheet';
 import { buildDeliveryLocationReply } from './chat-delivery-quote';
 import { ChatHeader } from './ChatHeader';
+import { chatRichFieldsFromPayload } from '../../../../panel/_lib/panel-chat-messages';
 import { fileToPersistedDataUrl } from './chat-media-persist';
 import {
   ChatMediaLightbox,
@@ -222,15 +223,20 @@ function createMessage(
     contactCard?: ChatContactCardData | null;
     sticker?: ChatMessage['sticker'];
     closeSale?: ChatCloseSalePrompt | null;
+    senderLabel?: string;
+    id?: string;
   },
 ): ChatMessage {
   return {
-    id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id:
+      options?.id ||
+      `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     text,
     createdAt: Date.now(),
     demo: options?.demo,
     isWelcome: options?.isWelcome,
+    senderLabel: options?.senderLabel,
     welcomeVersion: options?.isWelcome ? CHATBOT_WELCOME_VERSION : undefined,
     productCards: options?.productCards,
     cartActions: options?.cartActions,
@@ -774,6 +780,7 @@ export function ChatAssistantView({
             seq: number;
             role: string;
             body: string;
+            payload?: Record<string, unknown> | null;
           }>;
         } | null;
         if (cancelled || !data) return;
@@ -793,9 +800,13 @@ export function ChatAssistantView({
             if ((m.seq || 0) <= supervisionAfterSeqRef.current) continue;
             if (supervisionSeenIdsRef.current.has(m.id)) continue;
             supervisionSeenIdsRef.current.add(m.id);
+            const rich = chatRichFieldsFromPayload(m.payload);
             next.push(
               createMessage('assistant', m.body, {
+                id: m.id,
                 demo: m.role === 'system',
+                senderLabel: m.role === 'staff' ? 'Restaurante' : undefined,
+                ...rich,
               }),
             );
             supervisionAfterSeqRef.current = Math.max(

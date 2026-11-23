@@ -1,4 +1,5 @@
 import type {
+  ChatAttachment,
   ChatCartActionData,
   ChatCatalogCategory,
   ChatMessage,
@@ -13,6 +14,9 @@ export type PanelMessageRow = {
   created_at: string;
   payload?: Record<string, unknown> | null;
 };
+
+/** Max JSON size for staff media payload (data URLs). */
+export const PANEL_MESSAGE_PAYLOAD_MAX_CHARS = 1_400_000;
 
 function asProductCards(value: unknown): ChatProductCardData[] {
   if (!Array.isArray(value)) return [];
@@ -46,12 +50,60 @@ function asCategoryCards(value: unknown): ChatCatalogCategory[] {
   );
 }
 
-function richFieldsFromPayload(payload?: Record<string, unknown> | null): {
-  productCards?: ChatProductCardData[];
-  cartActions?: ChatCartActionData[];
-  catalogCategories?: ChatCatalogCategory[];
-  catalogProducts?: ChatProductCardData[];
-} {
+function asAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((a): a is ChatAttachment => {
+    if (!a || typeof a !== 'object') return false;
+    const row = a as ChatAttachment;
+    return (
+      typeof row.id === 'string' &&
+      (row.kind === 'image' || row.kind === 'file' || row.kind === 'audio') &&
+      typeof row.url === 'string' &&
+      row.url.length > 0
+    );
+  });
+}
+
+function asLocation(
+  value: unknown,
+): ChatMessage['location'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const loc = value as Record<string, unknown>;
+  const lat = Number(loc.lat);
+  const lng = Number(loc.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  return {
+    lat,
+    lng,
+    label: typeof loc.label === 'string' ? loc.label : undefined,
+    kind:
+      loc.kind === 'business' || loc.kind === 'customer' ? loc.kind : undefined,
+    address: typeof loc.address === 'string' ? loc.address : null,
+    mapsUrl: typeof loc.mapsUrl === 'string' ? loc.mapsUrl : null,
+    directionsUrl:
+      typeof loc.directionsUrl === 'string' ? loc.directionsUrl : null,
+  };
+}
+
+/**
+ * Structured UI fields stored on supervision `chat_messages.payload`
+ * (products, media, location) → ChatMessage options.
+ */
+export function chatRichFieldsFromPayload(
+  payload?: Record<string, unknown> | null,
+): Partial<
+  Pick<
+    ChatMessage,
+    | 'productCards'
+    | 'cartActions'
+    | 'catalogCategories'
+    | 'catalogProducts'
+    | 'attachments'
+    | 'voiceUrl'
+    | 'voiceDurationMs'
+    | 'location'
+  >
+> {
   if (!payload || typeof payload !== 'object') return {};
   const productCards = asProductCards(
     payload.product_cards ?? payload.productCards,
@@ -65,11 +117,24 @@ function richFieldsFromPayload(payload?: Record<string, unknown> | null): {
   const catalogProducts = asProductCards(
     payload.catalog_products ?? payload.catalogProducts,
   );
+  const attachments = asAttachments(payload.attachments);
+  const voiceUrl =
+    typeof payload.voiceUrl === 'string' && payload.voiceUrl
+      ? payload.voiceUrl
+      : attachments.find((a) => a.kind === 'audio')?.url || undefined;
+  const voiceDurationMs = Number(payload.voiceDurationMs);
+  const location = asLocation(payload.location);
   return {
     ...(productCards.length ? { productCards } : {}),
     ...(cartActions.length ? { cartActions } : {}),
     ...(catalogCategories.length ? { catalogCategories } : {}),
     ...(catalogProducts.length ? { catalogProducts } : {}),
+    ...(attachments.length ? { attachments } : {}),
+    ...(voiceUrl ? { voiceUrl } : {}),
+    ...(Number.isFinite(voiceDurationMs) && voiceDurationMs > 0
+      ? { voiceDurationMs }
+      : {}),
+    ...(location ? { location } : {}),
   };
 }
 
@@ -87,10 +152,13 @@ export function panelMessageRichness(row: PanelMessageRow): number {
     'catalogCategories',
     'catalog_products',
     'catalogProducts',
+    'attachments',
   ]) {
     const v = p[key];
     if (Array.isArray(v)) n += v.length;
   }
+  if (typeof p.voiceUrl === 'string' && p.voiceUrl) n += 1;
+  if (p.location && typeof p.location === 'object') n += 1;
   return n;
 }
 
@@ -125,7 +193,7 @@ export function mergePanelMessages(
 export function toPanelChatMessages(rows: PanelMessageRow[]): ChatMessage[] {
   return rows.map((m) => {
     const createdAt = Date.parse(m.created_at) || Date.now();
-    const rich = richFieldsFromPayload(m.payload);
+    const rich = chatRichFieldsFromPayload(m.payload);
     if (m.role === 'system') {
       return {
         id: m.id,

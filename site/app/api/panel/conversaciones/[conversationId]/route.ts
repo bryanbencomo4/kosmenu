@@ -155,7 +155,11 @@ export async function POST(
     return NextResponse.json({ error: 'supervision_disabled' }, { status: 403 });
   }
 
-  let body: { action?: string; text?: string };
+  let body: {
+    action?: string;
+    text?: string;
+    payload?: Record<string, unknown>;
+  };
   try {
     body = await request.json();
   } catch {
@@ -323,8 +327,25 @@ export async function POST(
 
   if (action === 'message') {
     const text = String(body.text || '').trim();
-    if (!text) {
+    const payload =
+      body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
+        ? body.payload
+        : {};
+    const hasMedia = Array.isArray(payload.attachments)
+      ? payload.attachments.length > 0
+      : Boolean(payload.voiceUrl || payload.location);
+    if (!text && !hasMedia) {
       return NextResponse.json({ error: 'empty_message' }, { status: 400 });
+    }
+    let payloadJson = '{}';
+    try {
+      payloadJson = JSON.stringify(payload);
+    } catch {
+      return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+    }
+    // Data-URL media lives in jsonb; keep a hard ceiling for serverless/DB.
+    if (payloadJson.length > 1_400_000) {
+      return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
     }
     if (String(conversation.status) !== 'human_handling') {
       return NextResponse.json({ error: 'not_in_human_mode' }, { status: 409 });
@@ -344,8 +365,9 @@ export async function POST(
       conversationId,
       comercioId: access.comercioId,
       role: 'staff',
-      text,
+      text: text || '📎 Adjunto',
       senderUserId: access.user.id,
+      payload,
     });
     if (!saved.ok) {
       return NextResponse.json({ error: 'send_failed' }, { status: 503 });

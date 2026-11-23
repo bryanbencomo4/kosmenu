@@ -129,4 +129,49 @@ describe('panel chat message mapping', () => {
     expect(mapped[1]?.role).toBe('user');
     expect(mapped[1]?.deliveryStatus).toBe('read');
   });
+
+  it('maps voice and image attachments from payload', () => {
+    const mapped = toPanelChatMessages([
+      base({
+        id: 'v1',
+        role: 'staff',
+        body: '🎤 Nota de voz (3s)',
+        payload: {
+          voiceUrl: 'data:audio/webm;base64,AAA',
+          voiceDurationMs: 3000,
+          attachments: [
+            {
+              id: 'a1',
+              kind: 'audio',
+              name: 'Nota de voz',
+              mime: 'audio/webm',
+              size: 12,
+              url: 'data:audio/webm;base64,AAA',
+            },
+          ],
+        },
+      }),
+      base({
+        id: 'i1',
+        role: 'staff',
+        seq: 2,
+        body: '📷 foto.jpg',
+        payload: {
+          attachments: [
+            {
+              id: 'img1',
+              kind: 'image',
+              name: 'foto.jpg',
+              mime: 'image/jpeg',
+              size: 100,
+              url: 'data:image/jpeg;base64,/9j/',
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(mapped[0]?.voiceUrl).toContain('data:audio');
+    expect(mapped[0]?.voiceDurationMs).toBe(3000);
+    expect(mapped[1]?.attachments?.[0]?.kind).toBe('image');
+  });
 });
