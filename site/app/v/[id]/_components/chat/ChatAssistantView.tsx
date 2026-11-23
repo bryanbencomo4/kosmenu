@@ -1161,6 +1161,32 @@ export function ChatAssistantView({
     [comercioId, businessName, currentConsumerLabel, playAssistantReceivedOnce],
   );
 
+  /**
+   * Inject soft identity ask into the thread when needed.
+   * Anchored to message history (isIdentityAsk) — never mark asked without a bubble.
+   */
+  const ensureIdentityAskInThread = useCallback(
+    (prev: ChatMessage[]): { next: ChatMessage[]; ask: ChatMessage | null } => {
+      const identity = readChatConsumerIdentity(comercioId);
+      if (!needsIdentityCapture(identity)) {
+        return { next: prev, ask: null };
+      }
+      if (prev.some((m) => m.isIdentityAsk)) {
+        identityAwaitingRef.current = true;
+        return { next: prev, ask: null };
+      }
+      const ask = createMessage('assistant', buildIdentityAskText(), {
+        isIdentityAsk: true,
+      });
+      identityAwaitingRef.current = true;
+      writeChatConsumerIdentity(comercioId, {
+        askedAt: new Date().toISOString(),
+      });
+      return { next: [...prev, ask], ask };
+    },
+    [comercioId],
+  );
+
   const sendMenuPrompt = useCallback(
     async (guestName?: string | null) => {
       if (menuPromptSentRef.current) return;
