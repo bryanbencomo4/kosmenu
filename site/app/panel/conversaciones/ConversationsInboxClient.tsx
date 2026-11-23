@@ -4,6 +4,10 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 
 import { commerceChatChannelName } from '../../_lib/chat-supervision-realtime';
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
+import {
+  CHAT_THEME_LIGHT,
+  chatThemeVars,
+} from '../../v/[id]/_components/chat/chat-theme';
 import { usePanelSession } from '../_lib/usePanelSession';
 
 type ConversationRow = {
@@ -22,6 +26,8 @@ type ComercioOption = {
   role: string;
   supervision_enabled: boolean;
 };
+
+const THEME_VARS = chatThemeVars('light');
 
 function statusLabel(status: string) {
   switch (status) {
@@ -57,6 +63,32 @@ function prioritizeConversations(rows: ConversationRow[]) {
       String(a.last_message_at || ''),
     );
   });
+}
+
+function formatListTime(iso: string | null) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  try {
+    const d = new Date(t);
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (sameDay) {
+      return new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      day: '2-digit',
+      month: 'short',
+    }).format(d);
+  } catch {
+    return '';
+  }
 }
 
 function ConversationsInboxInner({
@@ -182,7 +214,6 @@ function ConversationsInboxInner({
       )
       .subscribe();
 
-    // Same topic as server publishConversationEvent (light ids/types only).
     const hint = sb
       .channel(commerceChatChannelName(cid))
       .on('broadcast', { event: 'chat' }, () => {
@@ -196,7 +227,6 @@ function ConversationsInboxInner({
     };
   }, [token, comercioId, loadInbox]);
 
-  // Recovery poll when Realtime publication is missing or the socket drops.
   useEffect(() => {
     if (!token || !comercioId.trim()) return;
     const id = window.setInterval(() => {
@@ -206,117 +236,179 @@ function ConversationsInboxInner({
   }, [token, comercioId, loadInbox]);
 
   if (!ready) {
-    return <p className="text-sm text-stone-500">Comprobando sesión…</p>;
+    return (
+      <p className="p-4 text-sm" style={{ color: CHAT_THEME_LIGHT.textMuted }}>
+        Comprobando sesión…
+      </p>
+    );
   }
 
   const selected = comercios.find((c) => c.id === comercioId);
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <p className="text-sm text-stone-600">
-              Bandeja de conversaciones del asistente virtual.
-            </p>
-            {email ? (
-              <p className="mt-1 text-xs text-stone-500">{email}</p>
-            ) : null}
-          </div>
+    <div
+      className="mx-auto flex min-h-[calc(100dvh-3.5rem)] max-w-lg flex-col overflow-hidden bg-white shadow-sm md:min-h-[70vh] md:rounded-xl md:border"
+      style={{
+        ...THEME_VARS,
+        borderColor: 'var(--chat-card-border)',
+      }}
+    >
+      <div
+        className="flex items-center justify-between gap-3 px-4 py-3"
+        style={{ backgroundColor: '#008069', color: '#fff' }}
+      >
+        <div className="min-w-0">
+          <p className="truncate text-[17px] font-semibold">Chats</p>
+          {email ? (
+            <p className="truncate text-[12px] text-white/80">{email}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="text-xs font-medium text-stone-600 underline"
+            className="rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+            disabled={!token || !comercioId.trim() || loading}
+            onClick={() => void loadInbox()}
+          >
+            {loading ? '…' : 'Actualizar'}
+          </button>
+          <button
+            type="button"
+            className="rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold"
             onClick={() => void signOut()}
           >
             Salir
           </button>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-          <label className="block text-sm">
-            <span className="font-medium">Comercio</span>
-            {comercios.length > 0 ? (
-              <select
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
-                value={comercioId}
-                onChange={(e) => setComercioId(e.target.value)}
-                data-testid="comercio-select"
-              >
-                <option value="">Selecciona un comercio</option>
-                {comercios.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                    {c.supervision_enabled ? '' : ' (supervisión off)'}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
-                value={comercioId}
-                onChange={(e) => setComercioId(e.target.value)}
-                placeholder="UUID del comercio"
-              />
-            )}
-          </label>
-          <div className="flex items-end">
-            <button
-              type="button"
-              className="w-full rounded-xl bg-[#c45c26] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
-              disabled={!token || !comercioId.trim() || loading}
-              onClick={() => void loadInbox()}
+      </div>
+
+      <div
+        className="border-b px-3 py-2"
+        style={{ borderColor: 'var(--chat-card-border)' }}
+      >
+        <label className="block text-[12px] font-medium" style={{ color: 'var(--chat-text-muted)' }}>
+          Comercio
+          {comercios.length > 0 ? (
+            <select
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-[14.5px]"
+              style={{
+                borderColor: 'var(--chat-card-border)',
+                color: 'var(--chat-text)',
+                backgroundColor: 'var(--chat-input)',
+              }}
+              value={comercioId}
+              onChange={(e) => setComercioId(e.target.value)}
+              data-testid="comercio-select"
             >
-              {loading ? 'Cargando…' : 'Actualizar'}
-            </button>
-          </div>
-        </div>
+              <option value="">Selecciona un comercio</option>
+              {comercios.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                  {c.supervision_enabled ? '' : ' (supervisión off)'}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-[14.5px]"
+              style={{
+                borderColor: 'var(--chat-card-border)',
+                color: 'var(--chat-text)',
+              }}
+              value={comercioId}
+              onChange={(e) => setComercioId(e.target.value)}
+              placeholder="UUID del comercio"
+            />
+          )}
+        </label>
         {selected && !selected.supervision_enabled ? (
-          <p className="mt-2 text-sm text-amber-800">
+          <p className="mt-2 text-[13px] text-amber-800">
             La supervisión no está activa para este comercio (feature flag).
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm text-red-700" role="alert">
+          <p className="mt-2 text-[13px] text-red-700" role="alert">
             {error}
           </p>
         ) : null}
-      </section>
+      </div>
 
-      <ul className="space-y-2">
-        {rows.map((row) => (
-          <li key={row.id}>
-            <a
-              href={`/panel/conversaciones/${encodeURIComponent(row.id)}?comercioId=${encodeURIComponent(comercioId)}`}
-              className="block rounded-2xl border border-black/10 bg-white p-4 shadow-sm transition hover:border-[#c45c26]/40"
-              data-testid="conversation-row"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold">
-                    {row.consumer_label || 'Cliente anónimo'}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    {row.last_message_preview || 'Sin mensajes'}
+      <ul className="min-h-0 flex-1 overflow-y-auto">
+        {rows.map((row) => {
+          const initial = (
+            row.consumer_label || 'Cliente'
+          )
+            .trim()
+            .charAt(0)
+            .toUpperCase() || 'C';
+          const unread = row.unread_merchant_count > 0;
+          return (
+            <li key={row.id}>
+              <a
+                href={`/panel/conversaciones/${encodeURIComponent(row.id)}?comercioId=${encodeURIComponent(comercioId)}`}
+                className="flex items-center gap-3 border-b px-3 py-3 transition hover:bg-black/[0.03]"
+                style={{ borderColor: 'var(--chat-card-border)' }}
+                data-testid="conversation-row"
+              >
+                <div
+                  className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[17px] font-semibold text-white"
+                  style={{ backgroundColor: '#00A884' }}
+                >
+                  {initial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p
+                      className={`truncate text-[16px] ${unread ? 'font-semibold' : 'font-medium'}`}
+                      style={{ color: 'var(--chat-text)' }}
+                    >
+                      {row.consumer_label || 'Cliente'}
+                    </p>
+                    <span
+                      className="shrink-0 text-[12px] tabular-nums"
+                      style={{
+                        color: unread ? 'var(--chat-send)' : 'var(--chat-text-muted)',
+                      }}
+                    >
+                      {formatListTime(row.last_message_at)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <p
+                      className="truncate text-[13.5px]"
+                      style={{ color: 'var(--chat-text-muted)' }}
+                    >
+                      {row.last_message_preview || 'Sin mensajes'}
+                    </p>
+                    {unread ? (
+                      <span
+                        className="grid min-w-[1.25rem] place-items-center rounded-full px-1.5 text-[11.5px] font-semibold text-white"
+                        style={{ backgroundColor: 'var(--chat-send)' }}
+                      >
+                        {row.unread_merchant_count}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p
+                    className="mt-0.5 text-[11.5px]"
+                    style={{ color: 'var(--chat-text-muted)' }}
+                    data-status={row.status}
+                  >
+                    {statusLabel(row.status)}
+                    {assigneeLabel(row.assigned_user_id)
+                      ? ` · ${assigneeLabel(row.assigned_user_id)}`
+                      : ''}
                   </p>
                 </div>
-                <div className="text-right text-xs text-stone-500">
-                  <p data-status={row.status}>{statusLabel(row.status)}</p>
-                  {assigneeLabel(row.assigned_user_id) ? (
-                    <p className="mt-1">
-                      Resp: {assigneeLabel(row.assigned_user_id)}
-                    </p>
-                  ) : null}
-                  {row.unread_merchant_count > 0 ? (
-                    <p className="mt-1 font-semibold text-[#c45c26]">
-                      {row.unread_merchant_count} nuevo(s)
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </a>
-          </li>
-        ))}
+              </a>
+            </li>
+          );
+        })}
         {!loading && rows.length === 0 ? (
-          <li className="rounded-2xl border border-dashed border-stone-300 bg-white/60 p-6 text-center text-sm text-stone-500">
+          <li
+            className="px-6 py-16 text-center text-[14px]"
+            style={{ color: 'var(--chat-text-muted)' }}
+          >
             No hay conversaciones todavía (o la supervisión no está activa para
             este comercio).
           </li>
@@ -332,7 +424,11 @@ export function ConversationsInboxClient({
   searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   return (
-    <Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}>
+    <Suspense
+      fallback={
+        <p className="p-4 text-sm text-stone-500">Cargando bandeja…</p>
+      }
+    >
       <ConversationsInboxInner searchParamsPromise={searchParamsPromise} />
     </Suspense>
   );
