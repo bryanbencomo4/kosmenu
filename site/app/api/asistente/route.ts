@@ -240,6 +240,13 @@ export async function POST(request: Request) {
 export async function GET() {
   const config = getDiscoveryAssistantConfig();
   const live = isDiscoveryGeminiLiveAllowed(config);
+  const ledgerReady =
+    (process.env.DISCOVERY_ASSISTANT_REQUEST_LEDGER_READY ?? '')
+      .trim()
+      .toLowerCase() === '1' ||
+    (process.env.DISCOVERY_ASSISTANT_REQUEST_LEDGER_READY ?? '')
+      .trim()
+      .toLowerCase() === 'true';
   return json({
     ok: true,
     enabled: config.enabled,
@@ -247,6 +254,7 @@ export async function GET() {
     liveGemini: live.ok,
     liveReason: live.ok ? null : live.reason ?? null,
     quotaBackend: config.quotaBackend,
+    requestLedgerReady: ledgerReady,
     pageSize: config.defaultPageSize,
     maxGeminiHttpCallsPerRequest: config.maxGeminiHttpCallsPerRequest,
     geminiHttpBudget: config.geminiHttpBudget || null,

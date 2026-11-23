@@ -291,19 +291,12 @@ async function reservePostgres(params: {
     p_model: params.config.model,
   };
 
-  let { data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
+  // When requestId is present (live Gemini path), NEVER fall back to legacy
+  // non-idempotent reserve — fail-closed so the agent uses directory search only.
+  const { data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', {
     ...baseArgs,
     ...(requestId ? { p_request_id: requestId } : {}),
   });
-
-  // Migration 20261123180000 not applied yet — retry legacy 6-arg signature.
-  if (
-    error &&
-    requestId &&
-    /Could not find the function|schema cache|does not exist/i.test(error.message || '')
-  ) {
-    ({ data, error } = await params.supabase.rpc('reserve_ai_discovery_quota', baseArgs));
-  }
 
   if (error) {
     const msg = error.message || 'discovery quota rpc failed';
@@ -324,9 +317,11 @@ async function reservePostgres(params: {
     }
     if (/Could not find the function|schema cache|does not exist/i.test(msg)) {
       throw new DiscoveryQuotaError(
-        'Discovery postgres quota RPC missing — apply migration first',
+        requestId
+          ? 'Discovery request ledger RPC missing — refuse live Gemini'
+          : 'Discovery postgres quota RPC missing — apply migration first',
         503,
-        'postgres_quota_not_ready',
+        requestId ? 'request_ledger_unavailable' : 'postgres_quota_not_ready',
       );
     }
     throw new DiscoveryQuotaError(msg, 503, 'quota_unavailable');
@@ -476,15 +471,12 @@ async function recordPostgresTokens(params: {
     p_model: params.model,
   };
 
-  // Prefer ledger-aware RPC (migration 20261123180000). Fall back if not yet applied.
-  let { data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', {
+  // Fail-closed: never silently use non-idempotent legacy increment when a
+  // server requestId is required (live Gemini metering path).
+  const { data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', {
     ...args,
     p_request_id: requestId,
   });
-
-  if (error && /Could not find the function|schema cache|does not exist/i.test(error.message || '')) {
-    ({ data, error } = await params.supabase.rpc('increment_ai_discovery_tokens', args));
-  }
 
   if (error) {
     const msg = error.message || 'discovery token rpc failed';
@@ -493,6 +485,13 @@ async function recordPostgresTokens(params: {
     }
     if (/invalid discovery request/i.test(msg)) {
       throw new DiscoveryQuotaError(msg, 400, 'invalid_request_id');
+    }
+    if (/Could not find the function|schema cache|does not exist/i.test(msg)) {
+      throw new DiscoveryQuotaError(
+        'Discovery request ledger RPC missing — refuse non-idempotent token post',
+        503,
+        'request_ledger_unavailable',
+      );
     }
     throw new DiscoveryQuotaError(msg, 503, 'quota_unavailable');
   }

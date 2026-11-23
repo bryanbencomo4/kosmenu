@@ -88,6 +88,26 @@ describe('discovery assistant flags', () => {
     expect(live.reason).toMatch(/filesystem|quota|persistent|postgres/i);
   });
 
+  it('production Gemini stays off without request ledger ready', () => {
+    const config = getDiscoveryAssistantConfig({
+      NODE_ENV: 'production',
+      DISCOVERY_ASSISTANT_ENABLED: '1',
+      DISCOVERY_ASSISTANT_ALLOW_PRODUCTION: '1',
+      DISCOVERY_ASSISTANT_ALLOW_GEMINI: '1',
+      DISCOVERY_ASSISTANT_QUOTA_BACKEND: 'postgres',
+      DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY: '1',
+      GEMINI_API_KEY: 'fake',
+    } as NodeJS.ProcessEnv);
+    const live = isDiscoveryGeminiLiveAllowed(config, {
+      NODE_ENV: 'production',
+      DISCOVERY_ASSISTANT_ALLOW_GEMINI: '1',
+      DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY: '1',
+      DISCOVERY_ASSISTANT_REQUEST_LEDGER_READY: '0',
+    } as NodeJS.ProcessEnv);
+    expect(live.ok).toBe(false);
+    expect(live.reason).toBe('request_ledger_not_ready');
+  });
+
   it('defaults production quota backend to none', () => {
     const config = getDiscoveryAssistantConfig({
       NODE_ENV: 'production',

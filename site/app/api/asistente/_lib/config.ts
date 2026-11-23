@@ -136,6 +136,10 @@ export function isDiscoveryGeminiLiveAllowed(
     if (!envBool('DISCOVERY_ASSISTANT_POSTGRES_QUOTA_READY', false, env)) {
       return { ok: false, reason: 'postgres_quota_not_ready' };
     }
+    // Durable request_id ledger required before any live Gemini in production.
+    if (!envBool('DISCOVERY_ASSISTANT_REQUEST_LEDGER_READY', false, env)) {
+      return { ok: false, reason: 'request_ledger_not_ready' };
+    }
   }
 
   if (config.quotaBackend === 'none') {

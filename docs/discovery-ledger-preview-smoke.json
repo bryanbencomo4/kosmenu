@@ -1,0 +1,101 @@
+{
+  "target": "gsfxqzvmyzjjgpigrste.supabase.co",
+  "previewRef": "gsfxqzvmyzjjgpigrste",
+  "ok": true,
+  "steps": [
+    {
+      "name": "reserve_first",
+      "ok": true,
+      "requests": 1,
+      "idempotent": false
+    },
+    {
+      "name": "reserve_idempotent_same_id",
+      "ok": true,
+      "idempotent": true,
+      "monthRequests": 1,
+      "sessionRequests": 1
+    },
+    {
+      "name": "reserve_concurrency_same_id",
+      "ok": true,
+      "okCount": 20,
+      "sessionRequests": 1,
+      "monthRequests": 2
+    },
+    {
+      "name": "reserve_independent_ids",
+      "ok": true,
+      "before": 2,
+      "after": 4
+    },
+    {
+      "name": "tokens_after_reserve",
+      "ok": true,
+      "before": {
+        "tokens_input": 0,
+        "tokens_output": 0
+      },
+      "after": {
+        "agent": "discovery",
+        "period_month": "2099-11",
+        "requests": 5,
+        "tokens_input": 100,
+        "tokens_output": 40,
+        "estimated_cost": 0.0001,
+        "errors": 0,
+        "model": "ledger-smoke",
+        "updated_at": "2026-11-23T18:24:53.357101+00:00"
+      }
+    },
+    {
+      "name": "tokens_idempotent_duplicate",
+      "ok": true,
+      "mid": {
+        "tokens_input": 100,
+        "tokens_output": 40
+      },
+      "afterDup": {
+        "tokens_input": 100,
+        "tokens_output": 40
+      }
+    },
+    {
+      "name": "tokens_without_reserve",
+      "ok": true,
+      "error": "discovery request not reserved"
+    },
+    {
+      "name": "invalid_request_id",
+      "ok": true,
+      "error": "invalid discovery request id"
+    },
+    {
+      "name": "monthly_cap_with_ledger",
+      "ok": true,
+      "error": "discovery monthly request limit"
+    },
+    {
+      "name": "anon_denied",
+      "ok": true,
+      "error": "permission denied for function reserve_ai_discovery_quota"
+    },
+    {
+      "name": "anon_table_denied",
+      "ok": true,
+      "error": "permission denied for table ai_discovery_request_ledger"
+    },
+    {
+      "name": "partial_failure_no_double_reserve",
+      "ok": true,
+      "before": 1,
+      "after": 1
+    },
+    {
+      "name": "chatbot_untouched",
+      "ok": true,
+      "error": "Could not find the table 'public.ai_chatbot_usage' in the schema cache"
+    }
+  ],
+  "errors": []
+}
