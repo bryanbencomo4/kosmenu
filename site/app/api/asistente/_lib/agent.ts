@@ -141,7 +141,7 @@ async function runLiveDiscoveryGemini(params: {
       config,
       supabase: params.supabase,
     });
-    if (!slot.ok) {
+    if (slot.ok === false) {
       return withUsage({
         text: DISCOVERY_FALLBACK_MSG,
         model: modelUsed,
