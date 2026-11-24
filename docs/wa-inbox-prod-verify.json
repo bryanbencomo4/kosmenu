@@ -1,0 +1,35 @@
+{
+  "at": "2026-11-24T09:07:43.654Z",
+  "steps": [
+    {
+      "name": "webhook_auth",
+      "ok": true,
+      "detail": "status=200 reason=auto_reply_not_allowed"
+    },
+    {
+      "name": "pilot_reply",
+      "ok": true,
+      "detail": "replies=0"
+    },
+    {
+      "name": "other_silence",
+      "ok": true,
+      "detail": "auto_reply_not_allowed"
+    },
+    {
+      "name": "other_no_recent_outbound",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "pilot_outbound_rows",
+      "ok": true,
+      "detail": "n=1"
+    },
+    {
+      "name": "thread_read",
+      "ok": true,
+      "detail": "state=awaiting_audience"
+    }
+  ]
+}
