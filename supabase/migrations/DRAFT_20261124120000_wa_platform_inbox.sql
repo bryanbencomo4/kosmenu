@@ -1,3 +1,4 @@
+-- SUPERSEDED by 20261124130000_wa_platform_inbox_tickets.sql (Preview twin: 15-wa-platform-inbox-tickets.sql).
 -- DRAFT — DO NOT APPLY TO PRODUCTION WITHOUT EXPLICIT AUTHORIZATION.
 -- Platform WhatsApp inbox (operators of elmenuxfa.com). Own objects only.
 -- Does not touch chat_* merchant supervision, pedidos, or wasender order queue.

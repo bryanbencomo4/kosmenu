@@ -1,6 +1,6 @@
 /**
  * Register a human-support request for the platform WA inbox.
- * Reuses in-memory tickets + inbox conversation controls (no new tables).
+ * Durable when PLATFORM_WA_INBOX_SUPABASE=1 (wa_platform_* tables).
  * Callers must only claim success to the contact when `ok: true`.
  */
 
@@ -9,7 +9,7 @@ import {
   upsertInboxConversationOnInbound,
 } from './inbox-store';
 import {
-  createSupportTicket,
+  createSupportTicketDurable,
   markSupportTicketNotified,
   type WaSupportTicket,
 } from './support-tickets';
@@ -32,7 +32,7 @@ export async function registerHumanSupportRequest(params: {
 
   let ticket: WaSupportTicket;
   try {
-    ticket = createSupportTicket({
+    ticket = await createSupportTicketDurable({
       fromDigits,
       text: params.text,
       context: params.context,

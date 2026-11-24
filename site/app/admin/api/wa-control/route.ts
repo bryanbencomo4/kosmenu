@@ -27,7 +27,7 @@ import {
   setGlobalBotMute,
   takeConversation,
 } from '../../../api/wa-entry/_lib/operator-control';
-import { listPendingSupportTickets } from '../../../api/wa-entry/_lib/support-tickets';
+import { listPendingSupportTicketsDurable } from '../../../api/wa-entry/_lib/support-tickets';
 import {
   reactWasenderMessage,
   sendWasenderDirect,
@@ -134,10 +134,14 @@ export async function POST(request: Request) {
   const { action } = parsed.data;
 
   if (action === 'list_tickets') {
+    const tickets = await listPendingSupportTicketsDurable(40);
     return NextResponse.json({
       ok: true,
-      tickets: listPendingSupportTickets(40),
-      note: 'Tickets in-memory until durable store authorized',
+      tickets,
+      note:
+        String(process.env.PLATFORM_WA_INBOX_SUPABASE || '').trim() === '1'
+          ? 'Tickets durable (wa_platform_support_tickets)'
+          : 'Tickets in-memory (PLATFORM_WA_INBOX_SUPABASE≠1)',
     });
   }
 
@@ -233,7 +237,7 @@ export async function POST(request: Request) {
       global,
       conversation,
       control,
-      ticketsPending: listPendingSupportTickets(10).length,
+      ticketsPending: (await listPendingSupportTicketsDurable(10)).length,
       controllerActor: controllerId,
       canResumeAi: digits ? canResumeAutoReplyForContact(digits) : false,
     });

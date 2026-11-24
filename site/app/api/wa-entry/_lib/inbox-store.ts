@@ -120,6 +120,129 @@ function sb(): SupabaseClient | null {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+function rowToConversation(
+  row: Record<string, unknown>,
+  control?: WaConversationControl,
+): InboxConversation {
+  const fromDigits = String(row.from_digits || '');
+  const statusRaw = String(row.status || 'pending');
+  const status = (
+    [
+      'ai_handling',
+      'human_handling',
+      'needs_attention',
+      'pending',
+      'closed',
+    ] as InboxStatus[]
+  ).includes(statusRaw as InboxStatus)
+    ? (statusRaw as InboxStatus)
+    : 'pending';
+  const humanActive = control?.humanHandling ?? status === 'human_handling';
+  const aiActive =
+    control != null
+      ? control.aiActive && !control.humanHandling
+      : status === 'ai_handling';
+  return {
+    fromDigits,
+    displayName: row.display_name == null ? null : String(row.display_name),
+    status,
+    assignedOperatorId:
+      row.assigned_operator_id == null ? null : String(row.assigned_operator_id),
+    assignedOperatorLabel:
+      row.assigned_operator_label == null
+        ? null
+        : String(row.assigned_operator_label),
+    lastMessageText: String(row.last_message_text || ''),
+    lastMessageAtMs: Number(row.last_message_at_ms) || 0,
+    unreadCount: Number(row.unread_count) || 0,
+    attentionVersion:
+      control?.attentionVersion ?? (Number(row.attention_version) || 0),
+    contextRole: row.context_role == null ? null : String(row.context_role),
+    contextNote: row.context_note == null ? null : String(row.context_note),
+    updatedAtMs: Number(row.updated_at_ms) || 0,
+    closedAtMs:
+      row.closed_at_ms == null || row.closed_at_ms === ''
+        ? null
+        : Number(row.closed_at_ms),
+    humanActive,
+    aiActive,
+  };
+}
+
+async function persistConversationRow(next: InboxConversation): Promise<void> {
+  if (!inboxSupabaseEnabled()) return;
+  const client = sb();
+  if (!client) throw new Error('inbox_supabase_unavailable');
+  const { error } = await client.from('wa_platform_inbox_conversations').upsert(
+    {
+      from_digits: next.fromDigits,
+      display_name: next.displayName,
+      status: next.status,
+      assigned_operator_id: next.assignedOperatorId,
+      assigned_operator_label: next.assignedOperatorLabel,
+      last_message_text: next.lastMessageText,
+      last_message_at_ms: next.lastMessageAtMs,
+      unread_count: next.unreadCount,
+      attention_version: next.attentionVersion,
+      context_role: next.contextRole,
+      context_note: next.contextNote,
+      updated_at_ms: next.updatedAtMs,
+      closed_at_ms: next.closedAtMs,
+    },
+    { onConflict: 'from_digits' },
+  );
+  if (error) throw new Error(`inbox_conversation_persist_failed:${error.message}`);
+}
+
+async function hydrateFromSupabaseInbox(): Promise<void> {
+  const client = sb();
+  if (!client) return;
+  try {
+    const { data: convs, error } = await client
+      .from('wa_platform_inbox_conversations')
+      .select('*')
+      .order('last_message_at_ms', { ascending: false })
+      .limit(200);
+    if (error || !convs) return;
+    const store = resolveWaEntryControlStore();
+    const nowMs = Date.now();
+    for (const raw of convs) {
+      const row = raw as Record<string, unknown>;
+      const fromDigits = digitsOf(String(row.from_digits || ''));
+      if (!fromDigits) continue;
+      const thread = await store.getThread(fromDigits);
+      const control = describeConversationControl(fromDigits, thread, nowMs);
+      const hydrated = mergeControl(
+        rowToConversation(row, control),
+        control,
+        {
+          displayName:
+            row.display_name == null ? null : String(row.display_name),
+          status: rowToConversation(row, control).status,
+          lastMessageText: String(row.last_message_text || ''),
+          lastMessageAtMs: Number(row.last_message_at_ms) || 0,
+          unreadCount: Number(row.unread_count) || 0,
+          contextRole:
+            row.context_role == null ? null : String(row.context_role),
+          contextNote:
+            row.context_note == null ? null : String(row.context_note),
+          updatedAtMs: Number(row.updated_at_ms) || nowMs,
+          closedAtMs:
+            row.closed_at_ms == null || row.closed_at_ms === ''
+              ? null
+              : Number(row.closed_at_ms),
+        },
+      );
+      const prev = convMap().get(fromDigits);
+      if (!prev || hydrated.updatedAtMs >= (prev.updatedAtMs || 0)) {
+        convMap().set(fromDigits, hydrated);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function statusFromControl(
   prev: InboxConversation | undefined,
   control: WaConversationControl,
@@ -200,32 +323,7 @@ export async function upsertInboxConversationOnInbound(input: {
     closedAtMs: null,
   });
   convMap().set(fromDigits, next);
-
-  const client = sb();
-  if (client) {
-    try {
-      await client.from('wa_platform_inbox_conversations').upsert(
-        {
-          from_digits: next.fromDigits,
-          display_name: next.displayName,
-          status: next.status,
-          assigned_operator_id: next.assignedOperatorId,
-          assigned_operator_label: next.assignedOperatorLabel,
-          last_message_text: next.lastMessageText,
-          last_message_at_ms: next.lastMessageAtMs,
-          unread_count: next.unreadCount,
-          attention_version: next.attentionVersion,
-          context_role: next.contextRole,
-          context_note: next.contextNote,
-          updated_at_ms: next.updatedAtMs,
-          closed_at_ms: next.closedAtMs,
-        },
-        { onConflict: 'from_digits' },
-      );
-    } catch {
-      /* memory remains SoT until migration */
-    }
-  }
+  await persistConversationRow(next);
   return next;
 }
 
@@ -298,24 +396,31 @@ export async function appendInboxMessage(input: {
     });
   }
 
-  const client = sb();
-  if (client) {
-    try {
-      await client.from('wa_platform_inbox_messages').upsert(
-        {
-          id: msg.id,
-          from_digits: msg.fromDigits,
-          role: msg.role,
-          text: msg.text,
-          at_ms: msg.atMs,
-          client_message_id: msg.clientMessageId,
-          operator_id: msg.operatorId,
-          outbound_id: msg.outboundId,
-        },
-        { onConflict: 'id' },
-      );
-    } catch {
-      /* ignore */
+  if (inboxSupabaseEnabled()) {
+    const client = sb();
+    if (!client) throw new Error('inbox_supabase_unavailable');
+    const { error } = await client.from('wa_platform_inbox_messages').upsert(
+      {
+        id: msg.id,
+        from_digits: msg.fromDigits,
+        role: msg.role,
+        text: msg.text,
+        at_ms: msg.atMs,
+        client_message_id: msg.clientMessageId,
+        operator_id: msg.operatorId,
+        outbound_id: msg.outboundId,
+      },
+      { onConflict: 'id' },
+    );
+    if (error) {
+      // Dedup via unique (from_digits, client_message_id)
+      if (
+        msg.clientMessageId &&
+        /wa_platform_inbox_messages_client_uidx|duplicate key/i.test(error.message)
+      ) {
+        return msg;
+      }
+      throw new Error(`inbox_message_persist_failed:${error.message}`);
     }
   }
   return msg;
@@ -372,6 +477,7 @@ export async function listInboxConversations(input?: {
   const nowMs = Date.now();
 
   await hydrateFromDurableControlStore();
+  await hydrateFromSupabaseInbox();
 
   for (const r of Array.from(convMap().values())) {
     const thread = await store.getThread(r.fromDigits);
@@ -408,7 +514,25 @@ export async function getInboxConversation(
   fromDigitsRaw: string,
 ): Promise<InboxConversation | null> {
   const fromDigits = digitsOf(fromDigitsRaw);
-  const prev = convMap().get(fromDigits);
+  let prev = convMap().get(fromDigits);
+  if (!prev) {
+    const client = sb();
+    if (client) {
+      try {
+        const { data } = await client
+          .from('wa_platform_inbox_conversations')
+          .select('*')
+          .eq('from_digits', fromDigits)
+          .maybeSingle();
+        if (data) {
+          prev = rowToConversation(data as Record<string, unknown>);
+          convMap().set(fromDigits, prev);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   if (!prev) return null;
   const store = resolveWaEntryControlStore();
   const thread = await store.getThread(fromDigits);
@@ -426,6 +550,66 @@ export async function listInboxMessages(input: {
 }): Promise<InboxMessage[]> {
   const fromDigits = digitsOf(input.fromDigits);
   const limit = Math.min(200, Math.max(1, input.limit || 80));
+  const client = sb();
+  if (client) {
+    try {
+      let q = client
+        .from('wa_platform_inbox_messages')
+        .select('*')
+        .eq('from_digits', fromDigits)
+        .order('at_ms', { ascending: true })
+        .limit(500);
+      if (typeof input.afterMs === 'number' && Number.isFinite(input.afterMs)) {
+        q = q.gt('at_ms', input.afterMs);
+      }
+      if (typeof input.beforeMs === 'number' && Number.isFinite(input.beforeMs)) {
+        q = q.lt('at_ms', input.beforeMs);
+      }
+      const { data, error } = await q;
+      if (!error && data) {
+        const mapped: InboxMessage[] = data.map((raw) => {
+          const row = raw as Record<string, unknown>;
+          return {
+            id: String(row.id || ''),
+            fromDigits: String(row.from_digits || ''),
+            role: String(row.role || 'system') as InboxMessageRole,
+            text: String(row.text || ''),
+            atMs: Number(row.at_ms) || 0,
+            clientMessageId:
+              row.client_message_id == null
+                ? null
+                : String(row.client_message_id),
+            operatorId:
+              row.operator_id == null ? null : String(row.operator_id),
+            outboundId:
+              row.outbound_id == null ? null : String(row.outbound_id),
+          };
+        });
+        const mem = msgMap().get(fromDigits) || [];
+        const byId = new Map<string, InboxMessage>();
+        for (const m of mapped) byId.set(m.id, m);
+        for (const m of mem) {
+          if (!byId.has(m.id)) byId.set(m.id, m);
+        }
+        const merged = [...byId.values()].sort((a, b) => a.atMs - b.atMs);
+        msgMap().set(fromDigits, merged);
+        let list = merged;
+        if (typeof input.afterMs === 'number' && Number.isFinite(input.afterMs)) {
+          list = list.filter((m) => m.atMs > input.afterMs!);
+        }
+        if (
+          typeof input.beforeMs === 'number' &&
+          Number.isFinite(input.beforeMs)
+        ) {
+          list = list.filter((m) => m.atMs < input.beforeMs!);
+        }
+        if (list.length > limit) list = list.slice(list.length - limit);
+        return list;
+      }
+    } catch {
+      /* fall through to memory */
+    }
+  }
   let list = [...(msgMap().get(fromDigits) || [])];
   if (typeof input.afterMs === 'number' && Number.isFinite(input.afterMs)) {
     list = list.filter((m) => m.atMs > input.afterMs!);
@@ -442,7 +626,9 @@ export async function markInboxRead(fromDigitsRaw: string): Promise<void> {
   const fromDigits = digitsOf(fromDigitsRaw);
   const prev = convMap().get(fromDigits);
   if (!prev) return;
-  convMap().set(fromDigits, { ...prev, unreadCount: 0, updatedAtMs: Date.now() });
+  const next = { ...prev, unreadCount: 0, updatedAtMs: Date.now() };
+  convMap().set(fromDigits, next);
+  await persistConversationRow(next);
 }
 
 export async function getInboxMessage(
@@ -500,6 +686,7 @@ export async function inboxTakeConversation(input: {
     lastMessageAtMs: prev?.lastMessageAtMs || nowMs,
   });
   convMap().set(fromDigits, next);
+  await persistConversationRow(next);
   await appendInboxMessage({
     fromDigits,
     role: 'system',
@@ -547,6 +734,7 @@ export async function inboxReturnConversation(input: {
     next.status = 'pending';
   }
   convMap().set(fromDigits, next);
+  await persistConversationRow(next);
   await appendInboxMessage({
     fromDigits,
     role: 'system',
@@ -581,6 +769,7 @@ export async function inboxCloseConversation(
     aiActive: false,
   };
   convMap().set(fromDigits, next);
+  await persistConversationRow(next);
   await appendInboxMessage({
     fromDigits,
     role: 'system',

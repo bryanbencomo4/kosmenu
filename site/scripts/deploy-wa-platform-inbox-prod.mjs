@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Publish platform WA inbox + fail-closed auto-reply allowlist.
+ * Publish platform WA inbox + durable tickets + fail-closed auto-reply allowlist.
+ * Requires migration 20261124130000 already applied on prod.
  *
- *   CONFIRM_WA_PLATFORM_INBOX_DEPLOY=I_AUTHORIZE_WA_PLATFORM_INBOX_E4F2976 \
+ *   CONFIRM_WA_PLATFORM_INBOX_DEPLOY=I_AUTHORIZE_WA_PLATFORM_INBOX_PILOT_639066A \
  *   node site/scripts/deploy-wa-platform-inbox-prod.mjs
  *
- * Does NOT apply DRAFT inbox SQL (commented / not Preview-validated).
  * Does NOT change WaSender webhook. Master stays allowlist-only (not public).
  */
 import { spawnSync } from 'node:child_process';
@@ -13,7 +13,7 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CONFIRM = 'I_AUTHORIZE_WA_PLATFORM_INBOX_E4F2976';
+const CONFIRM = 'I_AUTHORIZE_WA_PLATFORM_INBOX_PILOT_639066A';
 const PILOT = '584140821633';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -37,8 +37,8 @@ const forced = [
   `PLATFORM_WA_MASTER_ALLOWLIST_DIGITS=${PILOT}`,
   'PLATFORM_WA_BOT_MUTE=0',
   'PLATFORM_WA_OPERATOR_CONTROL=1',
-  // Inbox tables migration not applied — do not enable supabase inbox flag.
-  'PLATFORM_WA_INBOX_SUPABASE=0',
+  // Durable inbox + option-9 tickets (migration applied).
+  'PLATFORM_WA_INBOX_SUPABASE=1',
   'PLATFORM_WA_BUSINESS_ASSISTANT_URL=https://app.elmenuxfa.com/asistente',
   'PLATFORM_WA_CONSUMER_URL=https://elmenuxfa.com/asistente?ref=wa',
 ];
@@ -48,8 +48,8 @@ for (const line of forced) {
   args.push('--env', line, '--build-env', line);
 }
 
-console.log('Deploying platform WA inbox + auto-reply allowlist…');
-console.log('Migration DRAFT_wa_platform_inbox: SKIPPED (commented / not Preview-validated)');
+console.log('Deploying platform WA inbox (durable) + pilot allowlist…');
+console.log('Migration 20261124130000: assumed applied (wa_platform_*); flag PLATFORM_WA_INBOX_SUPABASE=1');
 const r = spawnSync('npx', ['vercel', ...args], {
   cwd: root,
   encoding: 'utf8',
@@ -66,11 +66,12 @@ writeFileSync(
   JSON.stringify(
     {
       at: new Date().toISOString(),
-      commitHint: 'e4f2976+',
+      commitHint: '639066a+durable-inbox',
       autoReplyDigits: PILOT,
       masterPublic: false,
-      inboxSupabase: false,
-      migrationApplied: false,
+      inboxSupabase: true,
+      migrationApplied: true,
+      migration: '20261124130000_wa_platform_inbox_tickets.sql',
       urls,
     },
     null,
@@ -78,22 +79,17 @@ writeFileSync(
   ),
 );
 
-// Persist env var in project for future deploys (non-interactive).
-const envAdd = spawnSync(
-  'npx',
-  [
-    'vercel',
-    'env',
-    'add',
-    'PLATFORM_WA_AUTO_REPLY_DIGITS',
-    'production',
-    '--value',
-    PILOT,
-    '--yes',
-    '--force',
-  ],
-  { cwd: root, encoding: 'utf8', shell: true, env: process.env },
-);
-process.stdout.write(envAdd.stdout || '');
-process.stderr.write(envAdd.stderr || '');
+for (const [key, value] of [
+  ['PLATFORM_WA_AUTO_REPLY_DIGITS', PILOT],
+  ['PLATFORM_WA_INBOX_SUPABASE', '1'],
+  ['PLATFORM_WA_MASTER_PUBLIC', '0'],
+]) {
+  const envAdd = spawnSync(
+    'npx',
+    ['vercel', 'env', 'add', key, 'production', '--value', value, '--yes', '--force'],
+    { cwd: root, encoding: 'utf8', shell: true, env: process.env },
+  );
+  process.stdout.write(envAdd.stdout || '');
+  process.stderr.write(envAdd.stderr || '');
+}
 console.log('OK deploy', urls.join(', '));
