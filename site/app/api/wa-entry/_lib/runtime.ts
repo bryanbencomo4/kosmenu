@@ -18,12 +18,21 @@ import {
   type WaEntryStore,
 } from './store';
 import type { WaEntryAsyncStore } from './store-async';
-import { createSupabasePreviewAsyncStore } from './store-supabase-preview';
+import {
+  createSupabasePreviewAsyncStore,
+  createSupabaseProdAsyncStore,
+} from './store-supabase';
+import {
+  tryCreateProdWaMasterRuntime,
+  type WaMasterRuntimeDeps,
+} from './master-runtime';
 
 export type WaEntryRuntime = {
   config: WaEntryConfig;
   store: WaEntryStore | WaEntryAsyncStore;
   sender: WaEntrySender;
+  /** Production Master deps (memory/identity/quota). Never Preview for pilot users. */
+  master?: WaMasterRuntimeDeps | null;
 };
 
 let singleton: WaEntryRuntime | null = null;
@@ -31,19 +40,31 @@ let singleton: WaEntryRuntime | null = null;
 /**
  * Process-local runtime for the wa-entry module.
  * preview_isolated → Preview Supabase store + isolated sender (no prod queue).
+ * supabase store → production project only (asserted).
  * wasender real remains refuse-by-default.
  */
 export function getWaEntryRuntime(env: NodeJS.ProcessEnv = process.env): WaEntryRuntime {
   if (singleton) return singleton;
 
   const config = loadWaEntryConfig(env);
-  assertSafeLocalConfig(config, env);
+
+  // While inbound is off, skip durable-store asserts so health/deploy can stay
+  // fail-closed without requiring service-role wiring on every cold start.
+  if (config.inboundEnabled) {
+    assertSafeLocalConfig(config, env);
+  }
 
   let store: WaEntryStore | WaEntryAsyncStore;
-  if (config.storeKind === 'memory' || env.NODE_ENV === 'test') {
+  if (
+    !config.inboundEnabled ||
+    config.storeKind === 'memory' ||
+    env.NODE_ENV === 'test'
+  ) {
     store = createMemoryWaEntryStore();
   } else if (config.storeKind === 'supabase_preview') {
     store = createSupabasePreviewAsyncStore(config);
+  } else if (config.storeKind === 'supabase') {
+    store = createSupabaseProdAsyncStore(config, env);
   } else {
     const dataDir = path.isAbsolute(config.localDataDir)
       ? config.localDataDir
@@ -63,7 +84,12 @@ export function getWaEntryRuntime(env: NodeJS.ProcessEnv = process.env): WaEntry
     sender = createRefusingWasenderSender();
   }
 
-  singleton = { config, store, sender };
+  const master =
+    config.storeKind === 'supabase' && config.inboundEnabled
+      ? tryCreateProdWaMasterRuntime(config, env)
+      : null;
+
+  singleton = { config, store, sender, master };
   return singleton;
 }
 

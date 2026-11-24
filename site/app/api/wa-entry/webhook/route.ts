@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { verifyWaEntryWebhook } from '../_lib/auth';
+import { loadWaEntryConfig } from '../_lib/config';
 import { processWaEntryEvent } from '../_lib/process';
 import { getWaEntryRuntime } from '../_lib/runtime';
 
@@ -32,16 +33,15 @@ function allowIp(ip: string, limit: number, nowMs: number): boolean {
 }
 
 /**
- * Isolated inbound webhook for the universal WhatsApp entry router.
+ * Inbound webhook for the universal WhatsApp entry router.
  *
  * Durable claim/process completes BEFORE HTTP 200 on accepted events.
- * Fail-closed flags. Isolated Preview sender never uses prod WA queue.
- *
- * DO NOT point ELMENUXFA1 here without explicit dual-dispatch / secondary-session auth.
+ * Fail-closed flags (inbound/router/real-send independent).
+ * Production: only enable after ELMENUXFA1 webhook backup + controlled cutover.
  */
 export async function POST(req: Request) {
-  const runtimeCtx = getWaEntryRuntime();
-  const { config } = runtimeCtx;
+  // Config-only first so auth works even if durable store init fails.
+  const config = loadWaEntryConfig();
   const nowMs = Date.now();
   const ip = clientIp(req);
 
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
   }
 
-  // Authenticate BEFORE kill-switch so forged requests never look like a soft ignore.
+  // Authenticate BEFORE kill-switch / store init so forged requests never look like soft ignore.
   const auth = verifyWaEntryWebhook({
     config,
     headers: req.headers,
@@ -70,20 +70,37 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
 
-  if (!config.inboundEnabled || !config.routerEnabled) {
+  // Inbound off: ACK without side effects. Router off still allows passive claim path.
+  if (!config.inboundEnabled) {
     return NextResponse.json(
       { ok: true, action: 'ignored', reason: 'kill_switch' },
       { status: 200 },
     );
   }
 
+  let runtimeCtx;
+  try {
+    runtimeCtx = getWaEntryRuntime();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'runtime_init_error';
+    console.error('[wa-entry] runtime_init', message.slice(0, 200));
+    return NextResponse.json(
+      { ok: false, error: 'runtime_init', reason: message.slice(0, 160) },
+      { status: 500 },
+    );
+  }
+
   try {
     // Persist (claim) + route + isolated outbound BEFORE ACK so provider retries on failure.
     const result = await processWaEntryEvent({
-      config,
+      config: runtimeCtx.config,
       store: runtimeCtx.store,
       sender: runtimeCtx.sender,
       rawBody,
+      masterMemoryStore: runtimeCtx.master?.memoryStore,
+      masterQuota: runtimeCtx.master?.quota,
+      masterIdentitySource: runtimeCtx.master?.identitySource ?? null,
+      masterLoadMenu: runtimeCtx.master?.loadMenu,
     });
 
     console.info('[wa-entry] processed', {
@@ -130,18 +147,33 @@ export async function POST(req: Request) {
   }
 }
 
-/** Health / readiness — no secrets, no side effects. */
+/** Health / readiness — no secrets, no store side effects. */
 export async function GET() {
-  const { config } = getWaEntryRuntime();
-  return NextResponse.json({
-    ok: true,
-    module: 'wa-entry',
-    inboundEnabled: config.inboundEnabled,
-    routerEnabled: config.routerEnabled,
-    adapter: config.adapter,
-    storeKind: config.storeKind,
-    previewProjectRef: config.storeKind === 'supabase_preview' ? config.previewProjectRef : null,
-    realWasenderEnabled: false,
-    webhookSecretConfigured: Boolean(config.webhookSecret),
-  });
+  try {
+    // Config-only: do not initialize Supabase store on health checks.
+    const config = loadWaEntryConfig();
+    return NextResponse.json({
+      ok: true,
+      module: 'wa-entry',
+      inboundEnabled: config.inboundEnabled,
+      routerEnabled: config.routerEnabled,
+      adapter: config.adapter,
+      storeKind: config.storeKind,
+      previewProjectRef:
+        config.storeKind === 'supabase_preview' ? config.previewProjectRef : null,
+      prodProjectRef: config.storeKind === 'supabase' ? config.prodProjectRef : null,
+      realWasenderEnabled: Boolean(
+        config.allowRealWasender && config.adapter === 'wasender',
+      ),
+      allowlistCount: config.allowlistDigits.length,
+      enforceAllowlist: config.enforceAllowlist,
+      webhookSecretConfigured: Boolean(config.webhookSecret),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'health_error';
+    return NextResponse.json(
+      { ok: false, module: 'wa-entry', error: message.slice(0, 160) },
+      { status: 500 },
+    );
+  }
 }

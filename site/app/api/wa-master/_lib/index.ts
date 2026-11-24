@@ -37,6 +37,7 @@ export { phonesMatchDigits, waMasterDigitsKey } from './phone';
 export { WA_MASTER_PERSONALITY, greetingForIdentity } from './personality';
 export {
   createMemoryWaMasterQuotaStore,
+  createSupabaseWaMasterQuotaStore,
   WaMasterQuotaError,
   waMasterQuotaMonth,
   type WaMasterQuotaStore,

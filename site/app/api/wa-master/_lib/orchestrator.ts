@@ -138,32 +138,6 @@ export async function runWaMasterOrchestrator(
     }
   }
 
-  let mode: WaMasterOrchestratorResult['mode'] = 'deterministic';
-  let agentError: string | undefined;
-  if (!input.forceDeterministic) {
-    const agent = await runWaMasterAgentNlu({
-      config,
-      text,
-      identity,
-      memory,
-      quota,
-      maxMonthlyRequests: deps.maxMonthlyGeminiRequests ?? 500,
-      forceSimulate: deps.forceSimulateAgent ?? !config.allowGemini,
-      forceFail: deps.forceAgentFail,
-    });
-    if (agent.error === 'quota_exhausted' || agent.error === 'gemini_forced_fail') {
-      agentError = agent.error;
-      mode = 'fallback';
-    } else if (agent.mode === 'simulate') {
-      mode = 'deterministic';
-    } else if (agent.mode === 'live_refused') {
-      mode = 'fallback';
-      agentError = agent.error;
-    } else {
-      mode = 'gemini';
-    }
-  }
-
   const authGate = deps.authGate ?? createMemoryWaMasterAuthGate();
   const discoveryCtx: WaMasterDiscoveryCtx = deps.discoveryCtx ?? { pageSize: 5 };
   const loadMenu = deps.loadMenu ?? defaultMenuLoader;
@@ -182,6 +156,11 @@ export async function runWaMasterOrchestrator(
         };
       }
     });
+
+  let mode: WaMasterOrchestratorResult['mode'] = 'deterministic';
+  let agentError: string | undefined;
+  let geminiHttpCalls = 0;
+  let liveCompose: string | null = null;
 
   let replies: string[] = [];
   let toolsUsed: string[] = [];
@@ -315,12 +294,67 @@ export async function runWaMasterOrchestrator(
     ];
   }
 
+  // Live Gemini polish (1 HTTP typical): natural wording grounded in specialist facts.
+  // Skipped for admin/auth and human escalate so gates stay deterministic.
+  const softForGemini =
+    !primary.startsWith('admin') &&
+    primary !== 'support.human' &&
+    !escalateHuman;
+  if (!input.forceDeterministic && softForGemini && replies.length) {
+    const factsBlock = replies.join('\n');
+    const agent = await runWaMasterAgentNlu({
+      config,
+      text: [
+        `Mensaje del usuario: ${text}`,
+        '',
+        'HECHOS VERIFICADOS (úsalos tal cual; no inventes restaurantes ni acciones completadas):',
+        factsBlock,
+        '',
+        'Escribe UNA respuesta breve y natural en español para WhatsApp basada solo en esos hechos.',
+      ].join('\n'),
+      identity,
+      memory,
+      quota,
+      maxMonthlyRequests: deps.maxMonthlyGeminiRequests ?? config.maxMonthlyGeminiRequests,
+      forceSimulate: deps.forceSimulateAgent ?? (!config.allowGemini || config.simulateAgent),
+      forceFail: deps.forceAgentFail,
+      enableTools: false,
+      maxHttpCalls: config.maxGeminiHttpPerTurn,
+      requestId: `wm_${messageId}`,
+    });
+    geminiHttpCalls = agent.geminiHttpCalls || 0;
+    if (agent.error === 'quota_exhausted' || agent.error === 'gemini_forced_fail') {
+      agentError = agent.error;
+      mode = 'fallback';
+    } else if (agent.mode === 'simulate') {
+      mode = mode === 'fallback' ? 'fallback' : 'deterministic';
+    } else if (agent.mode === 'live_refused') {
+      mode = 'fallback';
+      agentError = agent.error;
+    } else if (agent.mode === 'live' && agent.composedReply) {
+      mode = 'gemini';
+      liveCompose = agent.composedReply;
+      replies = [agent.composedReply];
+      toolsUsed = [...toolsUsed, 'gemini'];
+    } else if (agent.mode === 'fallback') {
+      mode = 'fallback';
+      agentError = agent.error || 'gemini_fallback';
+    }
+  } else if (!input.forceDeterministic && deps.forceAgentFail) {
+    // Preserve test hook when soft path skipped
+    mode = 'fallback';
+    agentError = 'gemini_forced_fail';
+  }
+
   if (agentError === 'quota_exhausted') {
     replies = [
       'Ahora mismo no puedo usar el modelo de IA (cuota del Asistente Maestro). Sigo con respuestas básicas. ' +
         (replies[0] || ''),
     ];
   }
+
+  void liveCompose;
+  void geminiHttpCalls;
 
   replies = replies.filter(Boolean).slice(0, config.maxRepliesPerTurn);
   if (!replies.length) {

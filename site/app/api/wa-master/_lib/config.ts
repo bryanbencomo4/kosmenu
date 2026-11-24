@@ -13,6 +13,8 @@ export type WaMasterConfig = {
   maxTurnsInPrompt: number;
   maxRepliesPerTurn: number;
   maxMonthlyGeminiRequests: number;
+  /** Hard cap of billable Gemini HTTP calls per Master turn (incl. retries). */
+  maxGeminiHttpPerTurn: number;
   profileTtlMs: number;
   memoryDataDir: string;
   consumerAssistantUrl: string;
@@ -45,7 +47,8 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     simulateAgent: envBool(env, 'PLATFORM_WA_MASTER_SIMULATE', true),
     maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', 12),
     maxRepliesPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_REPLIES', 2),
-    maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 500),
+    maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 200),
+    maxGeminiHttpPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_GEMINI_HTTP_PER_TURN', 2),
     profileTtlMs: envInt(env, 'PLATFORM_WA_MASTER_PROFILE_TTL_MS', 1000 * 60 * 60 * 24 * 180),
     memoryDataDir: envStr(env, 'PLATFORM_WA_MASTER_MEMORY_DIR', '.wa-master-local'),
     consumerAssistantUrl: envStr(

@@ -66,3 +66,92 @@ grant select, insert, update, delete on public.wa_master_turns to service_role;
 grant select, insert, update, delete on public.wa_master_quota to service_role;
 grant select, insert, update, delete on public.wa_master_quota_ledger to service_role;
 grant usage, select on all sequences in schema public to service_role;
+
+-- Atomic exclusive Master Gemini quota (never touches discovery_* counters).
+create or replace function public.wa_master_quota_reserve(
+  p_period_month text,
+  p_max_requests int
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cur int;
+begin
+  if p_max_requests is null or p_max_requests < 1 then
+    return false;
+  end if;
+  insert into public.wa_master_quota (period_month, requests, tokens_input, tokens_output, updated_at_ms)
+  values (p_period_month, 0, 0, 0, (extract(epoch from now()) * 1000)::bigint)
+  on conflict (period_month) do nothing;
+
+  select requests into cur
+  from public.wa_master_quota
+  where period_month = p_period_month
+  for update;
+
+  if cur >= p_max_requests then
+    return false;
+  end if;
+
+  update public.wa_master_quota
+  set requests = requests + 1,
+      updated_at_ms = (extract(epoch from now()) * 1000)::bigint
+  where period_month = p_period_month;
+  return true;
+end;
+$$;
+
+create or replace function public.wa_master_quota_record_tokens(
+  p_period_month text,
+  p_tokens_input bigint,
+  p_tokens_output bigint,
+  p_request_id text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_request_id is null or length(trim(p_request_id)) = 0 then
+    return false;
+  end if;
+
+  insert into public.wa_master_quota_ledger (request_id, period_month, reserved_at_ms, tokens_recorded_at_ms)
+  values (
+    p_request_id,
+    p_period_month,
+    (extract(epoch from now()) * 1000)::bigint,
+    null
+  )
+  on conflict (request_id) do nothing;
+
+  update public.wa_master_quota_ledger
+  set tokens_recorded_at_ms = (extract(epoch from now()) * 1000)::bigint
+  where request_id = p_request_id
+    and tokens_recorded_at_ms is null;
+
+  if not found then
+    -- Already recorded (idempotent) or insert race lost — treat as success.
+    return true;
+  end if;
+
+  insert into public.wa_master_quota (period_month, requests, tokens_input, tokens_output, updated_at_ms)
+  values (p_period_month, 0, 0, 0, (extract(epoch from now()) * 1000)::bigint)
+  on conflict (period_month) do nothing;
+
+  update public.wa_master_quota
+  set tokens_input = tokens_input + greatest(0, coalesce(p_tokens_input, 0)),
+      tokens_output = tokens_output + greatest(0, coalesce(p_tokens_output, 0)),
+      updated_at_ms = (extract(epoch from now()) * 1000)::bigint
+  where period_month = p_period_month;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.wa_master_quota_reserve(text, int) to service_role;
+grant execute on function public.wa_master_quota_record_tokens(text, bigint, bigint, text) to service_role;

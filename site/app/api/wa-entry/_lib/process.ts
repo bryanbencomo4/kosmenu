@@ -380,14 +380,16 @@ async function processMasterAssistantBranch(params: {
     };
   }
 
+  // Gemini / simulate flags come from process env (Vercel), not WaEntryConfig alone.
   const masterConfig = loadWaMasterConfig({
+    ...process.env,
     PLATFORM_WA_MASTER: config.masterAssistantEnabled ? '1' : '0',
     PLATFORM_WA_MASTER_SHADOW: config.masterAssistantShadow ? '1' : '0',
     PLATFORM_WA_CONSUMER_URL: config.consumerAssistantUrl,
     PLATFORM_WA_BUSINESS_LANDING_URL: config.businessLandingUrl,
     PLATFORM_WA_BUSINESS_REGISTER_URL: config.businessRegisterUrl,
     PLATFORM_WA_BUSINESS_MANAGE_URL: config.businessManageUrl,
-  } as unknown as NodeJS.ProcessEnv);
+  } as NodeJS.ProcessEnv);
 
   const memStore = params.masterMemoryStore ?? createMemoryWaMasterStore();
   const memory = await loadOrCreateMemory(
@@ -402,6 +404,8 @@ async function processMasterAssistantBranch(params: {
     await memStore.delete(event.fromDigits);
   }
 
+  // Production identity: live catalog only (no contract fixtures). Tests may inject catalog.
+  const hasLiveIdentity = Boolean(params.masterIdentitySource || params.masterIdentityCatalog?.length);
   const identity =
     params.masterIdentityCatalog && params.masterIdentityCatalog.length
       ? resolveWaMasterIdentity({
@@ -411,7 +415,7 @@ async function processMasterAssistantBranch(params: {
       : await loadWaMasterIdentity({
           fromDigits: event.fromDigits,
           source: params.masterIdentitySource ?? null,
-          includeFixtures: true,
+          includeFixtures: !hasLiveIdentity,
         });
 
   const orch = await runWaMasterOrchestrator(
@@ -433,7 +437,10 @@ async function processMasterAssistantBranch(params: {
       executeDiscovery:
         params.masterDiscoveryExecute ?? params.masterOrchestratorDeps?.executeDiscovery,
       loadMenu: params.masterLoadMenu ?? params.masterOrchestratorDeps?.loadMenu,
-      forceSimulateAgent: masterConfig.simulateAgent || !masterConfig.allowGemini,
+      maxMonthlyGeminiRequests: masterConfig.maxMonthlyGeminiRequests,
+      forceSimulateAgent:
+        params.masterOrchestratorDeps?.forceSimulateAgent ??
+        (masterConfig.simulateAgent || !masterConfig.allowGemini),
     },
   );
 
