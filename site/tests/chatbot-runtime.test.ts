@@ -3,7 +3,10 @@ import {
   getChatbotConfig,
   isChatbotRuntimeAllowed,
 } from '../app/api/chat/_lib/config';
-import { chatRequestSchema } from '../app/api/chat/_lib/schema';
+import {
+  chatRequestSchema,
+  sanitizeChatRequestMessages,
+} from '../app/api/chat/_lib/schema';
 import { buildChatbotWelcomeMessage } from '../app/_lib/chatbot-preview';
 
 describe('chatbot runtime gates', () => {
@@ -36,6 +39,20 @@ describe('chatbot runtime gates', () => {
 
   it('rejects body schema with empty messages', () => {
     expect(() => chatRequestSchema.parse({ messages: [] })).toThrow();
+  });
+
+  it('sanitizes empty onboarding TTS bubbles so the turn still parses', () => {
+    const cleaned = sanitizeChatRequestMessages({
+      messages: [
+        { role: 'assistant', text: '¡Hola!' },
+        { role: 'assistant', text: '' },
+        { role: 'assistant', text: '   ' },
+        { role: 'user', text: 'hola que productos hay ?' },
+      ],
+    });
+    const parsed = chatRequestSchema.parse(cleaned);
+    expect(parsed.messages).toHaveLength(2);
+    expect(parsed.messages[1]?.text).toMatch(/productos/i);
   });
 
   it('welcome copy is short and uses the restaurant name', () => {

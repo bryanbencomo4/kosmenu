@@ -2143,20 +2143,35 @@ export function ChatAssistantView({
                 !m.attachments.some((a) => a.kind === 'audio' && a.analysis)
               ),
           );
+        // Build model text first so empty onboarding TTS bubbles (text:'')
+        // can fall back to voiceTtsText, then drop anything still blank —
+        // otherwise chatRequestSchema rejects the whole turn as invalid_body.
+        const preparedHistory = apiHistory
+          .map((m) => {
+            const raw =
+              String(m.text || '').trim() ||
+              String(m.voiceTtsText || '').trim();
+            return { message: m, raw };
+          })
+          .filter((row) => row.raw.length > 0);
         let lastUserIdx = -1;
-        for (let i = apiHistory.length - 1; i >= 0; i--) {
-          if (apiHistory[i].role === 'user') {
+        for (let i = preparedHistory.length - 1; i >= 0; i--) {
+          if (preparedHistory[i].message.role === 'user') {
             lastUserIdx = i;
             break;
           }
         }
-        const apiMessages = apiHistory.map((m, i) => ({
-          role: m.role as 'user' | 'assistant',
+        const apiMessages = preparedHistory.map((row, i) => ({
+          role: row.message.role as 'user' | 'assistant',
           // Cited reply context applies to the LAST user message only.
           text:
-            i === lastUserIdx && m.replyTo
-              ? prefixTextWithReplyContext(m.text, m.replyTo, history)
-              : m.text,
+            i === lastUserIdx && row.message.replyTo
+              ? prefixTextWithReplyContext(
+                  row.raw,
+                  row.message.replyTo,
+                  history,
+                )
+              : row.raw,
         }));
 
         if (

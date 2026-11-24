@@ -94,6 +94,24 @@ export const chatRequestSchema = z.object({
 
 export type ChatRequestBody = z.infer<typeof chatRequestSchema>;
 
+/**
+ * Drop blank history rows before schema parse.
+ * Onboarding TTS bubbles use text:'' (audio-only UI) and must not fail the turn.
+ */
+export function sanitizeChatRequestMessages(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const body = raw as { messages?: unknown };
+  if (!Array.isArray(body.messages)) return raw;
+  return {
+    ...body,
+    messages: body.messages.filter((m) => {
+      if (!m || typeof m !== 'object') return false;
+      const text = String((m as { text?: unknown }).text ?? '').trim();
+      return text.length > 0;
+    }),
+  };
+}
+
 export function createSessionId(): string {
   const rand =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto

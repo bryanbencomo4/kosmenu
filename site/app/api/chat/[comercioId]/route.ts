@@ -28,6 +28,7 @@ import {
 } from '../_lib/quota';
 import {
   chatRequestSchema,
+  sanitizeChatRequestMessages,
   createRequestId,
   createSessionId,
 } from '../_lib/schema';
@@ -149,7 +150,7 @@ export async function POST(
   let body: z.infer<typeof chatRequestSchema>;
   try {
     const raw = await request.json();
-    body = chatRequestSchema.parse(raw);
+    body = chatRequestSchema.parse(sanitizeChatRequestMessages(raw));
   } catch {
     return publicError(400, 'invalid_body', 'Mensaje inválido. Intenta de nuevo.');
   }
