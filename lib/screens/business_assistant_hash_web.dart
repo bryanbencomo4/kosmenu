@@ -30,12 +30,13 @@ void scrubBusinessAssistantHandoffFromUrl() {
       uri.fragment.startsWith('h=') || uri.fragment.contains('h=');
   if (!qp.containsKey('h') && !hadHashHandoff) return;
   qp.remove('h');
+  // Uri.replace(queryParameters: null) keeps the old query — pass {} to clear.
   final cleaned = uri.replace(
-    queryParameters: qp.isEmpty ? null : qp,
+    queryParameters: qp,
     fragment: '',
   );
   final pathAndQuery = cleaned.hasQuery
       ? '${cleaned.path}?${cleaned.query}'
       : cleaned.path;
-  html.window.history.replaceState(null, '', pathAndQuery);
+  html.window.history.replaceState(null, '', pathAndQuery.isEmpty ? '/' : pathAndQuery);
 }
