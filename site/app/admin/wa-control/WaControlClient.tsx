@@ -50,13 +50,14 @@ type FilterKey = 'all' | 'unattended' | 'ai' | 'human' | 'pending' | 'closed';
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'Todas' },
   { key: 'unattended', label: 'Sin atender' },
-  { key: 'ai', label: 'Atendidas por IA' },
-  { key: 'human', label: 'Atención humana' },
+  { key: 'ai', label: 'IA' },
+  { key: 'human', label: 'Humana' },
   { key: 'pending', label: 'Pendientes' },
   { key: 'closed', label: 'Cerradas' },
 ];
 
 const THEME_VARS = chatThemeVars('dark');
+const CHAT_DOODLE_URL = '/chat/doodle-pattern.png';
 
 async function postAction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await fetch('/admin/api/wa-control', {
@@ -75,7 +76,7 @@ async function postAction(body: Record<string, unknown>): Promise<Record<string,
     const detail = [json.error, json.detail].filter(Boolean).join(' — ');
     const err = new Error(
       res.status === 401
-        ? 'Sesión expirada o no enviada. Recarga la página e inicia sesión de nuevo.'
+        ? 'Sesión expirada. Recarga e inicia sesión de nuevo.'
         : detail || `HTTP ${res.status}`,
     ) as Error & { payload?: Record<string, unknown> };
     err.payload = json;
@@ -140,21 +141,16 @@ export function WaControlClient() {
         fromDigits: selectedRef.current || undefined,
         afterMs: opts?.soft ? lastAfterMs.current || undefined : undefined,
       });
-      const list = (json.conversations as InboxConversation[]) || [];
-      setConversations(list);
+      setConversations((json.conversations as InboxConversation[]) || []);
       setGlobal((json.global as GlobalMute) || null);
-      if (json.conversation) {
-        setConversation(json.conversation as InboxConversation);
-      }
+      if (json.conversation) setConversation(json.conversation as InboxConversation);
       const msgs = (json.messages as InboxMessage[]) || [];
       if (opts?.soft && lastAfterMs.current) {
         if (msgs.length) {
           setMessages((prev) => {
             const seen = new Set(prev.map((m) => m.id));
             const merged = [...prev];
-            for (const m of msgs) {
-              if (!seen.has(m.id)) merged.push(m);
-            }
+            for (const m of msgs) if (!seen.has(m.id)) merged.push(m);
             return merged;
           });
           lastAfterMs.current = Math.max(lastAfterMs.current, ...msgs.map((m) => m.atMs));
@@ -192,9 +188,7 @@ export function WaControlClient() {
   }, [refresh]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      void refresh({ soft: true });
-    }, 4000);
+    const id = window.setInterval(() => void refresh({ soft: true }), 4000);
     return () => window.clearInterval(id);
   }, [refresh]);
 
@@ -223,10 +217,7 @@ export function WaControlClient() {
     if (!selected && action !== 'pause_all' && action !== 'resume_all') return;
     setBusy(true);
     try {
-      await postAction({
-        action,
-        ...(selected ? { fromDigits: selected } : {}),
-      });
+      await postAction({ action, ...(selected ? { fromDigits: selected } : {}) });
       await refresh();
       if (selected) await openConversation(selected);
       setError(null);
@@ -243,28 +234,19 @@ export function WaControlClient() {
     setBusy(true);
     setError(null);
     try {
-      const json = await postAction({
-        action: 'send_message',
-        fromDigits: selected,
-        text,
-      });
+      const json = await postAction({ action: 'send_message', fromDigits: selected, text });
       setComposer('');
-      if (json.message) {
-        setMessages((prev) => [...prev, json.message as InboxMessage]);
-      }
-      if (json.conversation) {
-        setConversation(json.conversation as InboxConversation);
-      }
+      if (json.message) setMessages((prev) => [...prev, json.message as InboxMessage]);
+      if (json.conversation) setConversation(json.conversation as InboxConversation);
       await refresh({ soft: true });
     } catch (e) {
       const err = e as Error & { payload?: Record<string, unknown> };
-      const payload = err.payload;
-      if (payload?.message) {
-        setMessages((prev) => [...prev, payload.message as InboxMessage]);
+      if (err.payload?.message) {
+        setMessages((prev) => [...prev, err.payload!.message as InboxMessage]);
         setComposer('');
       }
-      if (payload?.conversation) {
-        setConversation(payload.conversation as InboxConversation);
+      if (err.payload?.conversation) {
+        setConversation(err.payload.conversation as InboxConversation);
       }
       setError(String(err.message || e));
     } finally {
@@ -276,37 +258,36 @@ export function WaControlClient() {
     <div
       data-testid="wa-inbox-root"
       data-chat-theme="dark"
-      className="flex h-[calc(100dvh-7.5rem)] min-h-[520px] overflow-hidden rounded-xl border shadow-[0_18px_50px_-32px_rgba(0,0,0,0.55)]"
+      className="flex h-full min-h-0 w-full overflow-hidden"
       style={{
         ...THEME_VARS,
         backgroundColor: 'var(--chat-card)',
         color: 'var(--chat-text)',
-        borderColor: 'var(--chat-card-border)',
       }}
     >
-      {/* Left: conversations */}
+      {/* List */}
       <aside
-        className={`flex w-full flex-col border-r md:w-[340px] lg:w-[380px] ${
+        className={`flex min-h-0 w-full flex-col border-r md:w-[320px] lg:w-[360px] xl:w-[380px] ${
           mobileShowThread && selected ? 'hidden md:flex' : 'flex'
         }`}
-        style={{ borderColor: 'var(--chat-card-border)' }}
+        style={{ borderColor: 'var(--chat-card-border)', backgroundColor: 'var(--chat-card)' }}
         data-testid="wa-inbox-list"
       >
         <div
-          className="border-b px-4 py-3"
+          className="shrink-0 border-b px-3 py-2.5"
           style={{
             backgroundColor: 'var(--chat-header)',
             borderColor: 'var(--chat-header-border)',
           }}
         >
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-[17px] font-semibold">Bandeja WhatsApp</h2>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-[16px] font-semibold">Chats</h2>
             <button
               type="button"
               disabled={busy}
               data-testid="wa-global-mute"
               onClick={() => runControl(muted ? 'resume_all' : 'pause_all')}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50"
               style={{
                 backgroundColor: muted
                   ? 'color-mix(in srgb, #f59e0b 28%, var(--chat-input))'
@@ -315,7 +296,7 @@ export function WaControlClient() {
               }}
             >
               {muted ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-              {muted ? 'Reanudar IA' : 'Pausar IA'}
+              {muted ? 'Reanudar' : 'Pausar IA'}
             </button>
           </div>
           <input
@@ -323,20 +304,19 @@ export function WaControlClient() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Buscar contacto o teléfono"
             data-testid="wa-inbox-search"
-            className="mb-3 w-full rounded-lg border px-3 py-2 text-[14px] outline-none"
+            className="mb-2 w-full rounded-lg px-3 py-2 text-[14px] outline-none"
             style={{
-              borderColor: 'var(--chat-card-border)',
               backgroundColor: 'var(--chat-input)',
               color: 'var(--chat-text)',
             }}
           />
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
                 onClick={() => setFilter(f.key)}
-                className="rounded-full px-2.5 py-1 text-[11.5px] font-medium"
+                className="shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium"
                 style={{
                   backgroundColor:
                     filter === f.key
@@ -350,13 +330,14 @@ export function WaControlClient() {
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--chat-card)' }}>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {conversations.length === 0 ? (
             <p
               className="px-4 py-16 text-center text-[14px]"
               style={{ color: 'var(--chat-text-muted)' }}
             >
-              Sin conversaciones aún. Los mensajes entrantes aparecerán aquí.
+              Sin conversaciones aún.
             </p>
           ) : (
             conversations.map((c) => {
@@ -368,47 +349,34 @@ export function WaControlClient() {
                   type="button"
                   data-testid={`wa-conv-${c.fromDigits}`}
                   onClick={() => void openConversation(c.fromDigits)}
-                  className="flex w-full gap-3 border-b px-3 py-3 text-left transition"
+                  className="flex w-full gap-3 border-b px-3 py-3 text-left"
                   style={{
                     borderColor: 'var(--chat-card-border)',
                     backgroundColor: active
-                      ? 'color-mix(in srgb, var(--chat-send) 12%, var(--chat-card))'
+                      ? 'color-mix(in srgb, var(--chat-send) 14%, var(--chat-card))'
                       : 'transparent',
                   }}
                 >
                   <div
                     className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[17px] font-semibold"
-                    style={{
-                      backgroundColor: 'var(--chat-input)',
-                      color: 'var(--chat-text)',
-                    }}
+                    style={{ backgroundColor: 'var(--chat-input)', color: 'var(--chat-text)' }}
                   >
                     {(c.displayName || c.fromDigits).slice(0, 1).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      <p
-                        className={`truncate text-[16px] ${unread ? 'font-semibold' : 'font-medium'}`}
-                      >
+                      <p className={`truncate text-[15.5px] ${unread ? 'font-semibold' : 'font-medium'}`}>
                         {contactTitle(c)}
                       </p>
                       <span
                         className="shrink-0 text-[12px] tabular-nums"
-                        style={{
-                          color: unread ? 'var(--chat-send)' : 'var(--chat-text-muted)',
-                        }}
+                        style={{ color: unread ? 'var(--chat-send)' : 'var(--chat-text-muted)' }}
                       >
                         {formatTime(c.lastMessageAtMs)}
                       </span>
                     </div>
-                    <p className="truncate text-[12.5px]" style={{ color: 'var(--chat-text-muted)' }}>
-                      +{c.fromDigits}
-                    </p>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <p
-                        className="truncate text-[13.5px]"
-                        style={{ color: 'var(--chat-text-muted)' }}
-                      >
+                      <p className="truncate text-[13.5px]" style={{ color: 'var(--chat-text-muted)' }}>
                         {c.lastMessageText || '—'}
                       </p>
                       {unread ? (
@@ -420,12 +388,8 @@ export function WaControlClient() {
                         </span>
                       ) : null}
                     </div>
-                    <p
-                      className="mt-0.5 text-[11.5px]"
-                      style={{ color: 'var(--chat-text-muted)' }}
-                    >
+                    <p className="mt-0.5 text-[11.5px]" style={{ color: 'var(--chat-text-muted)' }}>
                       {statusLabel(c)}
-                      {c.assignedOperatorLabel ? ` · ${c.assignedOperatorLabel}` : ''}
                     </p>
                   </div>
                 </button>
@@ -435,27 +399,25 @@ export function WaControlClient() {
         </div>
       </aside>
 
-      {/* Center: thread */}
+      {/* Thread */}
       <section
-        className={`min-w-0 flex-1 flex-col ${
+        className={`relative min-h-0 min-w-0 flex-1 flex-col ${
           mobileShowThread && selected ? 'flex' : 'hidden md:flex'
         }`}
         data-testid="wa-inbox-thread"
+        style={{ backgroundColor: 'var(--chat-bg)' }}
       >
         {!selected ? (
           <div
             className="flex flex-1 items-center justify-center p-8 text-center text-[14px]"
-            style={{
-              backgroundColor: 'var(--chat-bg)',
-              color: 'var(--chat-text-muted)',
-            }}
+            style={{ color: 'var(--chat-text-muted)' }}
           >
-            Selecciona una conversación para atenderla.
+            Selecciona una conversación
           </div>
         ) : (
           <>
             <header
-              className="flex items-center gap-3 border-b px-3 py-2.5"
+              className="relative z-10 flex shrink-0 items-center gap-2 border-b px-2 py-2 sm:gap-3 sm:px-3"
               style={{
                 backgroundColor: 'var(--chat-header)',
                 borderColor: 'var(--chat-header-border)',
@@ -463,32 +425,37 @@ export function WaControlClient() {
             >
               <button
                 type="button"
-                className="rounded-lg px-2 py-1 text-sm md:hidden"
-                style={{ color: 'var(--chat-text-muted)' }}
+                className="rounded-lg px-2 py-1 text-[15px] md:hidden"
+                style={{ color: 'var(--chat-text)' }}
                 onClick={() => setMobileShowThread(false)}
+                aria-label="Volver"
               >
                 ←
               </button>
+              <div
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[15px] font-semibold"
+                style={{ backgroundColor: 'var(--chat-input)' }}
+              >
+                {(conversation ? contactTitle(conversation) : selected).slice(0, 1).toUpperCase()}
+              </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[16px] font-semibold">
+                <p className="truncate text-[15.5px] font-semibold">
                   {conversation ? contactTitle(conversation) : `+${selected}`}
                 </p>
-                <p className="truncate text-[12.5px]" style={{ color: 'var(--chat-text-muted)' }}>
-                  +{selected}
-                  {conversation ? ` · ${statusLabel(conversation)}` : ''}
+                <p className="truncate text-[12px]" style={{ color: 'var(--chat-text-muted)' }}>
+                  {conversation ? statusLabel(conversation) : `+${selected}`}
+                  {conversation?.assignedOperatorLabel
+                    ? ` · ${conversation.assignedOperatorLabel}`
+                    : ''}
                 </p>
               </div>
-              {primaryControl?.kind === 'closed' ? (
-                <span className="text-[12px]" style={{ color: 'var(--chat-text-muted)' }}>
-                  Cerrada · historial conservado
-                </span>
-              ) : (
+              {primaryControl?.kind !== 'closed' ? (
                 <button
                   type="button"
                   disabled={busy}
                   data-testid="wa-close"
                   onClick={() => runControl('close')}
-                  className="rounded-full px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
+                  className="rounded-full px-2.5 py-1.5 text-[12px] font-medium disabled:opacity-50"
                   style={{
                     color: 'var(--chat-text-muted)',
                     backgroundColor: 'color-mix(in srgb, var(--chat-text) 8%, transparent)',
@@ -496,13 +463,12 @@ export function WaControlClient() {
                 >
                   Cerrar
                 </button>
-              )}
+              ) : null}
             </header>
 
-            {/* Staff bar — same pattern as panel supervision */}
             {primaryControl?.kind === 'ai' || primaryControl?.kind === 'pending' ? (
               <div
-                className="shrink-0 border-b px-3 py-2.5"
+                className="relative z-10 shrink-0 border-b px-3 py-2"
                 style={{
                   backgroundColor: 'var(--chat-header)',
                   borderColor: 'var(--chat-header-border)',
@@ -513,127 +479,119 @@ export function WaControlClient() {
                   disabled={busy}
                   data-testid="wa-take"
                   onClick={() => runControl('take')}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2.5 rounded-full px-4 text-[14px] font-semibold tracking-tight disabled:opacity-50"
-                  style={{
-                    backgroundColor: 'var(--chat-send)',
-                    color: 'var(--chat-send-fg)',
-                  }}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-full px-4 text-[14px] font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--chat-send)', color: 'var(--chat-send-fg)' }}
                 >
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/20">
-                    <Headphones className="h-4 w-4" strokeWidth={2.25} />
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/20">
+                    <Headphones className="h-3.5 w-3.5" strokeWidth={2.25} />
                   </span>
                   Atender personalmente
                 </button>
               </div>
             ) : null}
+
             {primaryControl?.kind === 'human' ? (
               <div
-                className="shrink-0 border-b px-3 py-2.5"
+                className="relative z-10 shrink-0 border-b px-3 py-2"
                 style={{
                   backgroundColor: 'var(--chat-header)',
                   borderColor: 'var(--chat-header-border)',
                 }}
               >
-                <p
-                  data-testid="wa-attending-label"
-                  className="mb-2 text-center text-[12px] font-medium"
-                  style={{ color: 'var(--chat-text-muted)' }}
-                >
-                  Atendiendo: {primaryControl.label}
-                </p>
                 <button
                   type="button"
                   disabled={busy}
                   data-testid="wa-return"
                   onClick={() => runControl('return')}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-3 text-[13px] font-semibold disabled:opacity-50"
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-full px-3 text-[13px] font-semibold disabled:opacity-50"
                   style={{
-                    backgroundColor:
-                      'color-mix(in srgb, var(--chat-send) 14%, var(--chat-input))',
+                    backgroundColor: 'color-mix(in srgb, var(--chat-send) 14%, var(--chat-input))',
                     color: 'var(--chat-text)',
                   }}
                 >
                   <span
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full"
                     style={{
-                      backgroundColor:
-                        'color-mix(in srgb, var(--chat-send) 22%, transparent)',
+                      backgroundColor: 'color-mix(in srgb, var(--chat-send) 22%, transparent)',
                       color: 'var(--chat-send)',
                     }}
                   >
-                    <Bot className="h-4 w-4" strokeWidth={2.25} />
+                    <Bot className="h-3.5 w-3.5" strokeWidth={2.25} />
                   </span>
                   Devolver al asistente
                 </button>
               </div>
             ) : null}
 
-            <div
-              className="flex-1 space-y-1.5 overflow-y-auto px-3 py-3"
-              style={{
-                backgroundColor: 'var(--chat-bg)',
-                backgroundImage:
-                  'radial-gradient(var(--chat-pattern) 1.2px, transparent 1.2px)',
-                backgroundSize: '18px 18px',
-              }}
-            >
-              {messages.map((m) => {
-                const mine = m.role === 'assistant' || m.role === 'operator';
-                if (m.role === 'system') {
+            <div className="relative min-h-0 flex-1">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-0"
+                style={{
+                  backgroundImage: `url('${CHAT_DOODLE_URL}')`,
+                  backgroundRepeat: 'repeat',
+                  backgroundPosition: 'top center',
+                  backgroundSize: '420px auto',
+                  opacity: 0.07,
+                }}
+              />
+              <div className="relative z-[1] flex h-full flex-col space-y-1.5 overflow-y-auto overscroll-contain px-2 py-3 sm:px-4">
+                {messages.map((m) => {
+                  const mine = m.role === 'assistant' || m.role === 'operator';
+                  if (m.role === 'system') {
+                    return (
+                      <div key={m.id} className="flex justify-center py-1">
+                        <span
+                          className="max-w-[92%] rounded-md px-3 py-1 text-center text-[11.5px] shadow-sm"
+                          style={{
+                            backgroundColor: 'var(--chat-system)',
+                            color: 'var(--chat-text-muted)',
+                          }}
+                        >
+                          {m.text}
+                        </span>
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={m.id} className="flex justify-center py-1">
-                      <span
-                        className="max-w-[90%] rounded-md px-3 py-1 text-center text-[11.5px]"
+                    <div
+                      key={m.id}
+                      className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
+                      data-testid={`wa-msg-${m.role}`}
+                    >
+                      <div
+                        className={`max-w-[88%] px-2.5 py-1.5 text-[14.5px] shadow-sm sm:max-w-[75%] ${
+                          mine ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md'
+                        }`}
                         style={{
-                          backgroundColor: 'var(--chat-system)',
-                          color: 'var(--chat-text-muted)',
+                          backgroundColor: mine ? 'var(--chat-bubble-out)' : 'var(--chat-bubble-in)',
+                          color: 'var(--chat-text)',
                         }}
                       >
-                        {m.text}
-                      </span>
-                    </div>
-                  );
-                }
-                return (
-                  <div
-                    key={m.id}
-                    className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
-                    data-testid={`wa-msg-${m.role}`}
-                  >
-                    <div
-                      className={`max-w-[85%] px-2.5 py-1.5 text-[14.5px] shadow-sm ${
-                        mine ? 'rounded-xl rounded-br-sm' : 'rounded-xl rounded-bl-sm'
-                      }`}
-                      style={{
-                        backgroundColor: mine
-                          ? 'var(--chat-bubble-out)'
-                          : 'var(--chat-bubble-in)',
-                        color: 'var(--chat-text)',
-                      }}
-                    >
-                      <p className="whitespace-pre-wrap break-words leading-snug">{m.text}</p>
-                      <div
-                        className="mt-0.5 flex items-center justify-end gap-1.5 text-[10.5px]"
-                        style={{ color: 'var(--chat-text-muted)' }}
-                      >
-                        <span>
-                          {m.role === 'contact'
-                            ? 'Cliente'
-                            : m.role === 'assistant'
-                              ? 'Asistente'
-                              : m.operatorLabel || 'Operador'}
-                        </span>
-                        <span>{formatTime(m.atMs)}</span>
+                        <p className="whitespace-pre-wrap break-words leading-snug">{m.text}</p>
+                        <div
+                          className="mt-0.5 flex items-center justify-end gap-1.5 text-[10.5px]"
+                          style={{ color: 'var(--chat-text-muted)' }}
+                        >
+                          <span>
+                            {m.role === 'contact'
+                              ? 'Cliente'
+                              : m.role === 'assistant'
+                                ? 'Asistente'
+                                : m.operatorLabel || 'Tú'}
+                          </span>
+                          <span>{formatTime(m.atMs)}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-              <div ref={threadEndRef} />
+                  );
+                })}
+                <div ref={threadEndRef} />
+              </div>
             </div>
 
             <footer
-              className="border-t px-2 py-2"
+              className="relative z-10 shrink-0 border-t px-2 py-2"
               style={{
                 backgroundColor: 'var(--chat-composer)',
                 borderColor: 'var(--chat-header-border)',
@@ -646,11 +604,8 @@ export function WaControlClient() {
                   rows={1}
                   placeholder="Escribe un mensaje"
                   data-testid="wa-composer"
-                  className="max-h-28 min-h-[44px] flex-1 resize-none rounded-2xl border-0 px-3.5 py-2.5 text-[15px] outline-none"
-                  style={{
-                    backgroundColor: 'var(--chat-input)',
-                    color: 'var(--chat-text)',
-                  }}
+                  className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[1.5rem] border-0 px-4 py-2.5 text-[15px] outline-none"
+                  style={{ backgroundColor: 'var(--chat-input)', color: 'var(--chat-text)' }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -665,16 +620,13 @@ export function WaControlClient() {
                   onClick={() => void sendMessage()}
                   aria-label="Enviar"
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-full disabled:opacity-40"
-                  style={{
-                    backgroundColor: 'var(--chat-send)',
-                    color: 'var(--chat-send-fg)',
-                  }}
+                  style={{ backgroundColor: 'var(--chat-send)', color: 'var(--chat-send-fg)' }}
                 >
                   <SendHorizontal className="h-5 w-5" strokeWidth={2.25} />
                 </button>
               </div>
               {error ? (
-                <p className="mt-2 px-1 text-[12.5px] text-red-400" role="alert">
+                <p className="mt-1.5 px-1 text-[12.5px] text-red-400" role="alert">
                   {error}
                 </p>
               ) : null}
@@ -683,9 +635,9 @@ export function WaControlClient() {
         )}
       </section>
 
-      {/* Right: contact info */}
+      {/* Contact panel — desktop only */}
       <aside
-        className="hidden w-[280px] flex-col border-l lg:flex"
+        className="hidden min-h-0 w-[260px] shrink-0 flex-col border-l xl:flex"
         style={{
           borderColor: 'var(--chat-card-border)',
           backgroundColor: 'var(--chat-header)',
@@ -693,67 +645,43 @@ export function WaControlClient() {
         data-testid="wa-inbox-sidebar"
       >
         <div
-          className="border-b px-4 py-3"
+          className="shrink-0 border-b px-4 py-3"
           style={{ borderColor: 'var(--chat-header-border)' }}
         >
           <h3 className="text-[14px] font-semibold">Contacto</h3>
         </div>
         {conversation ? (
-          <div className="space-y-4 overflow-y-auto px-4 py-4 text-[14px]">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-[14px]">
             <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--chat-text-muted)' }}>
                 Nombre
               </p>
               <p className="font-medium">{contactTitle(conversation)}</p>
             </div>
             <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--chat-text-muted)' }}>
                 Teléfono
               </p>
               <p className="font-medium">+{conversation.fromDigits}</p>
             </div>
             <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--chat-text-muted)' }}>
                 Estado
               </p>
               <p className="font-medium">{statusLabel(conversation)}</p>
             </div>
             <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--chat-text-muted)' }}>
                 Responsable
               </p>
               <p className="font-medium">{conversation.assignedOperatorLabel || '—'}</p>
             </div>
             <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
-                Rol contextual
-              </p>
-              <p className="font-medium">{conversation.contextRole || '—'}</p>
-            </div>
-            <div>
-              <p
-                className="text-[11px] uppercase tracking-wide"
-                style={{ color: 'var(--chat-text-muted)' }}
-              >
-                Notas / contexto
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--chat-text-muted)' }}>
+                Notas
               </p>
               <p className="whitespace-pre-wrap" style={{ color: 'var(--chat-text-muted)' }}>
-                {conversation.contextNote || 'Sin notas internas.'}
+                {conversation.contextNote || 'Sin notas.'}
               </p>
             </div>
           </div>

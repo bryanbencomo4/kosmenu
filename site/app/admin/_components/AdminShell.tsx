@@ -7,6 +7,8 @@ import type { CurrentAdmin } from '../_lib/admin-auth';
 import { AdminSidebar } from './AdminSidebar';
 import { AdminTopbar } from './AdminTopbar';
 
+const SIDEBAR_COLLAPSED_KEY = 'elmenuxfa:admin-sidebar-collapsed';
+
 export function AdminShell({
   admin,
   children,
@@ -16,10 +18,24 @@ export function AdminShell({
 }) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const isWaInbox =
+    pathname === '/admin/wa-control' ||
+    pathname === '/wa-control' ||
+    pathname.endsWith('/wa-control');
 
   useEffect(() => {
     setMobileNavOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    try {
+      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -30,12 +46,35 @@ export function AdminShell({
     };
   }, [mobileNavOpen]);
 
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#f7f5ff_0%,#f2f4ff_45%,#eef2ff_100%)] text-slate-900">
-      <div className="lg:grid lg:min-h-screen lg:grid-cols-[280px_minmax(0,1fr)]">
+    <div className="min-h-dvh bg-[linear-gradient(180deg,#f7f5ff_0%,#f2f4ff_45%,#eef2ff_100%)] text-slate-900">
+      <div
+        className={[
+          'lg:grid lg:min-h-dvh',
+          sidebarCollapsed
+            ? 'lg:grid-cols-[72px_minmax(0,1fr)]'
+            : 'lg:grid-cols-[280px_minmax(0,1fr)]',
+        ].join(' ')}
+      >
         {/* Desktop sidebar */}
         <div className="hidden lg:block">
-          <AdminSidebar admin={admin} />
+          <AdminSidebar
+            admin={admin}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebarCollapsed}
+          />
         </div>
 
         {/* Mobile drawer */}
@@ -64,12 +103,26 @@ export function AdminShell({
           </div>
         </div>
 
-        <div className="min-w-0">
+        <div
+          className={[
+            'min-w-0',
+            isWaInbox ? 'flex h-dvh flex-col overflow-hidden lg:h-screen' : '',
+          ].join(' ')}
+        >
           <AdminTopbar
             admin={admin}
             onOpenMenu={() => setMobileNavOpen(true)}
+            onToggleSidebar={toggleSidebarCollapsed}
+            sidebarCollapsed={sidebarCollapsed}
+            compact={isWaInbox}
           />
-          <main className="px-3 pb-6 pt-3 sm:px-6 sm:pb-8 sm:pt-4 lg:px-8">
+          <main
+            className={
+              isWaInbox
+                ? 'min-h-0 flex-1 overflow-hidden p-0'
+                : 'px-3 pb-6 pt-3 sm:px-6 sm:pb-8 sm:pt-4 lg:px-8'
+            }
+          >
             {children}
           </main>
         </div>
