@@ -42,29 +42,23 @@ export async function applyConversationPresence(input: {
     );
   }
 
-  // Persist when columns exist; otherwise in-memory + broadcast still work.
-  if (!isSupervisionMemoryEnabled()) {
+  // Persist durable presence only (read receipts). Typing is ephemeral and
+  // already delivered via broadcast — writing typing to chat_conversations
+  // storms Realtime and made the merchant inbox reload in a tight loop.
+  if (
+    !isSupervisionMemoryEnabled() &&
+    typeof input.readUpToSeq === 'number' &&
+    Number.isFinite(input.readUpToSeq)
+  ) {
     try {
       const sb = getServiceSupabaseClient();
       const patch: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
       };
-      if (typeof input.typing === 'boolean') {
-        const until = input.typing
-          ? new Date(Date.now() + TYPING_TTL_MS).toISOString()
-          : null;
-        if (input.party === 'consumer') patch.consumer_typing_until = until;
-        else patch.staff_typing_until = until;
-      }
-      if (
-        typeof input.readUpToSeq === 'number' &&
-        Number.isFinite(input.readUpToSeq)
-      ) {
-        if (input.party === 'consumer') {
-          patch.consumer_last_read_seq = state.consumerLastReadSeq;
-        } else {
-          patch.staff_last_read_seq = state.staffLastReadSeq;
-        }
+      if (input.party === 'consumer') {
+        patch.consumer_last_read_seq = state.consumerLastReadSeq;
+      } else {
+        patch.staff_last_read_seq = state.staffLastReadSeq;
       }
       await sb
         .from('chat_conversations')

@@ -17,7 +17,8 @@ export const runtime = 'nodejs';
  */
 export async function GET(request: Request) {
   const ip = getClientIp(request);
-  const limit = consumeRateLimit(`panel:chat:list:${ip}`, 60, 60_000);
+  // Inbox uses coalesced Realtime + poll; keep headroom for multi-tab staff.
+  const limit = consumeRateLimit(`panel:chat:list:${ip}`, 120, 60_000);
   if (!limit.ok) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }

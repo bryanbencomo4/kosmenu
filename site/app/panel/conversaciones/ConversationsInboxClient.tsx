@@ -1,10 +1,14 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import { commerceChatChannelName } from '../../_lib/chat-supervision-realtime';
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
 import { chatThemeVars } from '../../v/[id]/_components/chat/chat-theme';
+import {
+  isInboxListRelevantConversationChange,
+  shouldReloadInboxFromBroadcast,
+} from '../_lib/inbox-list-refresh';
 import { usePanelSession } from '../_lib/usePanelSession';
 
 type ConversationRow = {
@@ -105,6 +109,14 @@ function ConversationsInboxInner({
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const inFlightRef = useRef(false);
+  const queuedRef = useRef(false);
+  const debounceTimerRef = useRef<number | null>(null);
+  const backoffUntilRef = useRef(0);
+  const pollMsRef = useRef(20_000);
+  const loadInboxRef = useRef<(opts?: { force?: boolean }) => Promise<void>>(
+    async () => undefined,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -156,39 +168,96 @@ function ConversationsInboxInner({
     };
   }, [ready, token]);
 
-  const loadInbox = useCallback(async () => {
-    if (!token || !comercioId.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      window.sessionStorage.setItem('elmenuxfa:panel-comercio', comercioId.trim());
-    } catch {
-      /* ignore */
-    }
-    const res = await fetch(
-      `/api/panel/conversaciones?comercioId=${encodeURIComponent(comercioId.trim())}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      },
-    );
-    const data = await res.json().catch(() => ({}));
-    setLoading(false);
-    if (!res.ok) {
-      setError(
-        res.status === 401
-          ? 'Sesión expirada. Vuelve a iniciar sesión.'
-          : String(data.error || 'No se pudo cargar la bandeja'),
-      );
-      setRows([]);
+  const loadInbox = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!token || !comercioId.trim()) return;
+      if (!opts?.force && Date.now() < backoffUntilRef.current) {
+        queuedRef.current = true;
+        return;
+      }
+      if (inFlightRef.current) {
+        queuedRef.current = true;
+        return;
+      }
+      inFlightRef.current = true;
+      queuedRef.current = false;
+      setLoading(true);
+      try {
+        window.sessionStorage.setItem(
+          'elmenuxfa:panel-comercio',
+          comercioId.trim(),
+        );
+      } catch {
+        /* ignore */
+      }
+      try {
+        const res = await fetch(
+          `/api/panel/conversaciones?comercioId=${encodeURIComponent(comercioId.trim())}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+          },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 429) {
+            // Keep current rows — clearing caused the show/hide flicker loop.
+            backoffUntilRef.current = Date.now() + 15_000;
+            pollMsRef.current = Math.min(60_000, pollMsRef.current * 2);
+            setError(
+              'Demasiadas actualizaciones. Reintentando en unos segundos…',
+            );
+            return;
+          }
+          setError(
+            res.status === 401
+              ? 'Sesión expirada. Vuelve a iniciar sesión.'
+              : String(data.error || 'No se pudo cargar la bandeja'),
+          );
+          if (res.status === 401) setRows([]);
+          return;
+        }
+        backoffUntilRef.current = 0;
+        pollMsRef.current = 20_000;
+        setError(null);
+        setRows(prioritizeConversations(data.conversations || []));
+      } finally {
+        inFlightRef.current = false;
+        setLoading(false);
+        if (queuedRef.current) {
+          queuedRef.current = false;
+          window.setTimeout(() => {
+            void loadInboxRef.current({ force: true });
+          }, 750);
+        }
+      }
+    },
+    [token, comercioId],
+  );
+
+  loadInboxRef.current = loadInbox;
+
+  const scheduleInboxReload = useCallback((opts?: { immediate?: boolean }) => {
+    if (opts?.immediate) {
+      if (debounceTimerRef.current) {
+        window.clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      void loadInboxRef.current({ force: true });
       return;
     }
-    setRows(prioritizeConversations(data.conversations || []));
-  }, [token, comercioId]);
+    if (debounceTimerRef.current) window.clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = window.setTimeout(() => {
+      debounceTimerRef.current = null;
+      void loadInboxRef.current();
+    }, 1200);
+  }, []);
 
   useEffect(() => {
-    if (ready && token && comercioId.trim()) void loadInbox();
-  }, [ready, token, comercioId, loadInbox]);
+    if (ready && token && comercioId.trim()) {
+      scheduleInboxReload({ immediate: true });
+    }
+  }, [ready, token, comercioId, scheduleInboxReload]);
 
   useEffect(() => {
     if (!token || !comercioId.trim()) return;
@@ -205,32 +274,59 @@ function ConversationsInboxInner({
           table: 'chat_conversations',
           filter: `comercio_id=eq.${cid}`,
         },
-        () => {
-          void loadInbox();
+        (payload) => {
+          const eventType = String(
+            (payload as { eventType?: string }).eventType ||
+              (payload as { event?: string }).event ||
+              '',
+          );
+          if (
+            !isInboxListRelevantConversationChange(
+              eventType,
+              (payload.new || null) as Record<string, unknown> | null,
+              (payload.old || null) as Record<string, unknown> | null,
+            )
+          ) {
+            return;
+          }
+          scheduleInboxReload();
         },
       )
       .subscribe();
 
     const hint = sb
       .channel(commerceChatChannelName(cid))
-      .on('broadcast', { event: 'chat' }, () => {
-        void loadInbox();
+      .on('broadcast', { event: 'chat' }, (msg) => {
+        const payload = (msg?.payload || {}) as Record<string, unknown>;
+        if (!shouldReloadInboxFromBroadcast(payload)) return;
+        scheduleInboxReload();
       })
       .subscribe();
 
     return () => {
+      if (debounceTimerRef.current) {
+        window.clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
       void sb.removeChannel(channel);
       void sb.removeChannel(hint);
     };
-  }, [token, comercioId, loadInbox]);
+  }, [token, comercioId, scheduleInboxReload]);
 
   useEffect(() => {
     if (!token || !comercioId.trim()) return;
-    const id = window.setInterval(() => {
-      void loadInbox();
-    }, 20_000);
-    return () => window.clearInterval(id);
-  }, [token, comercioId, loadInbox]);
+    let timer: number | null = null;
+    const tick = () => {
+      if (document.visibilityState === 'visible') {
+        void loadInboxRef.current();
+      }
+      timer = window.setTimeout(tick, pollMsRef.current);
+    };
+    timer = window.setTimeout(tick, pollMsRef.current);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [token, comercioId]);
 
   if (!ready) {
     return (
@@ -291,7 +387,7 @@ function ConversationsInboxInner({
               backgroundColor: 'color-mix(in srgb, var(--chat-text) 8%, transparent)',
             }}
             disabled={!token || !comercioId.trim() || loading}
-            onClick={() => void loadInbox()}
+            onClick={() => scheduleInboxReload({ immediate: true })}
           >
             {loading ? '…' : 'Actualizar'}
           </button>
