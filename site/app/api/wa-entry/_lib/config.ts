@@ -31,6 +31,11 @@ export type WaEntryConfig = {
   masterAssistantEnabled: boolean;
   /** Run Master path but caller should suppress outbound (shadow). */
   masterAssistantShadow: boolean;
+  /**
+   * Pilot gate: Master only for these digits when Master is enabled.
+   * Fail-closed: empty list ⇒ nobody receives Master (classic router for all).
+   */
+  masterAllowlistDigits: string[];
   adapter: WaEntryAdapterKind;
   storeKind: WaEntryStoreKind;
   webhookSecret: string;
@@ -120,6 +125,9 @@ export function loadWaEntryConfig(env: NodeJS.ProcessEnv = process.env): WaEntry
     pollSendEnabled: envBool(env, 'PLATFORM_WA_POLL_SEND', false),
     masterAssistantEnabled: envBool(env, 'PLATFORM_WA_MASTER', false),
     masterAssistantShadow: envBool(env, 'PLATFORM_WA_MASTER_SHADOW', false),
+    masterAllowlistDigits: parseAllowlist(
+      envStr(env, 'PLATFORM_WA_MASTER_ALLOWLIST_DIGITS', ''),
+    ),
     adapter,
     storeKind,
     webhookSecret: envStr(env, 'PLATFORM_WA_WEBHOOK_SECRET', ''),
@@ -250,4 +258,15 @@ export function isAllowlisted(config: WaEntryConfig, fromDigits: string): boolea
     return false;
   }
   return config.allowlistDigits.includes(fromDigits);
+}
+
+/**
+ * Master pilot gate — independent from PLATFORM_WA_ALLOWLIST_DIGITS.
+ * Fail-closed: Master enabled + empty master allowlist ⇒ no Master for anyone.
+ */
+export function isMasterPilotAllowlisted(config: WaEntryConfig, fromDigits: string): boolean {
+  if (!config.masterAssistantEnabled) return false;
+  if (config.masterAllowlistDigits.length === 0) return false;
+  const digits = (fromDigits || '').replace(/\D/g, '');
+  return config.masterAllowlistDigits.includes(digits);
 }

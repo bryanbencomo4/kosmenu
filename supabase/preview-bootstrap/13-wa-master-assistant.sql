@@ -1,6 +1,10 @@
--- Preview-only: Asistente Maestro memory + exclusive quota.
--- DO NOT apply to production without explicit authorization.
--- Project intended: Preview gsfxqzvmyzjjgpigrste
+-- PREVIEW BOOTSTRAP ONLY — DO NOT APPLY TO PRODUCTION
+-- Allowed project ref: gsfxqzvmyzjjgpigrste (kosmenu-preview)
+-- Forbidden: qqhberaayhohxlbbhdyi (production)
+--
+-- Asistente Maestro memory (L1/L2/L3) + exclusive quota.
+-- Own objects only. Does not touch pedidos, wasender_message_queue,
+-- chat_supervision, discovery quota, or commerce mutation tables.
 
 create table if not exists public.wa_master_profiles (
   from_digits text primary key,
@@ -56,3 +60,9 @@ alter table public.wa_master_turns enable row level security;
 alter table public.wa_master_quota enable row level security;
 alter table public.wa_master_quota_ledger enable row level security;
 -- service_role only (no anon policies)
+grant select, insert, update, delete on public.wa_master_profiles to service_role;
+grant select, insert, update, delete on public.wa_master_threads to service_role;
+grant select, insert, update, delete on public.wa_master_turns to service_role;
+grant select, insert, update, delete on public.wa_master_quota to service_role;
+grant select, insert, update, delete on public.wa_master_quota_ledger to service_role;
+grant usage, select on all sequences in schema public to service_role;

@@ -20,8 +20,15 @@ export {
 export { createFileWaMasterMemoryStore } from './memory-store-file';
 export {
   createSupabaseWaMasterMemoryStore,
-  type WaMasterSupabaseLike,
+  createDualProcessMemoryHarness,
 } from './memory-store-supabase';
+export {
+  loadWaMasterIdentity,
+  createSupabaseWaMasterIdentitySource,
+  WA_MASTER_IDENTITY_FIXTURES,
+  WA_MASTER_CONSUMER_ORDER_FIXTURES,
+  type WaMasterIdentitySource,
+} from './identity-loader';
 export {
   runWaMasterOrchestrator,
   type WaMasterOrchestratorDeps,

@@ -1,4 +1,6 @@
-import { isAllowlisted, type WaEntryConfig } from './config';
+import { isAllowlisted, isMasterPilotAllowlisted, type WaEntryConfig } from './config';
+import { loadWaMasterIdentity } from '../../wa-master/_lib/identity-loader';
+import type { WaMasterIdentitySource } from '../../wa-master/_lib/identity-loader';
 import {
   normalizeWaInboundPayload,
   type WaNormalizedEvent,
@@ -59,6 +61,7 @@ export type ProcessWaEntryParams = {
   masterDiscoveryExecute?: WaMasterDiscoveryExecute;
   masterLoadMenu?: AdminMenuLoader;
   masterOrchestratorDeps?: WaMasterOrchestratorDeps;
+  masterIdentitySource?: WaMasterIdentitySource | null;
 };
 
 function safeParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -242,8 +245,8 @@ export async function processWaEntryEvent(
   const threadBefore = await store.getThread(event.fromDigits);
   storeOps += 1;
 
-  // Master Assistant (flag OFF by default). Reuses claim/allowlist/human gates above.
-  if (config.masterAssistantEnabled) {
+  // Master Assistant pilot gate (fail-closed allowlist). Non-pilot → classic router.
+  if (config.masterAssistantEnabled && isMasterPilotAllowlisted(config, event.fromDigits)) {
     return processMasterAssistantBranch({
       config,
       store,
@@ -261,6 +264,7 @@ export async function processWaEntryEvent(
       masterDiscoveryExecute: params.masterDiscoveryExecute,
       masterLoadMenu: params.masterLoadMenu,
       masterOrchestratorDeps: params.masterOrchestratorDeps,
+      masterIdentitySource: params.masterIdentitySource,
     });
   }
 
@@ -318,6 +322,7 @@ async function processMasterAssistantBranch(params: {
   masterDiscoveryExecute?: WaMasterDiscoveryExecute;
   masterLoadMenu?: AdminMenuLoader;
   masterOrchestratorDeps?: WaMasterOrchestratorDeps;
+  masterIdentitySource?: WaMasterIdentitySource | null;
 }): Promise<WaEntryProcessResult> {
   const { config, store, sender, event, nowMs } = params;
   let storeOps = params.storeOps;
@@ -391,10 +396,23 @@ async function processMasterAssistantBranch(params: {
     nowMs,
     masterConfig.profileTtlMs,
   );
-  const identity = resolveWaMasterIdentity({
-    fromDigits: event.fromDigits,
-    catalog: params.masterIdentityCatalog ?? [],
-  });
+
+  // Privacy erase request — wipe L1/L2/L3 for this contact when asked.
+  if (/\b(borrar mis datos|eliminar mi informacion|eliminar mis datos)\b/i.test(event.text)) {
+    await memStore.delete(event.fromDigits);
+  }
+
+  const identity =
+    params.masterIdentityCatalog && params.masterIdentityCatalog.length
+      ? resolveWaMasterIdentity({
+          fromDigits: event.fromDigits,
+          catalog: params.masterIdentityCatalog,
+        })
+      : await loadWaMasterIdentity({
+          fromDigits: event.fromDigits,
+          source: params.masterIdentitySource ?? null,
+          includeFixtures: true,
+        });
 
   const orch = await runWaMasterOrchestrator(
     {

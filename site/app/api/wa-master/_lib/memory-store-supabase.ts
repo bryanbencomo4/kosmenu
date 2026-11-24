@@ -1,82 +1,50 @@
-import type { WaMasterMemory, WaMasterSummary, WaMasterTurn } from './types';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { normalizeSummary } from './memory';
 import type { WaMasterMemoryStore } from './memory-store';
-
-type QueryResult<T> = { data: T | null; error: { message: string } | null };
-
-/** Minimal Supabase-like client surface for Preview persistence. */
-export type WaMasterSupabaseLike = {
-  from: (table: string) => {
-    select: (cols: string) => {
-      eq: (col: string, val: string) => {
-        maybeSingle: () => Promise<QueryResult<Record<string, unknown>>>;
-        order?: (col: string, opts: { ascending: boolean }) => {
-          limit: (n: number) => Promise<QueryResult<Record<string, unknown>[]>>;
-        };
-        limit?: (n: number) => Promise<QueryResult<Record<string, unknown>[]>>;
-      };
-    };
-    upsert: (row: Record<string, unknown>) => Promise<QueryResult<unknown>>;
-    delete: () => {
-      eq: (col: string, val: string) => Promise<QueryResult<unknown>>;
-    };
-    insert: (rows: Record<string, unknown> | Record<string, unknown>[]) => Promise<QueryResult<unknown>>;
-  };
-};
+import type { WaMasterMemory, WaMasterSummary, WaMasterTurn } from './types';
 
 /**
- * Preview Supabase memory store. Requires tables from
- * supabase/preview-bootstrap/13-wa-master-assistant.sql
+ * Preview/Postgres memory store (L1 turns + L2 summary + L3 profile).
+ * Requires supabase/preview-bootstrap/13-wa-master-assistant.sql
  */
-export function createSupabaseWaMasterMemoryStore(client: WaMasterSupabaseLike): WaMasterMemoryStore {
+export function createSupabaseWaMasterMemoryStore(client: SupabaseClient): WaMasterMemoryStore {
   return {
     async get(fromDigits) {
-      const thread = await client
+      const { data: thread, error: threadErr } = await client
         .from('wa_master_threads')
         .select('summary_json,updated_at_ms,expires_at_ms')
         .eq('from_digits', fromDigits)
         .maybeSingle();
-      if (thread.error || !thread.data) return null;
+      if (threadErr || !thread) return null;
 
-      const profileRes = await client
+      const { data: profile } = await client
         .from('wa_master_profiles')
         .select('*')
         .eq('from_digits', fromDigits)
         .maybeSingle();
 
-      const turnsRes = await client
+      const { data: turnRows } = await client
         .from('wa_master_turns')
         .select('role,text,at_ms,intent,specialist')
-        .eq('from_digits', fromDigits);
-
-      // Support both chained order/limit and plain eq→promise shapes in mocks.
-      let turns: WaMasterTurn[] = [];
-      const eqTurns = turnsRes as unknown as {
-        order?: (c: string, o: { ascending: boolean }) => {
-          limit: (n: number) => Promise<QueryResult<Record<string, unknown>[]>>;
-        };
-        data?: Record<string, unknown>[] | null;
-        error?: { message: string } | null;
-      };
-      if (typeof eqTurns.order === 'function') {
-        const listed = await eqTurns.order('at_ms', { ascending: false }).limit(20);
-        turns = ((listed.data || []) as Record<string, unknown>[])
-          .reverse()
-          .map((row) => ({
-            role: row.role as WaMasterTurn['role'],
-            text: String(row.text || ''),
-            atMs: Number(row.at_ms || 0),
-            intent: (row.intent as WaMasterTurn['intent']) || undefined,
-            specialist: (row.specialist as WaMasterTurn['specialist']) || undefined,
-          }));
-      }
+        .eq('from_digits', fromDigits)
+        .order('at_ms', { ascending: true })
+        .limit(40);
 
       const nowMs = Date.now();
       const summary = normalizeSummary(
-        (thread.data.summary_json as Partial<WaMasterSummary>) || {},
+        (thread.summary_json as Partial<WaMasterSummary>) || {},
         nowMs,
       );
-      const p = profileRes.data || {};
+      const turns: WaMasterTurn[] = (turnRows || []).map((row) => ({
+        role: row.role as WaMasterTurn['role'],
+        text: String(row.text || ''),
+        atMs: Number(row.at_ms || 0),
+        intent: (row.intent as WaMasterTurn['intent']) || undefined,
+        specialist: (row.specialist as WaMasterTurn['specialist']) || undefined,
+      }));
+
+      const p = profile || {};
       return {
         turns,
         summary,
@@ -99,7 +67,8 @@ export function createSupabaseWaMasterMemoryStore(client: WaMasterSupabaseLike):
         from_digits: fromDigits,
         summary_json: memory.summary,
         updated_at_ms: memory.summary.updatedAtMs,
-        expires_at_ms: memory.profile.retentionUntilMs || memory.summary.updatedAtMs + 7 * 86400000,
+        expires_at_ms:
+          memory.profile.retentionUntilMs || memory.summary.updatedAtMs + 7 * 86400000,
       });
       await client.from('wa_master_profiles').upsert({
         from_digits: fromDigits,
@@ -111,10 +80,10 @@ export function createSupabaseWaMasterMemoryStore(client: WaMasterSupabaseLike):
         attention_state: memory.profile.attentionState,
         last_active_at_ms: memory.profile.lastActiveAtMs,
         retention_until_ms: memory.profile.retentionUntilMs,
+        updated_at: new Date().toISOString(),
       });
-      // Replace recent turns simply: delete + insert last N (Preview-safe pattern).
       await client.from('wa_master_turns').delete().eq('from_digits', fromDigits);
-      const rows = memory.turns.slice(-20).map((t) => ({
+      const rows = memory.turns.slice(-40).map((t) => ({
         from_digits: fromDigits,
         role: t.role,
         text: t.text,
@@ -131,4 +100,22 @@ export function createSupabaseWaMasterMemoryStore(client: WaMasterSupabaseLike):
       await client.from('wa_master_profiles').delete().eq('from_digits', fromDigits);
     },
   };
+}
+
+/** In-memory fake Postgres for dual-instance / restart tests without network. */
+export function createDualProcessMemoryHarness() {
+  const shared = new Map<string, WaMasterMemory>();
+  const make = (): WaMasterMemoryStore => ({
+    async get(fromDigits) {
+      const v = shared.get(fromDigits);
+      return v ? structuredClone(v) : null;
+    },
+    async save(fromDigits, memory) {
+      shared.set(fromDigits, structuredClone(memory));
+    },
+    async delete(fromDigits) {
+      shared.delete(fromDigits);
+    },
+  });
+  return { makeStoreA: make, makeStoreB: make, shared };
 }

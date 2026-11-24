@@ -191,8 +191,10 @@ async function processMaster(text: string, opts: {
     } as unknown as NodeJS.ProcessEnv),
     masterAssistantEnabled: true,
     masterAssistantShadow: Boolean(opts.shadow),
+    masterAllowlistDigits: [(opts.from || '584140000100').replace(/\D/g, '')],
   };
   const from = opts.from || '584140000100';
+  config.masterAllowlistDigits = [from.replace(/\D/g, '')];
   const payload = {
     event: 'messages.upsert',
     sessionId: 'ELMENUXFA1',
@@ -531,6 +533,7 @@ describe('wa-master closure sprint', () => {
         PLATFORM_WA_ADAPTER: 'sim',
       } as unknown as NodeJS.ProcessEnv),
       masterAssistantEnabled: true,
+      masterAllowlistDigits: ['584140000700'],
     };
     const payload = {
       event: 'messages.upsert',

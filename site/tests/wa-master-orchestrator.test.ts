@@ -425,6 +425,7 @@ describe('wa-master Package 1', () => {
         PLATFORM_WA_MASTER: '1',
       } as unknown as NodeJS.ProcessEnv),
       masterAssistantEnabled: true,
+      masterAllowlistDigits: ['584140000030'],
     };
     const sender = createSimWaEntrySender(store);
     const payload = {
@@ -498,6 +499,7 @@ describe('wa-master Package 1', () => {
       } as unknown as NodeJS.ProcessEnv),
       masterAssistantEnabled: true,
       masterAssistantShadow: true,
+      masterAllowlistDigits: ['584140000050'],
     };
     const sender = createSimWaEntrySender(store);
     const payload = {

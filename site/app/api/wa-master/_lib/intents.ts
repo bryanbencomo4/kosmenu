@@ -91,7 +91,7 @@ export function classifyWaMasterIntents(params: {
     else intents.push('admin.availability');
   }
 
-  if (/\b(mi menu|ver mis productos|productos agotados)\b/.test(t)) {
+  if (/\b(mi menu|ver mis productos|mis productos|productos agotados|muestra(me)? mis productos)\b/.test(t)) {
     intents.push('admin.view_menu');
   }
 
