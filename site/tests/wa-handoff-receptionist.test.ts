@@ -19,7 +19,7 @@ function masterCfg(extra: Record<string, string> = {}) {
     PLATFORM_WA_MASTER_RECEPTIONIST: '1',
     PLATFORM_WA_MASTER_ALLOW_GEMINI: '0',
     PLATFORM_WA_MASTER_SIMULATE: '1',
-    PLATFORM_WA_BUSINESS_ASSISTANT_URL: 'https://elmenuxfa.com/asistente-negocio',
+    PLATFORM_WA_BUSINESS_ASSISTANT_URL: 'https://app.elmenuxfa.com/asistente',
     PLATFORM_WA_CONSUMER_URL: 'https://elmenuxfa.com/asistente?ref=wa',
     ...extra,
   } as unknown as NodeJS.ProcessEnv);
@@ -54,10 +54,16 @@ describe('wa handoff codes', () => {
       destination: 'consumer_discovery',
       code: rec.code,
       consumerBaseUrl: 'https://elmenuxfa.com/asistente?ref=wa',
-      businessAssistantBaseUrl: 'https://elmenuxfa.com/asistente-negocio',
+      businessAssistantBaseUrl: 'https://app.elmenuxfa.com/asistente',
     });
-    expect(url).toContain('h=');
+    expect(url).toMatch(/\/asistente\?ref=wa#h=/);
     expect(url).not.toContain(PILOT);
+    expect(url.includes('?h=') || url.includes('&h=')).toBe(false);
+
+    const peek = await store.validate({ code: rec.code, destination: 'consumer_discovery' });
+    expect(peek.ok).toBe(true);
+    const peek2 = await store.validate({ code: rec.code });
+    expect(peek2.ok).toBe(true);
 
     const ok = await store.redeem({ code: rec.code, destination: 'consumer_discovery' });
     expect(ok.ok).toBe(true);
@@ -65,7 +71,15 @@ describe('wa handoff codes', () => {
 
     const again = await store.redeem({ code: rec.code });
     expect(again.ok).toBe(false);
-    if (!again.ok) expect(again.error).toBe('consumed');
+    if (again.ok === false) expect(again.error).toBe('consumed');
+
+    const bizUrl = buildWaHandoffUrl({
+      destination: 'business_assistant',
+      code: 'abc',
+      consumerBaseUrl: 'https://elmenuxfa.com/asistente',
+      businessAssistantBaseUrl: 'https://app.elmenuxfa.com/asistente',
+    });
+    expect(bizUrl).toBe('https://app.elmenuxfa.com/asistente#h=abc');
   });
 
   it('rejects expired, revoked, mismatched destination, and peek-safe', async () => {
@@ -79,7 +93,7 @@ describe('wa handoff codes', () => {
     });
     const exp = await store.redeem({ code: expired.code, nowMs: now });
     expect(exp.ok).toBe(false);
-    if (!exp.ok) expect(exp.error).toBe('expired');
+    if (exp.ok === false) expect(exp.error).toBe('expired');
 
     const live = await store.issue({
       destination: 'business_assistant',
@@ -88,7 +102,7 @@ describe('wa handoff codes', () => {
     await store.revoke(live.code);
     const rev = await store.redeem({ code: live.code });
     expect(rev.ok).toBe(false);
-    if (!rev.ok) expect(rev.error).toBe('revoked');
+    if (rev.ok === false) expect(rev.error).toBe('revoked');
 
     const consumer = await store.issue({
       destination: 'consumer_discovery',
@@ -99,7 +113,7 @@ describe('wa handoff codes', () => {
       destination: 'business_assistant',
     });
     expect(mismatch.ok).toBe(false);
-    if (!mismatch.ok) expect(mismatch.error).toBe('destination_mismatch');
+    if (mismatch.ok === false) expect(mismatch.error).toBe('destination_mismatch');
 
     const unknown = await store.redeem({ code: 'not-a-real-code' });
     expect(unknown.ok).toBe(false);
@@ -125,7 +139,7 @@ describe('Master receptionist handoff', () => {
     );
     expect(out.replies).toHaveLength(1);
     expect(out.replies[0]).toMatch(/asistente/i);
-    expect(out.replies[0]).toMatch(/\?ref=wa&h=/);
+    expect(out.replies[0]).toMatch(/\?ref=wa#h=/);
     expect(out.replies[0]).toMatch(/Caracas/i);
     expect(out.toolsUsed).toContain('handoff_consumer');
     expect(out.replies[0]).not.toMatch(/1️⃣/);
@@ -186,7 +200,7 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(out.replies[0]).toMatch(/asistente para negocios|acceso seguro/i);
-    expect(out.replies[0]).toMatch(/asistente-negocio\?h=/);
+    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente#h=/);
     expect(out.toolsUsed).toContain('handoff_business');
   });
 
@@ -224,7 +238,7 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(b.replies[0]).toMatch(/Pizza Nova Pilot/);
-    expect(b.replies[0]).toMatch(/asistente-negocio\?h=/);
+    expect(b.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente#h=/);
   });
 
   it('receptionist flag off keeps legacy long search path available', async () => {

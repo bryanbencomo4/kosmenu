@@ -135,7 +135,7 @@ export async function POST(request: Request) {
   if (commercial.commercial) {
     const bizUrl =
       (process.env.PLATFORM_WA_BUSINESS_ASSISTANT_URL || '').trim() ||
-      'https://elmenuxfa.com/asistente-negocio';
+      'https://app.elmenuxfa.com/asistente';
     return json({
       ok: true,
       fallback: false,

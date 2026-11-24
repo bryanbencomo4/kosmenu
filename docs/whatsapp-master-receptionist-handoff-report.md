@@ -1,141 +1,125 @@
-# elmenuxfa.com — Recepcionista WhatsApp + handoff a asistentes
+# CIERRE FINAL — Handoff WhatsApp → asistentes (elmenuxfa.com)
 
+**Fecha:** 2026-11-24  
 **Rama:** `feature/wa-master-assistant`  
-**Producción:** **NO desplegado / NO activado**  
-**Piloto Master:** sigue limitado a `584140821633` (sin cambio de allowlist)
+**Base previa:** `f74d557`  
+**Commit final:** *(ver `git rev-parse HEAD` tras el commit de este cierre)*  
+**Producción:** sin deploy, sin migraciones, flags públicos sin activar.
 
 ---
 
-## 1. Arquitectura final de handoff
+## URL empresarial realmente implementada
 
-```
-WhatsApp (+584220451906 / ELMENUXFA1)
-  → wa-entry (router clásico | Master allowlist)
-    → Master recepcionista (flag PLATFORM_WA_MASTER_RECEPTIONIST)
-      → respuesta breve
-      → emite código opaco wa_handoff_codes (TTL 5 min, un solo uso)
-      → URL:
-          consumidor:  elmenuxfa.com/asistente?ref=wa&h=<code>
-          negocios:    elmenuxfa.com/asistente-negocio?h=<code>
-                         (alias business.*/asistente)
-                         (app.elmenuxfa.com/asistente → redirect Flutter, no desplegado)
-```
+| Capa | URL | Estado |
+|------|-----|--------|
+| Canónica (comerciante) | `https://app.elmenuxfa.com/asistente` | Implementada en **código Flutter** (`BusinessAssistantScreen` + ruta `/asistente`). **No se redeployó Flutter** (restricción de este cierre). El host vivo responde 200 con shell SPA/splash; la pantalla conversacional viaja en el próximo build Flutter habitual. |
+| Fallback interno Next | `/asistente-negocio` (y rewrite `business.*/asistente`) | Operativo en local/Preview. No es la URL que se ofrece al comerciante. |
+| Backend | `POST /api/asistente-negocio` | Bearer Supabase + handoff peek/consume. |
+| Consumidor | `https://elmenuxfa.com/asistente` | Continuidad con seed/`#h=` + auto-búsqueda preparada. |
 
-El código **no** incluye teléfono ni credenciales. Payload: intent, query, zone, operación pendiente, comercio candidato, draft de nombre.
-
-Validación: `POST /api/wa-handoff/redeem` (consumo atómico; reuso/expirado/revocado → error).
-
-**El handoff no es sesión admin.** Escrituras requieren auth + permisos en destino.
+Enlaces Master por defecto: `PLATFORM_WA_BUSINESS_ASSISTANT_URL` → `https://app.elmenuxfa.com/asistente` (fragmento `#h=`).
 
 ---
 
-## 2. Hosting `app.elmenuxfa.com/asistente`
+## Método de integración con Flutter
 
-| Hecho | Detalle |
-|--------|---------|
-| Runtime real | **Flutter Web** (deploy separado), no Next |
-| Implementación viable | Next: `/asistente-negocio` en `site/` |
-| Alias Preview | `business.elmenuxfa.com/asistente` → rewrite a `/asistente-negocio` |
-| app host | Redirect en `scripts/deploy_flutter_web.ps1` → `elmenuxfa.com/asistente-negocio` (**no desplegado**) |
-| Bloqueo | No se puede montar la página Next nativa en el host Flutter sin romper el SPA |
+**Decisión:** pantalla nativa Flutter en `/asistente` (misma SPA del panel), **sin redirect externo** a Next.
 
-URL empresarial funcionando en código/Preview path: **`/asistente-negocio`** (flags UI/API).
+1. Reutiliza `Supabase.instance.client.auth` (misma sesión del panel).
+2. Llama a Next `POST /api/asistente-negocio` con `Authorization: Bearer <access_token>`.
+3. Lee `#h=` / `?h=` en boot (`peek`); consume en el primer envío del usuario.
+4. Si no hay sesión: banner “Entrar” → `/` del panel; al autenticar, re-boot y recupera la solicitud.
+5. Recarga: hash + sessionStorage del navegador; no depende de un segundo login si la sesión Supabase sigue válida.
 
----
-
-## 3. Acceso firmado validado (tests)
-
-Vitest `wa-handoff-receptionist.test.ts`:
-
-- Emisión opaca + redeem OK  
-- Reuso → `consumed`  
-- Expirado → `expired`  
-- Revocado → `revoked`  
-- Destino incorrecto → `destination_mismatch`  
-- Manipulado/inexistente → `not_found`  
+`/asistente-negocio` queda solo como detalle interno / fallback Next.
 
 ---
 
-## 4. Transferencia de contexto
+## Resultado del handoff seguro
 
-- Consumidor: query + zona en payload → Discovery aplica seed tras redeem.  
-- Negocios: intent / pendingOperation / businessNameDraft / conversationHint → saludo contextual (no “¿en qué puedo ayudarte?” genérico).  
-- Solo se afirma “búsqueda preparada” si el handoff se emitió.
-
----
-
-## 5. Autenticación y permisos
-
-- Teléfono WhatsApp ≠ autorización de escritura.  
-- Asistente de negocios: orienta y propone; cambios reales → panel autenticado.  
-- API conversacional de escritura de productos/precios/FX: **no armada** (documentado; sin fingir).
-
----
-
-## 6. Funciones empresariales realmente disponibles
-
-| Función | Estado |
-|---------|--------|
-| Orientación / planes (links oficiales) | Sí |
-| Handoff contextual desde WA | Sí (flag) |
-| Registro conversacional completo create-comercio | **Pendiente** (panel register) |
-| Lectura menú / propuesta de edición en WA | Legacy; recepcionista prefiere handoff |
-| Ejecución auditada de precio/producto/FX vía chat | **Pendiente** API segura |
+| Control | Resultado |
+|---------|-----------|
+| Código opaco (base64url ~18 bytes) | OK |
+| TTL ~5 min | OK |
+| Peek vs consume | OK — boot/preview = `peek`; acción usuario = `consume` |
+| GET `/api/wa-handoff/redeem` | **405** (Playwright mobile+desktop) |
+| Destino restringido | `consumer_discovery` \| `business_assistant` |
+| Sin teléfono en URL | OK (`#h=` preferido; hash reduce referrer/logs) |
+| Reutilización / manipulación | redeem atómico; mismatch → error |
+| WhatsApp preview | no consume (sin GET redeem; peek no quema) |
 
 ---
 
-## 7. Adaptación Discovery
+## Continuidad de sesión
 
-- Acepta `?h=`, `?q=`, `?zone=`  
-- Detecta intención comercial/admin → CTA a asistente de negocios (sin operaciones admin en Discovery)
-
----
-
-## 8. Resultado de pruebas
-
-| Suite | Resultado |
-|-------|-----------|
-| `wa-handoff-receptionist` + Master orch/closure/e2e | **39/39** |
-| Playwright móvil | No ejecutado este sprint (UI flags off en prod) |
-| Typecheck puntual | Cubierto por Vitest + build types en rutas nuevas |
-
-Flags por defecto **OFF**:
-
-```
-PLATFORM_WA_MASTER_RECEPTIONIST=0
-NEXT_PUBLIC_BUSINESS_ASSISTANT=0
-BUSINESS_ASSISTANT_ENABLED=0
-```
+- **Autenticado + membresía:** consulta menú/precios/FX y propone cambios con enlace al panel.
+- **Sin sesión:** saludo con solicitud preparada + `needsAuth`; no se pierde el handoff hasta TTL/consumo.
+- **Sin membresía / no autorizado:** mensaje claro + registro panel; sin escritura.
+- **WhatsApp digits:** solo señal contextual hasheada en store; nunca autorización de escritura.
 
 ---
 
-## 9. Riesgos críticos
+## Funciones administrativas reales (lectura / propuesta)
 
-1. Activar recepcionista en prod sin handoff store Postgres → fallback sin contexto.  
-2. Desplegar redirect Flutter sin Next `/asistente-negocio` live → 404.  
-3. Confundir handoff con login admin.  
-4. Abrir Master al público.
+- Consulta productos y precios (Supabase, scoped a comercio de la membresía).
+- Consulta moneda / tasa.
+- Info de negocio seleccionado (o lista si hay varios).
+- Preparación de cambio de precio / alta de producto → **propuesta + transición al panel** (sin afirmar “completado”).
+- Orientación a registro (`?tab=register`).
+- Recuperación de solicitud desde handoff (`pendingOperation`, `conversationHint`, etc.).
 
----
+## Funciones todavía pendientes
 
-## 10. Pendientes
-
-- Redirect Flutter a producción (autorización aparte)  
-- Persistencia `wa_handoff_codes` en prod  
-- APIs seguras de escritura conversacional + confirmación  
-- Registro create-comercio 100% conversacional  
-- Playwright móvil E2E  
-- Sesión Supabase embebida en asistente-negocio (hoy orienta + panel)
+- APIs de **escritura** autorizadas (precio/producto/config) desde el asistente — hoy solo proponen + panel.
+- **Build/deploy Flutter** que publique `BusinessAssistantScreen` en `app.elmenuxfa.com` (excluido de este cierre).
+- Activación de flags en Preview/prod y tabla `wa_handoff_codes` en el entorno objetivo (Preview ya contemplada; prod no tocada).
 
 ---
 
-## 11. GO / NO-GO
+## Pruebas
 
-| | |
-|--|--|
-| Código + tests Preview path | **GO** para seguir en Preview |
-| Piloto limitado con recepcionista en prod | **NO-GO** hasta auth de deploy + flags + SQL handoff |
-| Master público | **NO-GO** |
-| Sustituir panel Flutter | **NO-GO** (no intentado) |
+### Vitest / TypeScript
 
-**Master allowlist permanece `584140821633`. Sin deploy de producción en este entregable.**
+- `tsc --noEmit`: OK (superficies afectadas + casts WA entry).
+- `wa-handoff-receptionist.test.ts`: 8/8.
+- `asistente-negocio-api.test.ts`: 2/2.
+- `wa-entry-router.test.ts`: 35/35.
+- Suites Master relacionadas: orchestrator/closure OK.
+
+### Playwright (móvil + escritorio) — local `:3023`
+
+Script: `site/scripts/wa-handoff-assistants-playwright.mjs`  
+Reporte JSON: `docs/wa-handoff-assistant-screenshots/wa-handoff-assistants-report.json`
+
+| Recorrido | Resultado |
+|-----------|-----------|
+| Consumidor seed `q=hamburguesas&zone=Caracas` | Contexto “Retomo…”, draft preparado, sin 404 |
+| Negocio Next `/asistente-negocio` | Chat shell + URL canónica visible |
+| GET redeem | 405 |
+| `app.elmenuxfa.com/asistente` | 200 (shell); conversación Flutter pendiente de build |
+
+---
+
+## Regresiones
+
+- Sin cambios a WhatsApp oficial, router público, allowlist Master `584140821633`, menús/pedidos, Gemini Discovery, supervision, webhooks.
+- Flags públicos **no** activados en producción.
+- Deploy Flutter **no** modificado.
+- Redirect externo como UX final: **no** usado.
+
+---
+
+## GO / NO-GO — piloto limitado
+
+| Criterio | Veredicto |
+|----------|-----------|
+| Consumidor WA → `/asistente` con contexto | **GO** (Preview/local con flags) |
+| Handoff seguro peek/consume | **GO** |
+| Asistente negocio conversacional (API + Next fallback) | **GO** (Preview/local) |
+| URL viva `app.elmenuxfa.com/asistente` con UI Flutter | **NO-GO hasta próximo build Flutter** (código listo; deploy diferido a propósito) |
+| Producción / flags públicos / migraciones | **NO-GO** (explícito: no publicar) |
+
+**Veredicto global piloto limitado:** **GO condicional en Preview** (Next + flags + handoff).  
+**NO-GO producción** y **NO-GO URL Flutter viva** hasta rebuild del panel web.
+
+Detenerse aquí — no publicar en producción.

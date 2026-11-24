@@ -1,0 +1,107 @@
+{
+  "ok": true,
+  "base": "http://127.0.0.1:3023",
+  "appAsistente": "https://app.elmenuxfa.com/asistente",
+  "viewports": [
+    "mobile",
+    "desktop"
+  ],
+  "steps": [
+    {
+      "name": "mobile:consumer_status",
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:3023/asistente?ref=wa&q=hamburguesas&zone=Caracas"
+    },
+    {
+      "name": "mobile:consumer_not_empty",
+      "ok": true,
+      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:16 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:16 a. m.\nhamburguesas en Caracas\n2:"
+    },
+    {
+      "name": "mobile:consumer_context_or_composer",
+      "ok": true
+    },
+    {
+      "name": "mobile:consumer_prepared_draft_or_results",
+      "ok": true,
+      "draft": "hamburguesas en Caracas"
+    },
+    {
+      "name": "mobile:redeem_get_405",
+      "ok": true,
+      "status": 405
+    },
+    {
+      "name": "mobile:biz_next_status",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "name": "mobile:biz_next_shell",
+      "ok": true,
+      "snippet": "ELMENUXFA.COM\n\nAsistente para negocios\n\nURL oficial del comerciante: app.elmenuxfa.com/asistente\n\n¡Hola! 😊 Soy el asistente para negocios de elmenuxfa.com. ¿Co"
+    },
+    {
+      "name": "mobile:app_asistente_reachable",
+      "ok": true,
+      "status": 200,
+      "snippet": "elmenuxfa.com",
+      "url": "https://app.elmenuxfa.com/asistente"
+    },
+    {
+      "name": "desktop:consumer_status",
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:3023/asistente?ref=wa&q=hamburguesas&zone=Caracas"
+    },
+    {
+      "name": "desktop:consumer_not_empty",
+      "ok": true,
+      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:16 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:16 a. m.\nhamburguesas en Caracas\n2:"
+    },
+    {
+      "name": "desktop:consumer_context_or_composer",
+      "ok": true
+    },
+    {
+      "name": "desktop:consumer_prepared_draft_or_results",
+      "ok": true,
+      "draft": "hamburguesas en Caracas"
+    },
+    {
+      "name": "desktop:redeem_get_405",
+      "ok": true,
+      "status": 405
+    },
+    {
+      "name": "desktop:biz_next_status",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "name": "desktop:biz_next_shell",
+      "ok": true,
+      "snippet": "ELMENUXFA.COM\n\nAsistente para negocios\n\nURL oficial del comerciante: app.elmenuxfa.com/asistente\n\n¡Hola! 😊 Soy el asistente para negocios de elmenuxfa.com. ¿Co"
+    },
+    {
+      "name": "desktop:app_asistente_reachable",
+      "ok": true,
+      "status": 200,
+      "snippet": "elmenuxfa.com",
+      "url": "https://app.elmenuxfa.com/asistente"
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\mobile-consumer.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\mobile-biz-next.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\mobile-app-asistente.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\desktop-consumer.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\desktop-biz-next.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-assistant-screenshots\\desktop-app-asistente.png"
+  ],
+  "errors": [],
+  "security": {
+    "getRedeem": 405
+  }
+}

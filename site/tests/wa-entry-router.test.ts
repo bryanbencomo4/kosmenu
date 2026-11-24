@@ -46,7 +46,7 @@ function testConfig(overrides: Partial<WaEntryConfig> = {}): WaEntryConfig {
       PLATFORM_WA_ROUTER: '1',
       PLATFORM_WA_ADAPTER: 'sim',
       PLATFORM_WA_WEBHOOK_SECRET: 'test-secret',
-    } as NodeJS.ProcessEnv),
+    } as unknown as NodeJS.ProcessEnv),
     ...overrides,
   };
 }

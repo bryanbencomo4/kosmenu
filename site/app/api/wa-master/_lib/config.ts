@@ -82,7 +82,7 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     businessAssistantUrl: envStr(
       env,
       'PLATFORM_WA_BUSINESS_ASSISTANT_URL',
-      'https://elmenuxfa.com/asistente-negocio',
+      'https://app.elmenuxfa.com/asistente',
     ),
   };
 }

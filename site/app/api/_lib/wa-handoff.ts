@@ -64,7 +64,14 @@ export interface WaHandoffStore {
     ttlMs?: number;
     nowMs?: number;
   }): Promise<WaHandoffRecord>;
+  /** Atomic consume — only after intentional user action. */
   redeem(input: {
+    code: string;
+    destination?: WaHandoffDestination;
+    nowMs?: number;
+  }): Promise<WaHandoffRedeemResult>;
+  /** Validate without consuming (previews / page boot). */
+  validate(input: {
     code: string;
     destination?: WaHandoffDestination;
     nowMs?: number;
@@ -110,10 +117,27 @@ export function buildWaHandoffUrl(params: {
     const base = params.consumerBaseUrl.includes('?')
       ? params.consumerBaseUrl.split('?')[0]
       : params.consumerBaseUrl.replace(/\/$/, '');
-    return `${base}?ref=wa&h=${code}`;
+    // Prefer hash fragment for the opaque code so referrers/logs/previews leak less.
+    return `${base}?ref=wa#h=${code}`;
   }
   const base = params.businessAssistantBaseUrl.replace(/\/$/, '');
-  return `${base}?h=${code}`;
+  return `${base}#h=${code}`;
+}
+
+/** Validate without consuming — safe for link-preview bots / page boots. */
+export function evaluateHandoffRecord(
+  cur: WaHandoffRecord | null,
+  destination: WaHandoffDestination | undefined,
+  nowMs: number,
+): WaHandoffRedeemResult {
+  if (!cur) return { ok: false, error: 'not_found' };
+  if (cur.revokedAtMs != null) return { ok: false, error: 'revoked' };
+  if (cur.consumedAtMs != null) return { ok: false, error: 'consumed' };
+  if (cur.expiresAtMs <= nowMs) return { ok: false, error: 'expired' };
+  if (destination && destination !== cur.destination) {
+    return { ok: false, error: 'destination_mismatch' };
+  }
+  return { ok: true, record: cur };
 }
 
 export function createMemoryWaHandoffStore(): WaHandoffStore {
@@ -137,17 +161,23 @@ export function createMemoryWaHandoffStore(): WaHandoffStore {
     },
     async redeem(input) {
       const nowMs = input.nowMs ?? Date.now();
-      const cur = map.get(input.code);
-      if (!cur) return { ok: false, error: 'not_found' };
-      if (cur.revokedAtMs != null) return { ok: false, error: 'revoked' };
-      if (cur.consumedAtMs != null) return { ok: false, error: 'consumed' };
-      if (cur.expiresAtMs <= nowMs) return { ok: false, error: 'expired' };
-      if (input.destination && input.destination !== cur.destination) {
-        return { ok: false, error: 'destination_mismatch' };
-      }
-      const next = { ...cur, consumedAtMs: nowMs };
+      const checked = evaluateHandoffRecord(
+        map.get(input.code) ?? null,
+        input.destination,
+        nowMs,
+      );
+      if (!checked.ok) return checked;
+      const next = { ...checked.record, consumedAtMs: nowMs };
       map.set(input.code, next);
       return { ok: true, record: next };
+    },
+    async validate(input) {
+      const nowMs = input.nowMs ?? Date.now();
+      return evaluateHandoffRecord(
+        map.get(input.code) ?? null,
+        input.destination,
+        nowMs,
+      );
     },
     async revoke(code, nowMs = Date.now()) {
       const cur = map.get(code);
@@ -226,6 +256,11 @@ export function createSupabaseWaHandoffStore(client: SupabaseClient): WaHandoffS
         },
       };
     },
+    async validate(input) {
+      const nowMs = input.nowMs ?? Date.now();
+      const cur = await this.peek(input.code);
+      return evaluateHandoffRecord(cur, input.destination, nowMs);
+    },
     async revoke(code, nowMs = Date.now()) {
       const { data, error } = await client
         .from('wa_handoff_codes')
@@ -301,31 +336,4 @@ async function redeemWithUpdate(
   };
 }
 
-/** Detect commercial / admin intent inside Discovery (consumer assistant). */
-export function detectCommercialIntentFromText(text: string): {
-  commercial: boolean;
-  kind: 'register' | 'admin' | 'pricing' | null;
-} {
-  const t = text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  if (
-    /\b(registrar|poner mi menu|crear.*negocio|tengo un restaurante|unirme a la plataforma)\b/.test(
-      t,
-    )
-  ) {
-    return { commercial: true, kind: 'register' };
-  }
-  if (/\b(plan|planes|cuanto cuesta|tarifa)\b/.test(t) && /\b(negocio|menu|plataforma)\b/.test(t)) {
-    return { commercial: true, kind: 'pricing' };
-  }
-  if (
-    /\b(editar mis productos|cambiar (el )?precio|actualizar (la )?tasa|agregar (un )?producto|ya tengo un negocio|mi menu digital)\b/.test(
-      t,
-    )
-  ) {
-    return { commercial: true, kind: 'admin' };
-  }
-  return { commercial: false, kind: null };
-}
+export { detectCommercialIntentFromText } from '../../_lib/commercial-intent';

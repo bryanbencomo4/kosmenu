@@ -10,6 +10,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
+import 'package:kosmenu_app/screens/business_assistant_screen.dart';
 import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
@@ -285,6 +286,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
         normalized.split('/').where((segment) => segment.isNotEmpty).toList();
     if (segments.isEmpty) return null;
     const known = <String>{
+      'asistente',
       'invite',
       'v',
       'orders',
@@ -415,6 +417,17 @@ class _KosmenuAppState extends State<KosmenuApp> {
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => const AuthGate(),
+      );
+    }
+
+    if (uri.path == '/asistente' ||
+        (uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'asistente')) {
+      // Prefer route URI; on web also merge Uri.base (#h=… survives path routing).
+      final code = BusinessAssistantScreen.handoffCodeFromUri(uri) ??
+          (kIsWeb ? BusinessAssistantScreen.handoffCodeFromUri(Uri.base) : null);
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => BusinessAssistantScreen(handoffCode: code),
       );
     }
 

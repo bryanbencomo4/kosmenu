@@ -14,6 +14,8 @@ import {
   buildDiscoveryChatUrl,
   canOfferDiscoveryChatLink,
 } from '../_lib/discovery-assistant';
+import { BUSINESS_ASSISTANT_CANONICAL_APP_PATH } from '../_lib/business-assistant';
+import { detectCommercialIntentFromText } from '../_lib/commercial-intent';
 import { alignDiscoveryRestaurantsToReplyText } from '../api/asistente/_lib/align-restaurants';
 import {
   DIRECTORY_CATEGORY_CHIPS,
@@ -494,6 +496,11 @@ export function DiscoveryAssistantView({
   const [geo, setGeo] = useState<{ lat: number; lng: number } | null>(null);
   const [regionHint, setRegionHint] = useState<string | null>(seedZone);
   const handoffAppliedRef = useRef(false);
+  const handoffReadyRef = useRef(false);
+  const pendingAutoQueryRef = useRef<string | null>(null);
+  const autoRanRef = useRef(false);
+  const [handoffBootDone, setHandoffBootDone] = useState(false);
+  const [skipGenericWelcome, setSkipGenericWelcome] = useState(false);
   const [lastSearch, setLastSearch] = useState<{
     q?: string;
     category?: string;
@@ -525,31 +532,41 @@ export function DiscoveryAssistantView({
     }
   }, [shareRef]);
 
-  // WA handoff / seed: apply search context once (never invent "prepared" without redeem).
+  // WA handoff / seed: peek only on boot (previews must not consume). Consume on first send.
   useEffect(() => {
     if (!mounted || handoffAppliedRef.current) return;
     let cancelled = false;
     const run = async () => {
       let q = seedQuery;
       let zone = seedZone;
-      if (handoffCode) {
+      let code = handoffCode;
+      if (typeof window !== 'undefined') {
+        const frag = window.location.hash.replace(/^#/, '');
+        if (frag.startsWith('h=')) code = decodeURIComponent(frag.slice(2));
+        else {
+          const h = new URLSearchParams(frag).get('h');
+          if (h) code = h;
+        }
+      }
+      if (code) {
         try {
           const res = await fetch('/api/wa-handoff/redeem', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
-              code: handoffCode,
+              code,
               destination: 'consumer_discovery',
+              action: 'peek',
             }),
           });
           const json = (await res.json()) as {
             ok?: boolean;
-            payload?: { query?: string | null; zone?: string | null; intent?: string | null };
-            error?: string;
+            payload?: { query?: string | null; zone?: string | null };
           };
           if (res.ok && json.ok && json.payload) {
             q = json.payload.query || q;
             zone = json.payload.zone || zone;
+            (window as unknown as { __waHandoffCode?: string }).__waHandoffCode = code;
           }
         } catch {
           /* keep seed params only */
@@ -557,12 +574,16 @@ export function DiscoveryAssistantView({
       }
       if (cancelled) return;
       handoffAppliedRef.current = true;
+      handoffReadyRef.current = true;
       if (zone) setRegionHint(zone);
       if (q) {
         const text = zone ? `${q} en ${zone}` : q;
+        pendingAutoQueryRef.current = text;
+        setSkipGenericWelcome(true);
         setDraft(text);
         setComposerFocusTick((n) => n + 1);
       }
+      setHandoffBootDone(true);
     };
     void run();
     return () => {
@@ -571,8 +592,26 @@ export function DiscoveryAssistantView({
   }, [mounted, handoffCode, seedQuery, seedZone]);
 
   // First open / reset: typing → hello → typing → prompt + real category carousel.
+  // Skip generic welcome when WA handoff already prepared a search.
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !handoffBootDone) return;
+    if (skipGenericWelcome) {
+      setMessages([
+        {
+          id: 'welcome-hello',
+          role: 'assistant',
+          text: WELCOME_HELLO,
+          createdAt: Date.now(),
+        },
+        {
+          id: 'handoff-context',
+          role: 'assistant',
+          text: 'Retomo tu búsqueda de WhatsApp. Un momento…',
+          createdAt: Date.now(),
+        },
+      ]);
+      return;
+    }
     let cancelled = false;
     const run = async () => {
       setMessages([]);
@@ -630,7 +669,7 @@ export function DiscoveryAssistantView({
     };
     // Intentionally only remount/reset — region refreshes handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, onboardingTick]);
+  }, [mounted, onboardingTick, handoffBootDone, skipGenericWelcome]);
 
   // When the user shares a zone, rebuild the category strip for that region.
   useEffect(() => {
@@ -899,6 +938,21 @@ export function DiscoveryAssistantView({
 
   const runAgent = useCallback(
     async (userText: string) => {
+      const commercial = detectCommercialIntentFromText(userText);
+      if (commercial.commercial) {
+        setBusy(true);
+        const bizUrl = `${BUSINESS_ASSISTANT_CANONICAL_APP_PATH}`;
+        const tip =
+          commercial.kind === 'register'
+            ? 'Para registrar o unir tu negocio'
+            : 'Para gestionar menú, precios o configuración';
+        await sleep(humanTypingMinMs(80));
+        pushAssistant({
+          text: `${tip} te paso al asistente empresarial (misma cuenta del panel):\n${bizUrl}\n\nTu contexto de WhatsApp se conserva si abriste un enlace seguro.`,
+        });
+        setBusy(false);
+        return;
+      }
       if (!apiEnabled) {
         await runDirectorySearch({ q: userText, userLabel: userText });
         return;
@@ -968,6 +1022,22 @@ export function DiscoveryAssistantView({
     [apiEnabled, geo, messages, pushAssistant, regionHint, runDirectorySearch, shareRef],
   );
 
+  // Auto-run prepared WA search once (no re-ask what/where).
+  // Do not consume here — preview bots that execute JS must not burn the code.
+  useEffect(() => {
+    if (!mounted || !handoffBootDone || !skipGenericWelcome) return;
+    if (autoRanRef.current) return;
+    const q = pendingAutoQueryRef.current;
+    if (!q) return;
+    autoRanRef.current = true;
+    pendingAutoQueryRef.current = null;
+    setMessages((prev) => [
+      ...prev,
+      { id: newId('u'), role: 'user', text: q, createdAt: Date.now() },
+    ]);
+    void runAgent(q);
+  }, [mounted, handoffBootDone, skipGenericWelcome, runAgent]);
+
   const onChip = useCallback(
     async (chip: ChipAction) => {
       if (busy) return;
@@ -1017,6 +1087,21 @@ export function DiscoveryAssistantView({
       ...prev,
       { id: newId('u'), role: 'user', text, createdAt: Date.now() },
     ]);
+
+    // Consume one-time handoff only on intentional user send (not page boot / previews).
+    const pendingCode = (window as unknown as { __waHandoffCode?: string }).__waHandoffCode;
+    if (pendingCode) {
+      (window as unknown as { __waHandoffCode?: string }).__waHandoffCode = undefined;
+      void fetch('/api/wa-handoff/redeem', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code: pendingCode,
+          destination: 'consumer_discovery',
+          action: 'consume',
+        }),
+      }).catch(() => null);
+    }
 
     if (text.length < 48) {
       const matchedRegion = matchDirectoryRegionLabel(text);

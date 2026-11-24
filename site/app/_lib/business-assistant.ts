@@ -1,6 +1,7 @@
 /**
- * Business assistant (/asistente-negocio) — flags fail closed.
- * Hosted on Next (elmenuxfa.com). app.elmenuxfa.com/asistente needs Flutter redirect.
+ * Business assistant — flags fail closed.
+ * Canonical merchant URL: app.elmenuxfa.com/asistente (Flutter + Next API).
+ * /asistente-negocio remains an internal Next fallback only.
  */
 
 function envFlagOn(raw: string | null | undefined): boolean {

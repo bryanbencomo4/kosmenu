@@ -79,7 +79,7 @@ function makeConfig(): WaEntryConfig {
     PLATFORM_WA_PREVIEW_SERVICE_ROLE_KEY: creds.key,
     PLATFORM_WA_ALLOWLIST_DIGITS: fromDigits,
     PLATFORM_WA_ENFORCE_ALLOWLIST: '1',
-  } as NodeJS.ProcessEnv);
+  } as unknown as NodeJS.ProcessEnv);
 }
 
 function payload(id: string, text: string, fromMe = false) {
@@ -241,7 +241,7 @@ describePreview('wa-entry Preview integration (isolated)', () => {
       .limit(5);
     expect(error).toBeNull();
     expect((data || []).length).toBeGreaterThan(0);
-    expect(data?.[0]?.origin).toBe('wa_entry_bot');
+    expect((data?.[0] as { origin?: string } | undefined)?.origin).toBe('wa_entry_bot');
   });
 
   afterAll(async () => {

@@ -43,22 +43,9 @@ if ([string]::IsNullOrWhiteSpace($supabaseAnonKey) -or -not $supabaseAnonKey.Sta
   throw 'Missing SUPABASE_ANON_KEY (env) or NEXT_PUBLIC_SUPABASE_ANON_KEY in site/.env.local'
 }
 
-# /asistente on app.elmenuxfa.com must NOT fall into Flutter SPA AuthGate.
-# Redirect to Next-hosted business assistant until a native Flutter route exists.
+# /asistente is handled by Flutter SPA (BusinessAssistantScreen). No external redirect.
 $vercelConfig = @'
 {
-  "redirects": [
-    {
-      "source": "/asistente",
-      "destination": "https://elmenuxfa.com/asistente-negocio",
-      "permanent": false
-    },
-    {
-      "source": "/asistente/:path*",
-      "destination": "https://elmenuxfa.com/asistente-negocio",
-      "permanent": false
-    }
-  ],
   "rewrites": [
     {
       "source": "/((?!assets/|branding/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|boot-fast\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|merchant-notifications(?:-sw)?\\.js|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
