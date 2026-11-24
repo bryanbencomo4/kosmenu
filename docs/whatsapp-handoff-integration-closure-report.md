@@ -8,7 +8,7 @@
 
 ## Commit reproducible
 
-**Commit:** `7c0a39f` — *Close Preview integration for WA handoff and Flutter /asistente*
+**Commit:** `00367a9` — *Close Preview integration for WA handoff and Flutter /asistente*
 
 Base previa: `1711ae4` / `3b55f04`.
 
