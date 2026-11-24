@@ -275,6 +275,7 @@ export async function POST(request: Request) {
       parsed.data.clientMessageId ||
       `op_${nowMs}_${Math.random().toString(36).slice(2, 8)}`;
 
+    let sendError: string | null = null;
     try {
       const { sendWhatsappText } = await import('../../../api/_lib/send-order-whatsapp');
       await sendWhatsappText(digits, text, {
@@ -282,14 +283,7 @@ export async function POST(request: Request) {
         dedupeKey: `wa-inbox-human:${clientMessageId}`,
       });
     } catch (e) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'send_failed',
-          detail: e instanceof Error ? e.message : String(e),
-        },
-        { status: 502 },
-      );
+      sendError = e instanceof Error ? e.message : String(e);
     }
 
     const msg = await appendInboxMessage({
@@ -302,6 +296,21 @@ export async function POST(request: Request) {
       operatorLabel,
     });
     const conversation = await getInboxConversation(digits);
+
+    if (sendError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'send_failed',
+          detail: sendError,
+          message: msg,
+          conversation,
+          elapsedMs: Date.now() - started,
+        },
+        { status: 502 },
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       message: msg,
