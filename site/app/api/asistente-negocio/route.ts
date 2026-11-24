@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { createClient } from '@supabase/supabase-js';
-import {
-  createMemoryWaHandoffStore,
-  createSupabaseWaHandoffStore,
-  type WaHandoffPayload,
-  type WaHandoffStore,
-} from '../_lib/wa-handoff';
+import type { WaHandoffPayload } from '../_lib/wa-handoff';
+import { resolveWaHandoffStore } from '../_lib/wa-handoff-store';
+import { appCorsPreflight, withAppCors } from '../_lib/app-cors';
 import { getUserFromBearerRequest } from '../_lib/supabase-user-auth';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { isBusinessAssistantApiEnabled } from '../../_lib/business-assistant';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const CORS = {
+  methods: 'POST, OPTIONS',
+  headers: 'authorization, content-type, accept',
+};
 
 const bodySchema = z.object({
   messages: z
@@ -26,21 +27,12 @@ const bodySchema = z.object({
   comercioId: z.string().trim().max(64).optional(),
 });
 
-function getHandoffStore(): WaHandoffStore {
-  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
-  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-  if (url && key && process.env.NODE_ENV !== 'test') {
-    try {
-      return createSupabaseWaHandoffStore(
-        createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }),
-      );
-    } catch {
-      /* fall through */
-    }
-  }
-  const g = globalThis as unknown as { __waHandoffStore?: WaHandoffStore };
-  if (!g.__waHandoffStore) g.__waHandoffStore = createMemoryWaHandoffStore();
-  return g.__waHandoffStore;
+function getHandoffStore() {
+  return resolveWaHandoffStore();
+}
+
+export async function OPTIONS(req: Request) {
+  return appCorsPreflight(req, CORS);
 }
 
 async function resolveMembership(userId: string, preferredComercioId?: string | null) {
@@ -127,6 +119,10 @@ function greeting(payload: WaHandoffPayload | null, authenticated: boolean): str
  * POST /api/asistente-negocio — conversational business assistant backend.
  * Flag: BUSINESS_ASSISTANT_ENABLED=1
  */
+function json(req: Request, data: unknown, status = 200) {
+  return withAppCors(req, NextResponse.json(data, { status }), CORS);
+}
+
 export async function POST(req: Request) {
   const vercelEnv = (process.env.VERCEL_ENV || '').trim().toLowerCase();
   const allow =
@@ -135,14 +131,14 @@ export async function POST(req: Request) {
     vercelEnv === 'preview' ||
     vercelEnv === '';
   if (!allow) {
-    return NextResponse.json({ ok: false, error: 'disabled' }, { status: 403 });
+    return json(req, { ok: false, error: 'disabled' }, 403);
   }
 
   let body: z.infer<typeof bodySchema>;
   try {
     body = bodySchema.parse(await req.json());
   } catch {
-    return NextResponse.json({ ok: false, error: 'invalid_body' }, { status: 400 });
+    return json(req, { ok: false, error: 'invalid_body' }, 400);
   }
 
   const user = await getUserFromBearerRequest(req);
@@ -175,7 +171,7 @@ export async function POST(req: Request) {
   const isBoot = !lastUser;
 
   if (isBoot) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated,
       handoffError,
@@ -188,32 +184,37 @@ export async function POST(req: Request) {
       selectedComercioId: membership.selected?.comercioId ?? null,
       text: handoffError
         ? handoffError === 'expired'
-          ? 'Este enlace venció. Pide uno nuevo por WhatsApp; tu conversación allí sigue disponible.'
+          ? 'Este enlace venció (TTL). No quedó atrapado: escribe de nuevo por WhatsApp y te enviaremos un acceso nuevo. Mientras tanto puedes iniciar sesión y consultar tu menú aquí.'
           : handoffError === 'consumed'
-            ? 'Este enlace ya fue usado. Si necesitas continuar, escribe de nuevo por WhatsApp.'
-            : 'No pude validar el acceso de WhatsApp. Puedes seguir si inicias sesión.'
+            ? 'Este enlace ya fue usado. Si necesitas continuar, escribe de nuevo por WhatsApp para un acceso nuevo.'
+            : 'No pude validar el acceso de WhatsApp. No hay una solicitud preparada. Puedes iniciar sesión o pedir un enlace nuevo.'
         : greeting(payload, authenticated),
       needsAuth: !authenticated && Boolean(payload?.pendingOperation?.startsWith('edit') || payload?.intent?.includes('admin')),
+      handoffValid: Boolean(payload) && !handoffError,
+      recoveryHint: handoffError === 'expired' || handoffError === 'consumed',
       panelUrl: 'https://app.elmenuxfa.com/',
       registerUrl: 'https://app.elmenuxfa.com/?tab=register',
     });
   }
 
   if (!authenticated) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: false,
       payload,
-      text:
-        'Para consultar tu menú o preparar cambios necesito que inicies sesión en elmenuxfa.com. Tu solicitud de WhatsApp se conserva en este enlace hasta que expire.',
+      handoffValid: Boolean(payload) && !handoffError,
+      text: handoffError
+        ? 'Inicia sesión para consultar tu negocio. El enlace de WhatsApp ya no es válido; pide uno nuevo si necesitas retomar esa solicitud.'
+        : 'Para consultar tu menú o preparar cambios necesito que inicies sesión en elmenuxfa.com. Tu solicitud de WhatsApp se conserva en este enlace hasta que expire.',
       needsAuth: true,
       panelUrl: 'https://app.elmenuxfa.com/',
+      registerUrl: 'https://app.elmenuxfa.com/?tab=register',
     });
   }
 
   if (!membership.selected && membership.list.length > 1) {
     const list = membership.list.map((c) => `• ${c.nombre}`).join('\n');
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       payload,
@@ -224,7 +225,7 @@ export async function POST(req: Request) {
   }
 
   if (!membership.selected) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       payload,
@@ -255,7 +256,7 @@ export async function POST(req: Request) {
     if (/\b(cambiar|actualizar|modificar|precio)\b/.test(t) || payload?.pendingOperation === 'edit_price') {
       const label = match ? String(match.nombre) : 'el producto';
       const current = match?.precio != null ? String(match.precio) : '—';
-      return NextResponse.json({
+      return json(req, {
         ok: true,
         authenticated: true,
         selectedComercioId: shop.comercioId,
@@ -288,7 +289,7 @@ export async function POST(req: Request) {
       .slice(0, 12)
       .map((p) => `• ${p.nombre}: ${p.precio ?? '—'}${p.disponible === false ? ' (agotado)' : ''}`)
       .join('\n');
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       selectedComercioId: shop.comercioId,
@@ -297,7 +298,7 @@ export async function POST(req: Request) {
   }
 
   if (/\b(tasa|cambio|moneda|dolar|dólar)\b/.test(t)) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       selectedComercioId: shop.comercioId,
@@ -307,7 +308,7 @@ export async function POST(req: Request) {
   }
 
   if (/\b(registrar|crear cuenta|nuevo negocio)\b/.test(t)) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       text: 'Para registrar un negocio adicional usa el flujo seguro del panel:\nhttps://app.elmenuxfa.com/?tab=register',
@@ -316,7 +317,7 @@ export async function POST(req: Request) {
   }
 
   if (/\b(agregar|añadir|nuevo producto)\b/.test(t)) {
-    return NextResponse.json({
+    return json(req, {
       ok: true,
       authenticated: true,
       selectedComercioId: shop.comercioId,
@@ -325,7 +326,7 @@ export async function POST(req: Request) {
     });
   }
 
-  return NextResponse.json({
+  return json(req, {
     ok: true,
     authenticated: true,
     selectedComercioId: shop.comercioId,

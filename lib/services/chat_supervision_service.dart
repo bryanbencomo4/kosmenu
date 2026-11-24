@@ -126,7 +126,7 @@ class ChatSupervisionService {
       Supabase.instance.client.auth.currentSession?.accessToken;
 
   static Uri _uri(String path, [Map<String, String>? query]) {
-    final base = AppConstants.apiBaseUrl;
+    final base = AppLinks.apiBaseUrl;
     return Uri.parse('$base$path').replace(queryParameters: query);
   }
 

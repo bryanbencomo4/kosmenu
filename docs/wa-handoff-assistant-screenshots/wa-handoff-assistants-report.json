@@ -1,7 +1,7 @@
 {
   "ok": true,
-  "base": "http://127.0.0.1:3023",
-  "appAsistente": "https://app.elmenuxfa.com/asistente",
+  "base": "http://127.0.0.1:3024",
+  "appAsistente": "http://127.0.0.1:8080/asistente",
   "viewports": [
     "mobile",
     "desktop"
@@ -11,12 +11,12 @@
       "name": "mobile:consumer_status",
       "ok": true,
       "status": 200,
-      "url": "http://127.0.0.1:3023/asistente?ref=wa&q=hamburguesas&zone=Caracas"
+      "url": "http://127.0.0.1:3024/asistente?ref=wa&q=hamburguesas&zone=Caracas"
     },
     {
       "name": "mobile:consumer_not_empty",
       "ok": true,
-      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:16 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:16 a. m.\nhamburguesas en Caracas\n2:"
+      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:47 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:47 a. m.\nhamburguesas en Caracas\n2:"
     },
     {
       "name": "mobile:consumer_context_or_composer",
@@ -47,18 +47,18 @@
       "ok": true,
       "status": 200,
       "snippet": "elmenuxfa.com",
-      "url": "https://app.elmenuxfa.com/asistente"
+      "url": "http://127.0.0.1:8080/asistente"
     },
     {
       "name": "desktop:consumer_status",
       "ok": true,
       "status": 200,
-      "url": "http://127.0.0.1:3023/asistente?ref=wa&q=hamburguesas&zone=Caracas"
+      "url": "http://127.0.0.1:3024/asistente?ref=wa&q=hamburguesas&zone=Caracas"
     },
     {
       "name": "desktop:consumer_not_empty",
       "ok": true,
-      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:16 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:16 a. m.\nhamburguesas en Caracas\n2:"
+      "bodySnippet": "Asistente elmenuxfa.com\n\nelmenuxfa.com\n\nen línea\n\n¡Hola! 👋 Bienvenido a elmenuxfa.com.\n2:47 a. m.\nRetomo tu búsqueda de WhatsApp. Un momento…\n2:47 a. m.\nhamburguesas en Caracas\n2:"
     },
     {
       "name": "desktop:consumer_context_or_composer",
@@ -89,7 +89,7 @@
       "ok": true,
       "status": 200,
       "snippet": "elmenuxfa.com",
-      "url": "https://app.elmenuxfa.com/asistente"
+      "url": "http://127.0.0.1:8080/asistente"
     }
   ],
   "screenshots": [

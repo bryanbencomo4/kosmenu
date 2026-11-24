@@ -120,8 +120,10 @@ export function buildWaHandoffUrl(params: {
     // Prefer hash fragment for the opaque code so referrers/logs/previews leak less.
     return `${base}?ref=wa#h=${code}`;
   }
+  // Flutter PathUrlStrategy strips URL fragments on boot — use query for merchant app.
   const base = params.businessAssistantBaseUrl.replace(/\/$/, '');
-  return `${base}#h=${code}`;
+  const join = base.includes('?') ? '&' : '?';
+  return `${base}${join}h=${code}`;
 }
 
 /** Validate without consuming — safe for link-preview bots / page boots. */

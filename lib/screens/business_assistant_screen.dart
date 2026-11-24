@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:kosmenu_app/core/theme/app_theme.dart';
+import 'package:kosmenu_app/screens/business_assistant_hash_stub.dart'
+    if (dart.library.html) 'package:kosmenu_app/screens/business_assistant_hash_web.dart';
 import 'package:kosmenu_app/services/elmenuxfa_api_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -48,6 +50,8 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   String? _error;
   String? _handoffCode;
   var _handoffConsumed = false;
+  var _handoffValid = false;
+  var _recoveryHint = false;
   StreamSubscription<AuthState>? _authSub;
 
   @override
@@ -55,14 +59,25 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
     super.initState();
     _handoffCode = widget.handoffCode;
     if ((_handoffCode == null || _handoffCode!.isEmpty) && kIsWeb) {
-      _handoffCode = BusinessAssistantScreen.handoffCodeFromUri(Uri.base);
+      _handoffCode = readBusinessAssistantHandoffFromLocation() ??
+          BusinessAssistantScreen.handoffCodeFromUri(Uri.base);
     }
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((_) {
       if (mounted && _booted) {
-        // Re-boot after login to recover pending request.
+        // Re-boot after login to recover pending request (if still within TTL).
         _boot(force: true);
       }
     });
+    if (kIsWeb) {
+      listenBusinessAssistantHashChange((_) {
+        final code = readBusinessAssistantHandoffFromLocation() ??
+            BusinessAssistantScreen.handoffCodeFromUri(Uri.base);
+        if (code == null || code.isEmpty || code == _handoffCode) return;
+        _handoffCode = code;
+        _handoffConsumed = false;
+        if (mounted) _boot(force: true);
+      });
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _boot());
   }
 
@@ -100,6 +115,14 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
 
   Future<void> _boot({bool force = false}) async {
     if (_busy && !force) return;
+    // Re-read hash on boot — PathUrlStrategy / Uri.base may omit fragment.
+    if (kIsWeb) {
+      final fromLoc = readBusinessAssistantHandoffFromLocation() ??
+          BusinessAssistantScreen.handoffCodeFromUri(Uri.base);
+      if (fromLoc != null && fromLoc.isNotEmpty) {
+        _handoffCode = fromLoc;
+      }
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -111,12 +134,19 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
         'handoffAction': 'peek',
       });
       final text = (json?['text'] as String?)?.trim();
+      _handoffValid = json?['handoffValid'] == true;
+      _recoveryHint = json?['recoveryHint'] == true;
+      final handoffError = (json?['handoffError'] as String?)?.trim();
+      if (handoffError != null && handoffError.isNotEmpty) {
+        _handoffValid = false;
+      }
       if (text != null && text.isNotEmpty) {
         _messages.add(_ChatMsg(role: 'assistant', text: text));
       }
       _booted = true;
     } catch (e) {
       _error = 'No pude conectar con el asistente. Revisa tu conexión.';
+      _handoffValid = false;
       _messages.add(
         _ChatMsg(
           role: 'assistant',
@@ -199,8 +229,12 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
     });
   }
 
-  Future<void> _openPanel() async {
-    final uri = Uri.parse('https://app.elmenuxfa.com/');
+  Future<void> _openPanel({bool register = false}) async {
+    final uri = Uri.parse(
+      register
+          ? 'https://app.elmenuxfa.com/?tab=register'
+          : 'https://app.elmenuxfa.com/',
+    );
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -212,6 +246,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
+      key: const Key('business_assistant_screen'),
       backgroundColor: const Color(0xFFF7F4EF),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -234,11 +269,22 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: _openPanel, child: const Text('Panel')),
+          TextButton(onPressed: () => _openPanel(), child: const Text('Panel')),
         ],
       ),
       body: Column(
         children: [
+          if (_recoveryHint)
+            Material(
+              color: const Color(0xFFFEF3C7),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  'El acceso de WhatsApp expiró o ya se usó. Escribe de nuevo por WhatsApp para un enlace nuevo; puedes seguir consultando con tu sesión.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+            ),
           if (session == null)
             Material(
               color: const Color(0xFFFFF7ED),
@@ -246,10 +292,12 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'No hay sesión. Inicia sesión para consultar tu menú o aplicar cambios.',
-                        style: TextStyle(fontSize: 13),
+                        _handoffValid
+                            ? 'Solicitud de WhatsApp lista. Inicia sesión para continuar con permisos.'
+                            : 'No hay sesión. Entra para consultar tu menú, o registra un negocio.',
+                        style: const TextStyle(fontSize: 13),
                       ),
                     ),
                     TextButton(
@@ -260,6 +308,10 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                         );
                       },
                       child: const Text('Entrar'),
+                    ),
+                    TextButton(
+                      onPressed: () => _openPanel(register: true),
+                      child: const Text('Registrar'),
                     ),
                   ],
                 ),

@@ -4,18 +4,15 @@
 
 import {
   buildWaHandoffUrl,
-  createMemoryWaHandoffStore,
   type WaHandoffDestination,
   type WaHandoffPayload,
   type WaHandoffStore,
 } from '../../_lib/wa-handoff';
+import { resolveWaHandoffStore } from '../../_lib/wa-handoff-store';
 import type { WaMasterConfig } from './config';
 
-let memoryFallback: WaHandoffStore | null = null;
-
 export function getDefaultWaHandoffStore(): WaHandoffStore {
-  if (!memoryFallback) memoryFallback = createMemoryWaHandoffStore();
-  return memoryFallback;
+  return resolveWaHandoffStore();
 }
 
 export async function issueMasterHandoff(params: {

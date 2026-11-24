@@ -79,7 +79,7 @@ describe('wa handoff codes', () => {
       consumerBaseUrl: 'https://elmenuxfa.com/asistente',
       businessAssistantBaseUrl: 'https://app.elmenuxfa.com/asistente',
     });
-    expect(bizUrl).toBe('https://app.elmenuxfa.com/asistente#h=abc');
+    expect(bizUrl).toBe('https://app.elmenuxfa.com/asistente?h=abc');
   });
 
   it('rejects expired, revoked, mismatched destination, and peek-safe', async () => {
@@ -200,7 +200,7 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(out.replies[0]).toMatch(/asistente para negocios|acceso seguro/i);
-    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente#h=/);
+    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
     expect(out.toolsUsed).toContain('handoff_business');
   });
 
@@ -238,7 +238,7 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(b.replies[0]).toMatch(/Pizza Nova Pilot/);
-    expect(b.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente#h=/);
+    expect(b.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
   });
 
   it('receptionist flag off keeps legacy long search path available', async () => {

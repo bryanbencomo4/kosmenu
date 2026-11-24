@@ -1,0 +1,82 @@
+{
+  "ok": true,
+  "flutterBase": "http://127.0.0.1:8080",
+  "nextBase": "http://127.0.0.1:3024",
+  "steps": [
+    {
+      "name": "mobile:minted_business_context",
+      "ok": true,
+      "handoffValid": true,
+      "text": "¡Hola! 😊 Vamos a revisar: cambiar.\n\nPrimero inicia sesión en tu cuenta de elmenuxfa.com para continuar de forma segura. Tu solicitud ya está preparada."
+    },
+    {
+      "name": "mobile:flutter_status",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "name": "mobile:business_assistant_screen",
+      "ok": true,
+      "hasCanvas": true,
+      "screenshotBytes": 25827
+    },
+    {
+      "name": "mobile:reload_keeps_asistente",
+      "ok": true,
+      "url": "http://127.0.0.1:8080/asistente"
+    },
+    {
+      "name": "mobile:invalid_handoff_no_false_prepared",
+      "ok": true,
+      "handoffValid": false,
+      "handoffError": "not_found",
+      "text": "No pude validar el acceso de WhatsApp. No hay una solicitud preparada. Puedes iniciar sesión o pedir un enlace nuevo."
+    },
+    {
+      "name": "mobile:cors_preflight",
+      "ok": true,
+      "status": 204
+    },
+    {
+      "name": "desktop:minted_business_context",
+      "ok": true,
+      "handoffValid": true,
+      "text": "¡Hola! 😊 Vamos a revisar: cambiar.\n\nPrimero inicia sesión en tu cuenta de elmenuxfa.com para continuar de forma segura. Tu solicitud ya está preparada."
+    },
+    {
+      "name": "desktop:flutter_status",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "name": "desktop:business_assistant_screen",
+      "ok": true,
+      "hasCanvas": true,
+      "screenshotBytes": 26542
+    },
+    {
+      "name": "desktop:reload_keeps_asistente",
+      "ok": true,
+      "url": "http://127.0.0.1:8080/asistente"
+    },
+    {
+      "name": "desktop:invalid_handoff_no_false_prepared",
+      "ok": true,
+      "handoffValid": false,
+      "handoffError": "not_found",
+      "text": "No pude validar el acceso de WhatsApp. No hay una solicitud preparada. Puedes iniciar sesión o pedir un enlace nuevo."
+    },
+    {
+      "name": "desktop:cors_preflight",
+      "ok": true,
+      "status": 204
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-flutter-screenshots\\mobile-minted-business.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-flutter-screenshots\\mobile-asistente.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-flutter-screenshots\\desktop-minted-business.png",
+    "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-handoff-flutter-screenshots\\desktop-asistente.png"
+  ]
+}
