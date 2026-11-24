@@ -22,19 +22,55 @@ export function AdminTopbar({
 }) {
   const canCreateBusiness = hasAdminPermission(admin.role, 'businesses.write');
 
-  return (
-    <header
-      className={[
-        'sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl',
-        compact ? 'shrink-0' : '',
-      ].join(' ')}
-    >
-      <div
-        className={[
-          'flex items-center gap-2 sm:gap-3',
-          compact ? 'px-2 py-1.5 sm:px-3 sm:py-2 lg:px-3' : 'px-3 py-2.5 sm:px-6 sm:py-3 lg:px-8',
-        ].join(' ')}
+  if (compact) {
+    return (
+      <header
+        className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 sm:px-3"
+        style={{ backgroundColor: '#202c33', borderColor: '#222d34' }}
       >
+        {onOpenMenu ? (
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#e9edef] lg:hidden"
+            aria-label="Abrir menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        ) : null}
+        {onToggleSidebar ? (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#8696a0] hover:bg-[#2a3942] lg:inline-flex"
+            aria-label={sidebarCollapsed ? 'Expandir menu lateral' : 'Plegar menu lateral'}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-5 w-5" />
+            ) : (
+              <PanelLeftClose className="h-5 w-5" />
+            )}
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium text-[#e9edef]">Admin · WhatsApp</p>
+        </div>
+        <form action={logoutAdminAction}>
+          <button
+            type="submit"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#8696a0] hover:bg-[#2a3942]"
+            aria-label="Cerrar sesion"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </form>
+      </header>
+    );
+  }
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
+      <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-6 sm:py-3 lg:px-8">
         {onOpenMenu ? (
           <button
             type="button"
@@ -64,24 +100,18 @@ export function AdminTopbar({
 
         <div className="min-w-0 flex-1 lg:hidden">
           <p className="truncate text-sm font-black tracking-[-0.02em] text-slate-950">
-            {compact ? 'WhatsApp' : 'Admin ElMenuxFA'}
+            Admin ElMenuxFA
           </p>
           <p className="truncate text-[11px] text-slate-500">{admin.displayName}</p>
         </div>
 
         <div className="hidden min-w-0 flex-1 lg:block">
-          <p className="text-sm font-semibold text-slate-950">
-            {compact ? 'Inbox WhatsApp' : 'Panel admin'}
-          </p>
-          {!compact ? (
-            <p className="truncate text-xs text-slate-500">{admin.email}</p>
-          ) : (
-            <p className="truncate text-xs text-slate-500">Número oficial · elmenuxfa.com</p>
-          )}
+          <p className="text-sm font-semibold text-slate-950">Panel admin</p>
+          <p className="truncate text-xs text-slate-500">{admin.email}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {canCreateBusiness && !compact ? (
+          {canCreateBusiness ? (
             <Link
               href="/admin/negocios"
               className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-xs font-black text-white sm:px-4 sm:text-sm"
@@ -91,19 +121,17 @@ export function AdminTopbar({
             </Link>
           ) : null}
 
-          {!compact ? (
-            <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 sm:flex">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-                <ShieldCheck className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 max-w-[140px]">
-                <p className="truncate text-xs font-semibold text-slate-950">
-                  {admin.displayName}
-                </p>
-                <p className="truncate text-[10px] text-slate-500">{admin.email}</p>
-              </div>
+          <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 sm:flex">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <ShieldCheck className="h-4 w-4" />
             </div>
-          ) : null}
+            <div className="min-w-0 max-w-[140px]">
+              <p className="truncate text-xs font-semibold text-slate-950">
+                {admin.displayName}
+              </p>
+              <p className="truncate text-[10px] text-slate-500">{admin.email}</p>
+            </div>
+          </div>
 
           <form action={logoutAdminAction}>
             <button

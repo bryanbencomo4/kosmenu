@@ -31,11 +31,17 @@ export function AdminShell({
 
   useEffect(() => {
     try {
+      // Inbox WhatsApp: start collapsed like WA Web icon rail unless user expanded.
+      if (isWaInbox) {
+        const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+        setSidebarCollapsed(stored !== '0');
+        return;
+      }
       setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [isWaInbox]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -59,7 +65,14 @@ export function AdminShell({
   };
 
   return (
-    <div className="min-h-dvh bg-[linear-gradient(180deg,#f7f5ff_0%,#f2f4ff_45%,#eef2ff_100%)] text-slate-900">
+    <div
+      className={[
+        'min-h-dvh text-slate-900',
+        isWaInbox
+          ? 'bg-[#111b21]'
+          : 'bg-[linear-gradient(180deg,#f7f5ff_0%,#f2f4ff_45%,#eef2ff_100%)]',
+      ].join(' ')}
+    >
       <div
         className={[
           'lg:grid lg:min-h-dvh',
