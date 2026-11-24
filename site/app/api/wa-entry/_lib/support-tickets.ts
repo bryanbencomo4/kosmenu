@@ -183,16 +183,16 @@ export function markSupportTicketNotified(id: string, ok: boolean, error?: strin
   tickets.set(id, t);
   const client = sb();
   if (client) {
-    void client
-      .from('wa_platform_support_tickets')
-      .update({
-        notified: t.notified,
-        notify_error: t.notifyError,
-        updated_at_ms: Date.now(),
-      })
-      .eq('id', id)
-      .then(() => undefined)
-      .catch(() => undefined);
+    void Promise.resolve(
+      client
+        .from('wa_platform_support_tickets')
+        .update({
+          notified: t.notified,
+          notify_error: t.notifyError,
+          updated_at_ms: Date.now(),
+        })
+        .eq('id', id),
+    ).catch(() => undefined);
   }
   return t;
 }
@@ -204,12 +204,12 @@ export function claimSupportTicket(id: string): WaSupportTicket | null {
   tickets.set(id, t);
   const client = sb();
   if (client) {
-    void client
-      .from('wa_platform_support_tickets')
-      .update({ status: 'claimed', updated_at_ms: Date.now() })
-      .eq('id', id)
-      .then(() => undefined)
-      .catch(() => undefined);
+    void Promise.resolve(
+      client
+        .from('wa_platform_support_tickets')
+        .update({ status: 'claimed', updated_at_ms: Date.now() })
+        .eq('id', id),
+    ).catch(() => undefined);
   }
   return t;
 }
