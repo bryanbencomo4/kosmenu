@@ -5,6 +5,7 @@ export {
   assistantReturnNotice,
   rootMenuIdForProfile,
 } from './copy';
+// Notices remain available for optional operator-authored sends; inbox take/return does not auto-send them.
 export { resolveMenuProfile } from './profile';
 export {
   tryHandleSmartMenu,

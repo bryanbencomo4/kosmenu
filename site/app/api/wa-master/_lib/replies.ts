@@ -26,10 +26,9 @@ export function buildDeterministicReplies(params: {
 
   if (intents.includes('support.human')) {
     escalateHuman = true;
+    // User-facing copy is applied in process.ts only after registration succeeds.
     return {
-      replies: [
-        '¡Claro! 😊 Hemos recibido tu solicitud.\n\nEn unos momentos, alguien de nuestro equipo se pondrá en contacto contigo por este mismo WhatsApp.\n\nGracias por tu paciencia. 💚',
-      ],
+      replies: [],
       escalateHuman,
       toolsUsed: ['escalate_human'],
       askedFields,

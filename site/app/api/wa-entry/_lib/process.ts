@@ -40,7 +40,11 @@ import {
   stampAttentionVersion,
   takeConversation,
 } from './operator-control';
-import { createSupportTicket, markSupportTicketNotified } from './support-tickets';
+import {
+  HUMAN_SUPPORT_FAILURE_REPLY,
+  HUMAN_SUPPORT_SUCCESS_REPLY,
+  registerHumanSupportRequest,
+} from './register-human-support';
 
 export type WaEntryProcessResult = {
   accepted: boolean;
@@ -514,20 +518,27 @@ async function processMasterAssistantBranch(params: {
   await memStore.save(event.fromDigits, orch.memory);
   storeOps += 1;
 
-  // Send the user-facing escalate notice BEFORE taking (take bumps attention version).
+  // Register support BEFORE claiming success; take after send (attention version).
   const attentionForSend = expectedAttentionVersion;
   let escalateReplies = orch.replies;
+  let escalateRegistered = false;
   if (orch.escalateHuman) {
-    const ticket = createSupportTicket({
+    const registered = await registerHumanSupportRequest({
       fromDigits: event.fromDigits,
       text: event.text,
-      context: orch.replies.join('\n').slice(0, 500),
+      context: [
+        orch.intents?.join(',') || '',
+        orch.specialist || '',
+        (orch.replies || []).join('\n'),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+        .slice(0, 500),
       nowMs,
     });
-    // Honest copy: only claim notification when we marked the ticket.
-    markSupportTicketNotified(ticket.id, true);
+    escalateRegistered = registered.ok;
     escalateReplies = [
-      '¡Claro! 😊 Hemos recibido tu solicitud.\n\nEn unos momentos, alguien de nuestro equipo se pondrá en contacto contigo por este mismo WhatsApp.\n\nGracias por tu paciencia. 💚',
+      registered.ok ? HUMAN_SUPPORT_SUCCESS_REPLY : HUMAN_SUPPORT_FAILURE_REPLY,
     ];
   }
   if (!orch.escalateHuman) {
@@ -543,10 +554,11 @@ async function processMasterAssistantBranch(params: {
     storeOps += 1;
   }
 
-  const nextState: WaThreadState = orch.escalateHuman ? 'human_handling' : 'awaiting_audience';
+  const nextState: WaThreadState =
+    orch.escalateHuman && escalateRegistered ? 'human_handling' : 'awaiting_audience';
 
   if (config.masterAssistantShadow || masterConfig.shadowMode) {
-    if (orch.escalateHuman) {
+    if (orch.escalateHuman && escalateRegistered) {
       await takeConversation({
         store,
         fromDigits: event.fromDigits,
@@ -562,7 +574,7 @@ async function processMasterAssistantBranch(params: {
       reason: 'master_shadow',
       eventId: event.messageId,
       chatId: event.fromDigits,
-      state: nextState,
+      state: orch.escalateHuman && escalateRegistered ? 'human_handling' : nextState,
       replies: [],
       metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
     };
@@ -572,7 +584,8 @@ async function processMasterAssistantBranch(params: {
     sender,
     store,
     event,
-    nextState: orch.escalateHuman ? 'awaiting_audience' : nextState,
+    nextState:
+      orch.escalateHuman && escalateRegistered ? 'awaiting_audience' : nextState,
     repliesText: escalateReplies,
     dedupeKey: orch.dedupeKey,
     nowMs,
@@ -582,7 +595,7 @@ async function processMasterAssistantBranch(params: {
   });
   storeOps = dispatched.metrics.storeOps;
 
-  if (orch.escalateHuman) {
+  if (orch.escalateHuman && escalateRegistered) {
     await takeConversation({
       store,
       fromDigits: event.fromDigits,

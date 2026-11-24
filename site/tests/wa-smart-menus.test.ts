@@ -130,7 +130,7 @@ describe('wa smart menus', () => {
     expect(memory.summary.signupDraft?.businessName).toBe('Pizza Demo');
   });
 
-  it('9 escalates human with success copy', async () => {
+  it('9 escalates human without claiming success in menu layer', async () => {
     const now = Date.now();
     const config = loadWaMasterConfig({
       PLATFORM_WA_MASTER: '1',
@@ -147,8 +147,8 @@ describe('wa smart menus', () => {
       fromDigits: '584140821633',
     });
     expect(out.escalateHuman).toBe(true);
-    expect(out.replies[0]).toMatch(/Hemos recibido tu solicitud/);
-    expect(out.replies[0]).toMatch(/En unos momentos/);
+    expect(out.replies).toEqual([]);
+    expect(out.intents).toContain('support.human');
   });
 
   it('8 opens support menu', async () => {

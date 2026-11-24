@@ -8,12 +8,7 @@ import type {
   WaMasterMemory,
   WaMasterSpecialist,
 } from '../types';
-import {
-  buildMenuText,
-  humanEscalateSuccessReply,
-  invalidChoiceReply,
-  rootMenuIdForProfile,
-} from './copy';
+import { buildMenuText, invalidChoiceReply, rootMenuIdForProfile } from './copy';
 import { resolveMenuProfile } from './profile';
 import { WA_MENU_STALE_MS, type WaMenuId, type WaMenuProfile } from './types';
 
@@ -221,13 +216,10 @@ export async function tryHandleSmartMenu(params: {
 
   // --- Universal free-text / digits (even during pending questions) ---
   if (isUniversalHuman(text) || digit === 9) {
+    // Copy is decided AFTER durable/inbox registration in process.ts.
     return {
       handled: true,
-      replies: [
-        humanEscalateSuccessReply({
-          fastCoverage: params.fastHumanCoverage !== false,
-        }),
-      ],
+      replies: [],
       memoryPatch: {
         ...patchMenu(nav.menuId || rootMenuIdForProfile(profile), profile, nowMs),
         pendingQuestion: null,
