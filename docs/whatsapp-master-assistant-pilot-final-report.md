@@ -1,7 +1,7 @@
 # elmenuxfa.com — Informe final piloto Asistente Maestro
 
 **Deployment ID:** `dpl_BSrmD1jNVcBniTvQdAVShiVTyMbE` (Ready, aliased `elmenuxfa.com`)  
-**Commit base:** `6bd4228` · commits piloto: ver `git log --oneline 6bd4228..HEAD` en `feature/wa-master-assistant`  
+**Commits recuperables:** `6bd4228` → `2988983` (wa-entry prod) → `a8cbff6` (Master Gemini piloto)  
 **Fecha:** 2026-11-24  
 **Pausa humana:** liberada 2026-11-24 (solo `584140821633`; auditoría en `backups/wa-master-clear-pause-20261124-013951/`)  
 
