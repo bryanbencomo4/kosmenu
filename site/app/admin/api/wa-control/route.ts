@@ -29,6 +29,10 @@ import {
 } from '../../../api/wa-entry/_lib/operator-control';
 import { listPendingSupportTickets } from '../../../api/wa-entry/_lib/support-tickets';
 import {
+  notifyAssistantReturnToContact,
+  notifyHumanTakeToContact,
+} from '../../../api/wa-entry/_lib/attention-notices';
+import {
   reactWasenderMessage,
   sendWasenderDirect,
   uploadWasenderMedia,
@@ -265,11 +269,29 @@ export async function POST(request: Request) {
         controllerId,
         nowMs,
       });
-      return NextResponse.json({ ok: true, control, elapsedMs: Date.now() - started });
+      const notice = await notifyHumanTakeToContact({
+        store,
+        fromDigits: digits,
+        operatorLabel,
+        nowMs,
+      });
+      return NextResponse.json({
+        ok: true,
+        control,
+        notice,
+        elapsedMs: Date.now() - started,
+      });
     }
+    const notice = await notifyHumanTakeToContact({
+      store,
+      fromDigits: digits,
+      operatorLabel,
+      nowMs,
+    });
     return NextResponse.json({
       ok: true,
       conversation: taken.conversation,
+      notice,
       elapsedMs: Date.now() - started,
     });
   }
@@ -287,17 +309,25 @@ export async function POST(request: Request) {
         controllerId,
         nowMs,
       });
+      const notice = canResumeAutoReplyForContact(digits)
+        ? await notifyAssistantReturnToContact({ store, fromDigits: digits, nowMs })
+        : { sent: false, error: 'auto_reply_not_allowed' };
       return NextResponse.json({
         ok: true,
         control,
         aiResumed: canResumeAutoReplyForContact(digits),
+        notice,
         elapsedMs: Date.now() - started,
       });
     }
+    const notice = returned.aiResumed
+      ? await notifyAssistantReturnToContact({ store, fromDigits: digits, nowMs })
+      : { sent: false, error: 'ai_not_resumed' };
     return NextResponse.json({
       ok: true,
       conversation: returned.conversation,
       aiResumed: returned.aiResumed,
+      notice,
       elapsedMs: Date.now() - started,
     });
   }

@@ -28,7 +28,7 @@ export function buildDeterministicReplies(params: {
     escalateHuman = true;
     return {
       replies: [
-        'Entendido. Voy a pausar la atención automática para que una persona del equipo de elmenuxfa.com pueda ayudarte.\n\nCuéntale el detalle cuando te escriba; ya dejo el contexto de esta conversación.',
+        '¡Claro! 😊 Hemos recibido tu solicitud.\n\nEn unos momentos, alguien de nuestro equipo se pondrá en contacto contigo por este mismo WhatsApp.\n\nGracias por tu paciencia. 💚',
       ],
       escalateHuman,
       toolsUsed: ['escalate_human'],

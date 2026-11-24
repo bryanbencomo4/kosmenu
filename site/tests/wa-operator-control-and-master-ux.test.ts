@@ -61,6 +61,11 @@ function emptyMemory(fromDigits: string): WaMasterMemory {
       pendingAdminProposal: null,
       lastHandoffUrl: null,
       lastHandoffAtMs: null,
+      menuId: null,
+      menuProfile: null,
+      menuUpdatedAtMs: 0,
+      misunderstandCount: 0,
+      supportIssueText: null,
     },
     turns: [],
   };

@@ -26,6 +26,11 @@ export function emptySummary(nowMs: number): WaMasterSummary {
     pendingAdminProposal: null,
     lastHandoffUrl: null,
     lastHandoffAtMs: null,
+    menuId: null,
+    menuProfile: null,
+    menuUpdatedAtMs: 0,
+    misunderstandCount: 0,
+    supportIssueText: null,
   };
 }
 
@@ -44,6 +49,11 @@ export function normalizeSummary(raw: Partial<WaMasterSummary> | null | undefine
     pendingAdminProposal: raw.pendingAdminProposal ?? null,
     lastHandoffUrl: raw.lastHandoffUrl ?? null,
     lastHandoffAtMs: raw.lastHandoffAtMs ?? null,
+    menuId: raw.menuId ?? null,
+    menuProfile: raw.menuProfile ?? null,
+    menuUpdatedAtMs: raw.menuUpdatedAtMs ?? 0,
+    misunderstandCount: raw.misunderstandCount ?? 0,
+    supportIssueText: raw.supportIssueText ?? null,
   };
 }
 

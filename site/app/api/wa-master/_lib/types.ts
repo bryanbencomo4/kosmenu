@@ -116,6 +116,12 @@ export type WaMasterSummary = {
   /** Last issued handoff URL (avoid repeat spam). */
   lastHandoffUrl: string | null;
   lastHandoffAtMs: number | null;
+  /** Smart menu navigation (numbered, contextual). */
+  menuId: string | null;
+  menuProfile: string | null;
+  menuUpdatedAtMs: number;
+  misunderstandCount: number;
+  supportIssueText: string | null;
 };
 
 /** L3 — durable contact profile (no secrets) */

@@ -527,7 +527,7 @@ async function processMasterAssistantBranch(params: {
     // Honest copy: only claim notification when we marked the ticket.
     markSupportTicketNotified(ticket.id, true);
     escalateReplies = [
-      'Quiero darte la información correcta. 😊 Dejé tu consulta registrada para que un agente de elmenuxfa.com pueda ayudarte lo antes posible.\n\nPauso el asistente automático en esta conversación.',
+      '¡Claro! 😊 Hemos recibido tu solicitud.\n\nEn unos momentos, alguien de nuestro equipo se pondrá en contacto contigo por este mismo WhatsApp.\n\nGracias por tu paciencia. 💚',
     ];
   }
   if (!orch.escalateHuman) {

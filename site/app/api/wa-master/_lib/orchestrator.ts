@@ -25,6 +25,7 @@ import {
 } from './specialists/admin';
 import { runCommercialSpecialist } from './specialists/commercial';
 import { runConsumerSpecialist } from './specialists/consumer';
+import { tryHandleSmartMenu } from './menus';
 import type {
   WaMasterIdentity,
   WaMasterMemory,
@@ -64,9 +65,50 @@ export async function runWaMasterOrchestrator(
   };
   memory = appendTurn(memory, { role: 'user', text, atMs: nowMs });
 
+  // Smart numbered menus (0/8/9 + profile roots) — before specialists.
+  const menuHit = await tryHandleSmartMenu({
+    text,
+    identity,
+    memory,
+    config,
+    nowMs,
+    fromDigits: input.fromDigits,
+    handoffStore: deps.handoffStore,
+    fastHumanCoverage: true,
+  });
+  if (menuHit.handled && !menuHit.delegate) {
+    memory = patchSummary(memory, menuHit.memoryPatch, nowMs);
+    for (const r of menuHit.replies) {
+      memory = appendTurn(memory, {
+        role: 'assistant',
+        text: r,
+        atMs: nowMs,
+        specialist: menuHit.specialist,
+      });
+    }
+    memory = setLastIntent(memory, menuHit.intents[0] || 'greeting', nowMs);
+    return {
+      replies: menuHit.replies.slice(0, config.maxRepliesPerTurn),
+      intents: menuHit.intents,
+      specialist: menuHit.specialist,
+      memory,
+      escalateHuman: menuHit.escalateHuman,
+      toolsUsed: menuHit.toolsUsed,
+      mode: 'deterministic',
+      dedupeKey: `menu:${messageId}:${menuHit.intents.join(',')}`,
+    };
+  }
+  if (menuHit.handled && menuHit.delegate) {
+    memory = patchSummary(memory, menuHit.memoryPatch, nowMs);
+  }
+
   const classified = classifyWaMasterIntents({ text, identity, memory });
   let intents = classified.intents;
   let specialist = classified.specialist;
+  if (menuHit.delegate) {
+    intents = [menuHit.delegate.intent];
+    specialist = menuHit.delegate.specialist;
+  }
 
   const looksCommercial =
     /\b(registrar|poner mi|poner el men[uú]|crear.*men[uú]|plataforma|tengo una? (pizzer|hamburg|restaurante|negocio)|planes|precios del servicio|men[uú] de mi restaurante)\b/i.test(
