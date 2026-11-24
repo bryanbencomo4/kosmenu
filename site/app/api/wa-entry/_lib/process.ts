@@ -11,6 +11,15 @@ import type { WaEntrySender } from './sender';
 import type { WaEntryAsyncStore } from './store-async';
 import { asAsyncStore } from './store-async';
 import type { WaEntryStore } from './store';
+import {
+  createMemoryWaMasterStore,
+  loadOrCreateMemory,
+  loadWaMasterConfig,
+  resolveWaMasterIdentity,
+  runWaMasterOrchestrator,
+  type WaMasterIdentityCatalogRow,
+  type WaMasterMemoryStore,
+} from '../../wa-master/_lib';
 
 export type WaEntryProcessResult = {
   accepted: boolean;
@@ -36,6 +45,9 @@ export type ProcessWaEntryParams = {
   payload?: unknown;
   nowMs?: number;
   forceSendFail?: boolean;
+  /** Optional Master Assistant identity catalog (tests / future service-role snapshot). */
+  masterIdentityCatalog?: WaMasterIdentityCatalogRow[];
+  masterMemoryStore?: WaMasterMemoryStore;
 };
 
 function safeParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -66,7 +78,8 @@ export async function processWaEntryEvent(
   const store = resolveAsyncStore(params.store);
   let storeOps = 0;
 
-  if (!config.inboundEnabled || !config.routerEnabled) {
+  // Inbound kill-switch: no claim, no side effects.
+  if (!config.inboundEnabled) {
     return {
       accepted: true,
       action: 'ignored',
@@ -138,6 +151,71 @@ export async function processWaEntryEvent(
     }
   }
 
+  // Passive reception: durable claim + classify without auto-replies.
+  if (!config.routerEnabled) {
+    if (event.isGroup) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: 'group',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+    if (event.isStatus) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: 'status',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+    if (event.fromMe) {
+      const thread = (await store.getThread(event.fromDigits)) || {
+        fromDigits: event.fromDigits,
+        state: 'human_handling' as const,
+        updatedAtMs: nowMs,
+        expiresAtMs: nowMs + config.threadTtlMs,
+        humanPausedUntilMs: nowMs + config.humanPauseMs,
+        repliesLastHour: [] as number[],
+        lastOutboundDedupeKey: null as string | null,
+      };
+      const paused = {
+        ...thread,
+        state: 'human_handling' as const,
+        humanPausedUntilMs: nowMs + config.humanPauseMs,
+        updatedAtMs: nowMs,
+        expiresAtMs: nowMs + config.threadTtlMs,
+      };
+      await store.saveThread(paused);
+      storeOps += 2;
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: 'from_me',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        state: 'human_handling',
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'router_off',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
   if (!isAllowlisted(config, event.fromDigits) && !event.fromMe) {
     return {
       accepted: true,
@@ -152,6 +230,22 @@ export async function processWaEntryEvent(
 
   const threadBefore = await store.getThread(event.fromDigits);
   storeOps += 1;
+
+  // Master Assistant (flag OFF by default). Reuses claim/allowlist/human gates above.
+  if (config.masterAssistantEnabled) {
+    return processMasterAssistantBranch({
+      config,
+      store,
+      sender,
+      event,
+      threadBefore,
+      nowMs,
+      storeOps,
+      forceSendFail: params.forceSendFail,
+      masterIdentityCatalog: params.masterIdentityCatalog,
+      masterMemoryStore: params.masterMemoryStore,
+    });
+  }
 
   const { result, thread } = routeWaEntryEvent({
     event,
@@ -177,6 +271,176 @@ export async function processWaEntryEvent(
     };
   }
 
+  return dispatchReplies({
+    sender,
+    store,
+    event,
+    nextState: result.nextState,
+    repliesText: result.replies,
+    dedupeKey: result.dedupeKey,
+    nowMs,
+    storeOps,
+    forceSendFail: params.forceSendFail,
+  });
+}
+
+async function processMasterAssistantBranch(params: {
+  config: WaEntryConfig;
+  store: WaEntryAsyncStore;
+  sender: WaEntrySender;
+  event: WaNormalizedEvent;
+  threadBefore: Awaited<ReturnType<WaEntryAsyncStore['getThread']>>;
+  nowMs: number;
+  storeOps: number;
+  forceSendFail?: boolean;
+  masterIdentityCatalog?: WaMasterIdentityCatalogRow[];
+  masterMemoryStore?: WaMasterMemoryStore;
+}): Promise<WaEntryProcessResult> {
+  const { config, store, sender, event, nowMs } = params;
+  let storeOps = params.storeOps;
+
+  // Preserve human pause semantics from existing thread state.
+  if (
+    params.threadBefore?.humanPausedUntilMs != null &&
+    params.threadBefore.humanPausedUntilMs > nowMs
+  ) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'human_handling',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      state: 'human_handling',
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  if (event.fromMe) {
+    const paused = {
+      fromDigits: event.fromDigits,
+      state: 'human_handling' as const,
+      updatedAtMs: nowMs,
+      expiresAtMs: nowMs + config.threadTtlMs,
+      humanPausedUntilMs: nowMs + config.humanPauseMs,
+      repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
+      lastOutboundDedupeKey: params.threadBefore?.lastOutboundDedupeKey ?? null,
+    };
+    await store.saveThread(paused);
+    storeOps += 1;
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'from_me',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      state: 'human_handling',
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  if (event.isGroup) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'group',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  const masterConfig = loadWaMasterConfig({
+    PLATFORM_WA_MASTER: config.masterAssistantEnabled ? '1' : '0',
+    PLATFORM_WA_MASTER_SHADOW: config.masterAssistantShadow ? '1' : '0',
+    PLATFORM_WA_CONSUMER_URL: config.consumerAssistantUrl,
+    PLATFORM_WA_BUSINESS_LANDING_URL: config.businessLandingUrl,
+    PLATFORM_WA_BUSINESS_REGISTER_URL: config.businessRegisterUrl,
+    PLATFORM_WA_BUSINESS_MANAGE_URL: config.businessManageUrl,
+  } as NodeJS.ProcessEnv);
+
+  const memStore = params.masterMemoryStore ?? createMemoryWaMasterStore();
+  const memory = await loadOrCreateMemory(
+    memStore,
+    event.fromDigits,
+    nowMs,
+    masterConfig.profileTtlMs,
+  );
+  const identity = resolveWaMasterIdentity({
+    fromDigits: event.fromDigits,
+    catalog: params.masterIdentityCatalog ?? [],
+  });
+
+  const orch = runWaMasterOrchestrator(
+    {
+      fromDigits: event.fromDigits,
+      text: event.text,
+      messageId: event.messageId,
+      nowMs,
+      identity,
+      memory,
+      forceDeterministic: true,
+    },
+    masterConfig,
+  );
+
+  await memStore.save(event.fromDigits, orch.memory);
+  storeOps += 1;
+
+  const nextState: WaThreadState = orch.escalateHuman ? 'human_handling' : 'awaiting_audience';
+  await store.saveThread({
+    fromDigits: event.fromDigits,
+    state: nextState,
+    updatedAtMs: nowMs,
+    expiresAtMs: nowMs + config.threadTtlMs,
+    humanPausedUntilMs: orch.escalateHuman ? nowMs + config.humanPauseMs : null,
+    repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
+    lastOutboundDedupeKey: orch.dedupeKey,
+  });
+  storeOps += 1;
+
+  if (config.masterAssistantShadow || masterConfig.shadowMode) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'master_shadow',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      state: nextState,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  return dispatchReplies({
+    sender,
+    store,
+    event,
+    nextState,
+    repliesText: orch.replies,
+    dedupeKey: orch.dedupeKey,
+    nowMs,
+    storeOps,
+    forceSendFail: params.forceSendFail,
+  });
+}
+
+async function dispatchReplies(params: {
+  sender: WaEntrySender;
+  store: WaEntryAsyncStore;
+  event: WaNormalizedEvent;
+  nextState: WaThreadState;
+  repliesText: string[];
+  dedupeKey: string;
+  nowMs: number;
+  storeOps: number;
+  forceSendFail?: boolean;
+}): Promise<WaEntryProcessResult> {
+  const { sender, store, event, nowMs } = params;
+  let storeOps = params.storeOps;
+
   const locked = await store.tryAcquireSendLock(event.fromDigits, nowMs, 15_000);
   storeOps += 1;
   if (!locked) {
@@ -186,7 +450,7 @@ export async function processWaEntryEvent(
       reason: 'rate_limited',
       eventId: event.messageId,
       chatId: event.fromDigits,
-      state: result.nextState,
+      state: params.nextState,
       replies: [],
       metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
     };
@@ -194,13 +458,13 @@ export async function processWaEntryEvent(
 
   const replies: WaEntryProcessResult['replies'] = [];
   try {
-    for (const text of result.replies) {
+    for (const text of params.repliesText) {
       const outbound = await sendWithBoundedRetry({
         sender,
         to: event.fromDigits,
         text,
         eventId: event.messageId,
-        dedupeKey: result.dedupeKey,
+        dedupeKey: params.dedupeKey,
         forceFail: params.forceSendFail,
       });
       storeOps += 1;
@@ -211,7 +475,7 @@ export async function processWaEntryEvent(
           reason: 'send_failed_after_retry',
           eventId: event.messageId,
           chatId: event.fromDigits,
-          state: result.nextState,
+          state: params.nextState,
           replies,
           metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
         };
@@ -231,7 +495,7 @@ export async function processWaEntryEvent(
     reason: 'ok',
     eventId: event.messageId,
     chatId: event.fromDigits,
-    state: result.nextState,
+    state: params.nextState,
     replies,
     metrics: {
       receivedAtMs: nowMs,

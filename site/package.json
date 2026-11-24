@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:wa-entry": "vitest run tests/wa-entry-router.test.ts",
+    "test:wa-master": "vitest run tests/wa-master-orchestrator.test.ts",
     "test:wa-entry-preview": "node scripts/wa-entry-preview-integration.mjs",
     "test:supervision-e2e": "node scripts/chat-supervision-ci-e2e.mjs",
     "typecheck": "tsc --noEmit"

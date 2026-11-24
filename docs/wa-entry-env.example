@@ -18,11 +18,33 @@ PLATFORM_WA_ECHO_WINDOW_MS=300000
 PLATFORM_WA_MAX_BODY_BYTES=65536
 PLATFORM_WA_WEBHOOK_RATE_PER_MINUTE=120
 
+# Interactive modality (default text). `poll` is local/gated only — never enable
+# PLATFORM_WA_POLL_SEND in production without Edge queue + poll.results webhook auth.
+# PLATFORM_WA_INTERACTIVE_MODE=text
+# PLATFORM_WA_POLL_SEND=0
+
+# Asistente Maestro (default OFF). Do not enable on production ELMENUXFA1 without GO.
+# PLATFORM_WA_MASTER=0
+# PLATFORM_WA_MASTER_SHADOW=0
+# PLATFORM_WA_MASTER_ALLOW_GEMINI=0
+
 # Local file/sim fallback (dev UI only)
 # PLATFORM_WA_ADAPTER=sim
 # PLATFORM_WA_STORE=file
 # PLATFORM_WA_LOCAL_DIR=.wa-entry-local
 # PLATFORM_WA_ALLOW_INSECURE_LOCAL=1
+
+# --- Production path (flags default OFF; enable gradually) ---
+# PLATFORM_WA_INBOUND=0
+# PLATFORM_WA_ROUTER=0
+# PLATFORM_WA_ADAPTER=wasender
+# PLATFORM_WA_STORE=supabase
+# PLATFORM_WA_ALLOW_REAL_WASENDER=0
+# PLATFORM_WA_ENFORCE_ALLOWLIST=1
+# PLATFORM_WA_ALLOWLIST_DIGITS=
+# PLATFORM_WA_WEBHOOK_SECRET=
+# PLATFORM_WA_PROD_PROJECT_REF=qqhberaayhohxlbbhdyi
+# Uses NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (must be prod ref).
 
 # Link defaults (public read-only destinations)
 # PLATFORM_WA_CONSUMER_URL=https://elmenuxfa.com/asistente?ref=wa
