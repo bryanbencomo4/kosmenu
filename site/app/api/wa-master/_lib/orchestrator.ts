@@ -369,10 +369,12 @@ export async function runWaMasterOrchestrator(
   }
 
   // Live Gemini polish (1 HTTP typical): natural wording grounded in specialist facts.
-  // Skipped for admin/auth, human escalate, and receptionist handoff replies.
+  // Skipped for admin/auth, greetings, human escalate, and receptionist handoff replies.
+  // Greeting polish was inventing "menú sin productos" over a simple hello.
   const softForGemini =
     !primary.startsWith('admin') &&
     primary !== 'support.human' &&
+    primary !== 'greeting' &&
     !escalateHuman &&
     !skipGeminiPolish &&
     !config.receptionistMode;

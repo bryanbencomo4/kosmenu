@@ -258,10 +258,11 @@ export async function tryHandleSmartMenu(params: {
     return showRoot(profile);
   }
 
-  // Greeting / empty with no active menu → root
+  // Greeting / "menú" / empty → always re-open profile root.
+  // Must not require !menuId: after support/human or mid-session, "Hola" was
+  // falling through to Gemini and skipping the numbered smart menu.
   if (
-    !nav.menuId &&
-    (digit === null || nav.stale) &&
+    digit === null &&
     (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|hi|hello)(\b|$)/.test(t) ||
       t === 'menu' ||
       t === 'menú' ||

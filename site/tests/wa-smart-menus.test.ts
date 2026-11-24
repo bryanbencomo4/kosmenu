@@ -91,6 +91,43 @@ describe('wa smart menus', () => {
     expect(out.memoryPatch.menuId).toBe('root_unknown');
   });
 
+  it('Hola re-opens root even when a menuId is already active', async () => {
+    const now = Date.now();
+    const config = loadWaMasterConfig({
+      PLATFORM_WA_MASTER: '1',
+    } as unknown as NodeJS.ProcessEnv);
+    const memory = createEmptyMemory('584140821633', now, 86_400_000);
+    memory.summary.menuId = 'support_issue';
+    memory.summary.menuProfile = 'registered';
+    memory.summary.menuUpdatedAtMs = now;
+    memory.summary.humanIntervened = true;
+    const out = await tryHandleSmartMenu({
+      text: 'Hola',
+      identity: identity({
+        role: 'merchant_candidate',
+        comercios: [
+          {
+            comercioId: 'c1',
+            publicName: 'pizzas el trueno',
+            slug: 'pizzas-el-trueno',
+            matchField: 'whatsapp',
+            provenance: 'inferred_ai',
+          },
+        ],
+      }),
+      memory,
+      config,
+      nowMs: now,
+      fromDigits: '584140821633',
+    });
+    expect(out.handled).toBe(true);
+    expect(out.skipGeminiPolish).toBe(true);
+    expect(out.memoryPatch.menuId).toBe('root_registered');
+    expect(out.replies[0]).toMatch(/pizzas el trueno/);
+    expect(out.replies[0]).toMatch(/1️⃣/);
+    expect(out.replies[0]).toMatch(/9️⃣/);
+  });
+
   it('0 returns to profile root without wiping signup memory', async () => {
     const now = Date.now();
     const config = loadWaMasterConfig({
