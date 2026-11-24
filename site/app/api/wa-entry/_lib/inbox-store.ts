@@ -269,6 +269,45 @@ export async function appendInboxMessage(input: {
   return msg;
 }
 
+/** Seed list from durable wa_entry_outbound + threads (no new tables). */
+async function hydrateFromDurableControlStore(): Promise<void> {
+  const store = resolveWaEntryControlStore();
+  const nowMs = Date.now();
+  let outbound: Awaited<ReturnType<typeof store.listOutbound>> = [];
+  try {
+    outbound = await store.listOutbound(120);
+  } catch {
+    return;
+  }
+  for (const row of outbound) {
+    const fromDigits = digitsOf(row.to);
+    if (!fromDigits || fromDigits.startsWith('__')) continue;
+    const thread = await store.getThread(fromDigits);
+    const control = describeConversationControl(fromDigits, thread, nowMs);
+    const prev = convMap().get(fromDigits);
+    const seeded = mergeControl(prev, control, {
+      lastMessageText: prev?.lastMessageText || (row.text || '').slice(0, 240),
+      lastMessageAtMs: Math.max(prev?.lastMessageAtMs || 0, row.atMs || 0),
+      updatedAtMs: Math.max(prev?.updatedAtMs || 0, row.atMs || 0),
+    });
+    convMap().set(fromDigits, seeded);
+    const msgs = msgMap().get(fromDigits) || [];
+    if (!msgs.some((m) => m.outboundId === row.id || m.id === `out_${row.id}`)) {
+      msgs.push({
+        id: `out_${row.id}`,
+        fromDigits,
+        role: row.origin === 'wa_entry_bot' ? 'assistant' : 'operator',
+        text: row.text || '',
+        atMs: row.atMs,
+        outboundId: row.id,
+      });
+      msgs.sort((a, b) => a.atMs - b.atMs);
+      if (msgs.length > 500) msgs.splice(0, msgs.length - 500);
+      msgMap().set(fromDigits, msgs);
+    }
+  }
+}
+
 export async function listInboxConversations(input?: {
   filter?: string;
   q?: string;
@@ -279,6 +318,8 @@ export async function listInboxConversations(input?: {
   const limit = Math.min(200, Math.max(1, input?.limit || 80));
   const store = resolveWaEntryControlStore();
   const nowMs = Date.now();
+
+  await hydrateFromDurableControlStore();
 
   for (const r of Array.from(convMap().values())) {
     const thread = await store.getThread(r.fromDigits);
