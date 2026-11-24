@@ -1,0 +1,22 @@
+{
+  "base": "https://admin.elmenuxfa.com",
+  "at": "2026-11-24T08:57:13.527Z",
+  "steps": [
+    {
+      "name": "auth_gate",
+      "ok": true,
+      "detail": "Unauthorized redirected → https://admin.elmenuxfa.com/admin/login?next=%2Fadmin%2Fwa-control"
+    },
+    {
+      "name": "ui_desktop",
+      "ok": false,
+      "detail": "Could not open inbox (set ADMIN_E2E_EMAIL / ADMIN_E2E_PASSWORD)"
+    },
+    {
+      "name": "ui_mobile",
+      "ok": false,
+      "detail": "Could not open inbox (set ADMIN_E2E_EMAIL / ADMIN_E2E_PASSWORD)"
+    }
+  ],
+  "outDir": "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\wa-inbox-screenshots"
+}

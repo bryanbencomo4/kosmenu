@@ -1,3 +1,4 @@
+import { isPlatformWaAutoReplyAllowed } from './auto-reply-policy';
 import { hashOutboundText, type WaOutboundRecord } from './contract';
 import type { WaEntryConfig } from './config';
 import { isAllowlisted } from './config';
@@ -164,6 +165,23 @@ export function createPreparedWasenderSender(params: {
       }
 
       const digits = req.to.replace(/\D/g, '');
+      // Absolute auto-reply silence (independent of PLATFORM_WA_ALLOWLIST / Master flags).
+      if (!isPlatformWaAutoReplyAllowed(digits)) {
+        const record: WaOutboundRecord = {
+          id: `suppressed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          to: digits,
+          text: req.text,
+          eventId: req.eventId,
+          dedupeKey: req.dedupeKey,
+          result: 'refused',
+          atMs: Date.now(),
+          attempt: 1,
+          origin: 'wa_entry_bot',
+          textHash: hashOutboundText(req.text),
+        };
+        await asyncStore.appendOutbound(record);
+        return { ok: false, alreadySent: false, record };
+      }
       // Public mode (enforce off + empty list): process already gated inbound.
       // If a list exists, still require membership before real send.
       const sendGate =

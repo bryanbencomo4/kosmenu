@@ -6,13 +6,19 @@ export const dynamic = 'force-dynamic';
 export default async function AdminWaControlPage() {
   await requireAdminAnyPermission(['orders.write', 'businesses.write', 'security.write']);
   return (
-    <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px' }}>
-      <h1 style={{ fontSize: 22, marginBottom: 8 }}>Control WhatsApp · elmenuxfa.com</h1>
-      <p style={{ color: '#555', marginBottom: 20, lineHeight: 1.45 }}>
-        Toma conversaciones, pausa el bot de la plataforma y reanúdalo. No detiene notificaciones
-        de pedidos ni la sesión WaSender.
-      </p>
+    <div className="mx-auto max-w-[1600px]">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2 px-1">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            Inbox WhatsApp · elmenuxfa.com
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">
+            Recepción del número oficial. Respuestas automáticas solo para contactos autorizados.
+            Toma cualquier conversación con un clic. No detiene notificaciones de pedidos.
+          </p>
+        </div>
+      </div>
       <WaControlClient />
-    </main>
+    </div>
   );
 }

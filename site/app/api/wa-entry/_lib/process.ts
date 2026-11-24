@@ -27,6 +27,11 @@ import {
 } from '../../wa-master/_lib';
 import type { WaMasterDiscoveryCtx, WaMasterDiscoveryExecute } from '../../wa-master/_lib/discovery-bridge';
 import type { AdminMenuLoader } from '../../wa-master/_lib/specialists/admin';
+import { isPlatformWaAutoReplyAllowed } from './auto-reply-policy';
+import {
+  appendInboxMessage,
+  upsertInboxConversationOnInbound,
+} from './inbox-store';
 import {
   describeConversationControl,
   readGlobalBotMute,
@@ -181,6 +186,19 @@ export async function processWaEntryEvent(
       threadTtlMs: config.threadTtlMs,
     });
     storeOps += 2;
+    try {
+      await appendInboxMessage({
+        fromDigits: event.fromDigits,
+        role: 'operator',
+        text: event.text,
+        atMs: nowMs,
+        clientMessageId: event.messageId,
+        operatorId: 'wasender:fromMe',
+        operatorLabel: 'WhatsApp Business',
+      });
+    } catch {
+      /* inbox best-effort */
+    }
     return {
       accepted: true,
       action: 'ignored',
@@ -193,30 +211,50 @@ export async function processWaEntryEvent(
     };
   }
 
+  if (event.isGroup) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'group',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+  if (event.isStatus) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'status',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
+  // Always register 1:1 inbound in the platform inbox (even when bot stays silent).
+  try {
+    await upsertInboxConversationOnInbound({
+      fromDigits: event.fromDigits,
+      displayName: null,
+      text: event.text,
+      atMs: nowMs,
+    });
+    await appendInboxMessage({
+      fromDigits: event.fromDigits,
+      role: 'contact',
+      text: event.text,
+      atMs: nowMs,
+      clientMessageId: event.messageId,
+    });
+  } catch {
+    /* inbox best-effort — never block reception */
+  }
+
   // Passive reception: durable claim + classify without auto-replies.
   if (!config.routerEnabled) {
-    if (event.isGroup) {
-      return {
-        accepted: true,
-        action: 'ignored',
-        reason: 'group',
-        eventId: event.messageId,
-        chatId: event.fromDigits,
-        replies: [],
-        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-      };
-    }
-    if (event.isStatus) {
-      return {
-        accepted: true,
-        action: 'ignored',
-        reason: 'status',
-        eventId: event.messageId,
-        chatId: event.fromDigits,
-        replies: [],
-        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-      };
-    }
     return {
       accepted: true,
       action: 'ignored',
@@ -243,6 +281,20 @@ export async function processWaEntryEvent(
         metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
       };
     }
+  }
+
+  // Absolute auto-reply silence outside the single authorized allowlist.
+  // Applies to Master, receptionist, classic 1/2, welcome, fallback, Gemini.
+  if (!isPlatformWaAutoReplyAllowed(event.fromDigits)) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'auto_reply_not_allowed',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
   }
 
   if (!isAllowlisted(config, event.fromDigits) && !event.fromMe) {
@@ -559,6 +611,20 @@ async function dispatchReplies(params: {
   const { sender, store, event, nowMs } = params;
   let storeOps = params.storeOps;
 
+  // Absolute allowlist again (post-Gemini / post-router) — fail-closed.
+  if (!isPlatformWaAutoReplyAllowed(event.fromDigits)) {
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'auto_reply_not_allowed',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      state: params.nextState,
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
+  }
+
   // Race: operator take / global mute while Gemini (or router) prepared a reply.
   {
     const race = await shouldDiscardInFlightBotReply({
@@ -644,6 +710,17 @@ async function dispatchReplies(params: {
       }
       if (!outbound.alreadySent) {
         replies.push({ text, outboundId: outbound.record.id });
+        try {
+          await appendInboxMessage({
+            fromDigits: event.fromDigits,
+            role: 'assistant',
+            text,
+            atMs: Date.now(),
+            outboundId: outbound.record.id,
+          });
+        } catch {
+          /* inbox best-effort */
+        }
       }
     }
   } finally {

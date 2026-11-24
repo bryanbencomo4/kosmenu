@@ -138,6 +138,7 @@ export async function sendWhatsappText(
   const source = metadata.source?.trim() || 'next-api';
   // Bot mute / human take: only gate platform-wa-entry. Never block order / supervision.
   if (source === 'platform-wa-entry') {
+    const { isPlatformWaAutoReplyAllowed } = await import('../wa-entry/_lib/auto-reply-policy');
     const { resolveWaEntryControlStore } = await import('../wa-entry/_lib/control-store');
     const {
       describeConversationControl,
@@ -147,6 +148,9 @@ export async function sendWhatsappText(
     const store = resolveWaEntryControlStore();
     const nowMs = Date.now();
     const digits = recipient.replace(/\D/g, '');
+    if (!isPlatformWaAutoReplyAllowed(digits)) {
+      throw new Error('wa_entry_suppressed_before_enqueue:auto_reply_not_allowed');
+    }
     const global = await readGlobalBotMute(store, nowMs);
     const thread = await store.getThread(digits);
     const control = describeConversationControl(digits, thread, nowMs);

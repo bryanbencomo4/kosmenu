@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inbox WhatsApp · preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #eef2ff; color: #0f172a; }
+    .wrap { max-width: 1600px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: #475569; font-size: 14px; margin-bottom: 12px; }
+    .root { display: flex; height: calc(100dvh - 100px); min-height: 520px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 18px 50px -32px rgba(15,23,42,.45); }
+    .list { width: 360px; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; }
+    .list-h { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
+    .mute { background: #0f172a; color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+    .search { width: 100%; margin: 10px 0; padding: 8px 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; }
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; background: #f1f5f9; }
+    .pill.on { background: #0f172a; color: #fff; }
+    .row { display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
+    .row.active { background: #eef2ff; }
+    .av { width: 44px; height: 44px; border-radius: 999px; background: #e2e8f0; display: grid; place-items: center; font-weight: 700; }
+    .meta { flex: 1; min-width: 0; }
+    .meta strong { display: block; font-size: 14px; }
+    .meta .t { float: right; font-size: 11px; color: #64748b; }
+    .meta .phone { font-size: 12px; color: #64748b; }
+    .meta .prev { font-size: 13px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge { background: #10b981; color: #fff; border-radius: 999px; font-size: 10px; padding: 2px 6px; font-weight: 700; }
+    .thread { flex: 1; display: flex; flex-direction: column; background: #f4f6fb; }
+    .th { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+    .take { background: #00A884; color: #fff; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 600; }
+    .msgs { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .bubble { max-width: 70%; background: #fff; border-radius: 16px; padding: 10px 14px; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .bubble.me { align-self: flex-end; background: #dcf8c6; }
+    .bubble .who { font-size: 10px; color: #64748b; text-align: right; margin-top: 4px; }
+    .composer { display: flex; gap: 8px; padding: 12px; background: #fff; border-top: 1px solid #e2e8f0; }
+    .composer textarea { flex: 1; border-radius: 12px; border: 1px solid #e2e8f0; padding: 10px; min-height: 44px; }
+    .composer button { background: #0f172a; color: #fff; border: 0; border-radius: 12px; padding: 10px 16px; font-weight: 600; }
+    .side { width: 280px; border-left: 1px solid #e2e8f0; background: #fff; padding: 16px; }
+    .side h3 { margin: 0 0 12px; font-size: 14px; }
+    .side label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; margin-top: 12px; }
+    .side p { margin: 2px 0 0; font-weight: 600; }
+    @media (max-width: 900px) {
+      .side { display: none; }
+      .list { width: 100%; }
+      .thread { display: none; }
+      .root.thread-open .list { display: none; }
+      .root.thread-open .thread { display: flex; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Inbox WhatsApp · elmenuxfa.com</h1>
+    <p class="sub">Preview de layout (pre-deploy). Autenticación real verificada en admin.elmenuxfa.com.</p>
+    <div class="root" data-testid="wa-inbox-root">
+      <aside class="list" data-testid="wa-inbox-list">
+        <div class="list-h">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <strong>Bandeja WhatsApp</strong>
+            <button class="mute" data-testid="wa-global-mute">Pausar respuestas automáticas</button>
+          </div>
+          <input class="search" placeholder="Buscar contacto o teléfono" data-testid="wa-inbox-search" />
+          <div class="pills">
+            <span class="pill on">Todas</span>
+            <span class="pill">Sin atender</span>
+            <span class="pill">Atendidas por IA</span>
+            <span class="pill">Atención humana</span>
+          </div>
+        </div>
+        <div class="row active">
+          <div class="av">B</div>
+          <div class="meta">
+            <span class="t">10:42</span>
+            <strong>Bryan</strong>
+            <div class="phone">+584140821633</div>
+            <div class="prev">¿Cuánto cuesta el menú?</div>
+            <div style="font-size:11px;color:#64748b;margin-top:4px">IA atendiendo</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="av">5</div>
+          <div class="meta">
+            <span class="t">09:18</span>
+            <strong>+58412…</strong>
+            <div class="phone">+584120000099</div>
+            <div class="prev" style="display:flex;justify-content:space-between;gap:8px">
+              <span>Hola, necesito ayuda</span>
+              <span class="badge">1</span>
+            </div>
+            <div style="font-size:11px;color:#64748b;margin-top:4px">Pendiente · sin IA</div>
+          </div>
+        </div>
+      </aside>
+      <section class="thread" data-testid="wa-inbox-thread">
+        <header class="th">
+          <div style="flex:1">
+            <strong>Bryan</strong>
+            <div style="font-size:12px;color:#64748b">+584140821633 · IA atendiendo</div>
+          </div>
+          <button class="take" data-testid="wa-take">Atender personalmente</button>
+        </header>
+        <div class="msgs">
+          <div class="bubble">¿Cuánto cuesta el menú?<div class="who">Cliente · 10:41</div></div>
+          <div class="bubble me">¡Hola! 😊 Te cuento los planes vigentes…<div class="who">Asistente · 10:42</div></div>
+        </div>
+        <footer class="composer">
+          <textarea placeholder="Escribe una respuesta…" data-testid="wa-composer"></textarea>
+          <button data-testid="wa-send">Enviar</button>
+        </footer>
+      </section>
+      <aside class="side" data-testid="wa-inbox-sidebar">
+        <h3>Contacto</h3>
+        <label>Nombre</label><p>Bryan</p>
+        <label>Teléfono</label><p>+584140821633</p>
+        <label>Estado</label><p>IA atendiendo</p>
+        <label>Responsable</label><p>—</p>
+        <label>Rol contextual</label><p>Consumidor / piloto</p>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>
