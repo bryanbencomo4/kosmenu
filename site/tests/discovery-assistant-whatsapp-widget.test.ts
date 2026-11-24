@@ -26,5 +26,24 @@ describe('WhatsApp widget vs discovery composer', () => {
     expect(view).toMatch(/data-discovery-composer-shell="1"/);
     expect(view).toMatch(/relative z-20/);
     expect(composer).toMatch(/relative z-30/);
+    expect(composer).toMatch(/ChatComposer/);
+    expect(view).toMatch(/ChatHeader/);
+    expect(view).toMatch(/data-chat-doodle/);
+    expect(view).toMatch(/CHAT_DOODLE_URL|doodle-pattern/);
+    expect(view).toMatch(/ChatVoiceNote/);
+    expect(view).toMatch(/voiceUrl: payload\.url/);
+    expect(view).toMatch(/cleanDiscoveryReplyText/);
+    expect(view).toMatch(/humanTypingMinMs/);
+    expect(view).toMatch(/data-discovery-cards="1"/);
+    expect(view).toMatch(/ChatCategoryCarousel/);
+    expect(view).toMatch(/alignDiscoveryRestaurantsToReplyText/);
+    expect(view).toMatch(/buildVisibleCategoryCards/);
+    expect(view).toMatch(/revealMoreCategories|onSeeAll/);
+    expect(view).toMatch(/loadDiscoveryCategoryStats/);
+    expect(view).toMatch(/DiscoveryProductCarousel/);
+    expect(view).toMatch(/buildFairDiscoveryProducts/);
+    expect(view).toMatch(/menusCollapsed/);
+    expect(view).toMatch(/elmenuxfa\.com/);
   });
 });
+

@@ -1,15 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { MapPin, MessageCircle, Store } from 'lucide-react';
+import { Store } from 'lucide-react';
 
 import { ChatHorizontalScroller } from '../v/[id]/_components/chat/ChatHorizontalScroller';
+import { ChatThumbImage } from '../v/[id]/_components/chat/ChatThumbImage';
+
+import type { DiscoveryUiDish } from './discovery-products';
 
 export type DiscoveryUiRestaurant = {
   id: string;
   slug: string;
   nombre: string;
+  /** Real commerce logo (thumbnail). */
   logoUrl: string | null;
+  /** Hero / cover photo for restaurant cards. */
+  coverUrl?: string | null;
   categoria: string | null;
   direccion: string | null;
   zonaOperacion: string | null;
@@ -20,12 +26,17 @@ export type DiscoveryUiRestaurant = {
   distanceKm: number | null;
   ratingAverage?: number;
   ratingCount?: number;
+  currencies?: string[];
+  showcaseDishes?: DiscoveryUiDish[];
 };
 
 type DiscoveryRestaurantCarouselProps = {
   restaurants: DiscoveryUiRestaurant[];
   onOpenMenu?: (restaurant: DiscoveryUiRestaurant) => void;
 };
+
+const btnPrimary =
+  'inline-flex w-full items-center justify-center gap-1 rounded-lg bg-[var(--chat-send)] px-2 py-1.5 text-[12px] font-semibold text-[var(--chat-send-fg)] active:opacity-90';
 
 function openBadge(restaurant: DiscoveryUiRestaurant) {
   if (restaurant.isOpen === true) {
@@ -37,6 +48,9 @@ function openBadge(restaurant: DiscoveryUiRestaurant) {
   return { label: 'Horario no confirmado', tone: 'unknown' as const };
 }
 
+/**
+ * Same card chrome as ChatProductCarouselCard: top photo, title, meta, primary CTA.
+ */
 export function DiscoveryRestaurantCarousel({
   restaurants,
   onOpenMenu,
@@ -46,78 +60,67 @@ export function DiscoveryRestaurantCarousel({
   return (
     <div data-discovery-restaurant-carousel="1" className="w-full max-w-full">
       <ChatHorizontalScroller ariaLabel="Restaurantes encontrados" className="py-1">
-        {restaurants.map((r) => {
+        {restaurants.map((r, index) => {
           const badge = openBadge(r);
           const zone = r.zonaOperacion || r.direccion;
+          const metaParts = [
+            badge.label,
+            r.categoria,
+            r.distanceKm != null && Number.isFinite(r.distanceKm)
+              ? `~${r.distanceKm < 10 ? r.distanceKm.toFixed(1) : Math.round(r.distanceKm)} km`
+              : null,
+          ].filter(Boolean);
           return (
             <article
               key={r.id}
               data-discovery-restaurant={r.slug}
-              className="flex w-[220px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] shadow-[0_6px_18px_rgba(0,0,0,0.12)]"
+              data-chat-product-card={r.slug}
+              className="flex w-[168px] shrink-0 snap-start flex-col overflow-hidden rounded-xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] shadow-sm"
             >
-              <div className="flex items-center gap-2.5 px-3 pt-3">
-                <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--chat-input)]">
-                  {r.logoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.logoUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <Store className="h-5 w-5 text-[var(--chat-text-muted)]" aria-hidden />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-semibold leading-tight text-[var(--chat-text)]">
-                    {r.nombre}
-                  </p>
-                  {r.categoria ? (
-                    <p className="truncate text-[11px] text-[var(--chat-text-muted)]">{r.categoria}</p>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="mt-2 space-y-1 px-3">
-                <p
-                  className={`text-[11px] font-medium ${
+              <div className="relative h-[110px] w-full shrink-0 bg-[var(--chat-input)]">
+                {r.coverUrl || r.logoUrl ? (
+                  <ChatThumbImage
+                    src={r.coverUrl || r.logoUrl}
+                    sourceUrl={r.coverUrl || r.logoUrl}
+                    priority={index < 3}
+                    fallbackLetter={r.nombre}
+                    className="h-full w-full object-cover object-center"
+                  />
+                ) : (
+                  <span className="grid h-full w-full place-items-center text-[var(--chat-text-muted)]">
+                    <Store className="h-8 w-8" aria-hidden />
+                  </span>
+                )}
+                <span
+                  className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white ${
                     badge.tone === 'open'
-                      ? 'text-emerald-600 dark:text-emerald-400'
+                      ? 'bg-emerald-600/90'
                       : badge.tone === 'closed'
-                        ? 'text-rose-600 dark:text-rose-400'
-                        : 'text-[var(--chat-text-muted)]'
+                        ? 'bg-rose-600/90'
+                        : 'bg-black/70'
                   }`}
                 >
-                  {badge.label}
-                </p>
-                {zone ? (
-                  <p className="flex items-start gap-1 text-[11px] text-[var(--chat-text-muted)]">
-                    <MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                    <span className="line-clamp-2">{zone}</span>
-                  </p>
-                ) : null}
-                {r.distanceKm != null && Number.isFinite(r.distanceKm) ? (
-                  <p className="text-[11px] text-[var(--chat-text-muted)]">
-                    ~{r.distanceKm < 10 ? r.distanceKm.toFixed(1) : Math.round(r.distanceKm)} km
-                  </p>
-                ) : null}
+                  {badge.tone === 'open' ? 'Abierto' : badge.tone === 'closed' ? 'Cerrado' : 'Horario'}
+                </span>
               </div>
 
-              <div className="mt-auto flex flex-col gap-1.5 p-3 pt-2.5">
-                <Link
-                  href={r.menuUrl}
-                  onClick={() => onOpenMenu?.(r)}
-                  className="inline-flex h-9 items-center justify-center rounded-full bg-[var(--chat-send)] px-3 text-[12px] font-semibold text-[var(--chat-send-fg)]"
-                  data-testid={`discovery-menu-${r.slug}`}
-                >
-                  Ver menú
-                </Link>
-                {r.chatUrl ? (
+              <div className="flex min-h-0 flex-1 flex-col p-2">
+                <h3 className="line-clamp-1 text-[13px] font-semibold leading-snug text-[var(--chat-text)]">
+                  {r.nombre}
+                </h3>
+                <p className="mt-0.5 line-clamp-2 min-h-[2.1rem] text-[11.5px] leading-[1.05rem] text-[var(--chat-text-muted)]">
+                  {metaParts.join(' · ') || zone || 'Ver menú en elmenuxfa.com'}
+                </p>
+                <div className="mt-auto pt-1.5">
                   <Link
-                    href={r.chatUrl}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-input)] px-3 text-[12px] font-semibold text-[var(--chat-text)]"
-                    data-testid={`discovery-chat-${r.slug}`}
+                    href={r.menuUrl}
+                    onClick={() => onOpenMenu?.(r)}
+                    className={btnPrimary}
+                    data-testid={`discovery-menu-${r.slug}`}
                   >
-                    <MessageCircle className="h-3.5 w-3.5" aria-hidden />
-                    Hablar con el asistente
+                    Ver menú
                   </Link>
-                ) : null}
+                </div>
               </div>
             </article>
           );

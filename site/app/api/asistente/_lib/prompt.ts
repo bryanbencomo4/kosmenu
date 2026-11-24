@@ -14,6 +14,8 @@ export function buildDiscoverySystemPrompt(): string {
     '- Si el usuario pide algo cerca, pide ubicación o región; no inventes coords.',
     '- Ofrece enlaces de menú (menuUrl). Ofrece chatUrl solo si la herramienta lo incluye.',
     '- Responde en español, breve y útil. Cuando listes restaurantes, resume 2–5 opciones y sugiere filtros.',
+    '- Nombra solo restaurantes que realmente encajen con lo pedido (plato/categoría). El carrusel mostrará exactamente esos nombres.',
+    '- No digas "aquí tienes algunas" y luego omitas del texto comercios que el carrusel va a mostrar: o los nombras o no los recomiendas.',
     '- Si no hay resultados, dilo con claridad y sugiere otra categoría o zona.',
   ].join('\n');
 }

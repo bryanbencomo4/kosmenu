@@ -128,31 +128,173 @@ export function directoryEntryMatchesRegion(
   return addressMatchesRegionLabel(entry.direccion ?? '', region);
 }
 
-export const DIRECTORY_CATEGORY_CHIPS = [
-  { id: 'hamburguesas', label: 'Hamburguesas', glyph: '🍔' },
-  { id: 'tacos', label: 'Tacos', glyph: '🌮' },
-  { id: 'pizzas', label: 'Pizzas', glyph: '🍕' },
-  { id: 'criolla', label: 'Comida criolla', glyph: '🍲' },
-  { id: 'sushi', label: 'Sushi', glyph: '🍣' },
-  { id: 'cafe', label: 'Cafeterías', glyph: '☕' },
-  { id: 'postres', label: 'Postres', glyph: '🍰' },
-  { id: 'bares', label: 'Bares', glyph: '🍻' },
+export type DirectoryCategoryChip = {
+  id: string;
+  label: string;
+  glyph: string;
+  /** Tie-breaker when restaurant supply is similar (higher = more important). */
+  priority: number;
+};
+
+/**
+ * Catalog of cuisine chips for discovery. Only chips with real restaurant
+ * supply should be shown (see `buildDirectoryCategoryStats`).
+ */
+export const DIRECTORY_CATEGORY_CHIPS: readonly DirectoryCategoryChip[] = [
+  { id: 'hamburguesas', label: 'Hamburguesas', glyph: '🍔', priority: 100 },
+  { id: 'pizzas', label: 'Pizzas', glyph: '🍕', priority: 96 },
+  { id: 'arepas', label: 'Arepas', glyph: '🫓', priority: 94 },
+  { id: 'pollo', label: 'Pollo', glyph: '🍗', priority: 90 },
+  { id: 'sushi', label: 'Sushi', glyph: '🍣', priority: 82 },
+  { id: 'parrilla', label: 'Parrilla', glyph: '🥩', priority: 80 },
+  { id: 'cafe', label: 'Cafeterías', glyph: '☕', priority: 72 },
+  { id: 'criolla', label: 'Comida criolla', glyph: '🍲', priority: 70 },
+  { id: 'postres', label: 'Postres', glyph: '🍰', priority: 55 },
+  { id: 'tacos', label: 'Tacos', glyph: '🌮', priority: 48 },
+  { id: 'saludable', label: 'Saludable', glyph: '🥗', priority: 42 },
+  { id: 'bares', label: 'Bares', glyph: '🍻', priority: 28 },
 ] as const;
 
-export function categoryChipMatches(categoria: string | null | undefined, chipId: string) {
-  const hay = (categoria ?? '')
+/** Tokens kept tight so empty/false categories do not pollute the carousel. */
+const CATEGORY_TOKENS: Record<string, string[]> = {
+  hamburguesas: ['hamburg', 'burger', 'burguer', 'smash'],
+  pizzas: ['pizza', 'pizzer'],
+  arepas: ['arepa'],
+  pollo: ['pollo', 'broaster', 'chicken', 'alitas', 'wings'],
+  sushi: ['sushi', 'poke'],
+  parrilla: ['parrill', 'steak', 'churrasco', 'churrasq'],
+  cafe: ['cafe', 'cafeter', 'coffee', 'espresso', 'cappuccino', 'latte'],
+  criolla: ['crioll', 'pabellon', 'venezol', 'tipic'],
+  postres: ['postre', 'helader', 'cheesecake', 'merengada', 'pasteler', 'torta', 'dulce'],
+  tacos: ['taco', 'quesadilla', 'nacho'],
+  saludable: ['salud', 'fitness', 'ensalada', 'bowl', 'wrap'],
+  // Avoid bare "bar" (matches Barbería / random substrings).
+  bares: ['bares', 'licorer', 'coctel', 'pub'],
+};
+
+function foldCategoryHay(value: string | null | undefined): string {
+  return (value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-  const map: Record<string, string[]> = {
-    hamburguesas: ['hamburg', 'burger', 'rapida', 'fast'],
-    tacos: ['taco', 'mexi'],
-    pizzas: ['pizza', 'pizzer'],
-    criolla: ['crioll', 'venezol', 'tipic', 'casera'],
-    sushi: ['sushi', 'japon', 'asia'],
-    cafe: ['cafe', 'cafeter', 'coffee', 'panader'],
-    postres: ['postre', 'dulce', 'helader', 'pastel'],
-    bares: ['bar', 'pub', 'licor', 'coctel'],
-  };
-  return (map[chipId] ?? []).some((token) => hay.includes(token));
 }
+
+function hayHasCategoryToken(hay: string, token: string): boolean {
+  if (!hay || !token) return false;
+  if (token.length >= 4) return hay.includes(token);
+  // Short tokens need a soft boundary so "bar" ≠ "Salsamentaria".
+  const re = new RegExp(`(?:^|[^a-z0-9])${token}(?:[^a-z0-9]|$)`);
+  return re.test(hay);
+}
+
+export function categoryChipMatches(categoria: string | null | undefined, chipId: string) {
+  const hay = foldCategoryHay(categoria);
+  if (!hay) return false;
+  return (CATEGORY_TOKENS[chipId] ?? []).some((token) => hayHasCategoryToken(hay, token));
+}
+
+/**
+ * A dish belongs to a discovery chip when its product name OR its menu
+ * category name matches (e.g. “Classic” inside categoría “Hamburguesas”).
+ */
+export function dishMatchesDirectoryCategory(
+  dish: { name?: string | null; categoryName?: string | null },
+  chipId: string,
+): boolean {
+  if (!chipId) return false;
+  return (
+    categoryChipMatches(dish.name, chipId) ||
+    categoryChipMatches(dish.categoryName, chipId)
+  );
+}
+
+export type DirectoryCategoryStatEntry = {
+  id: string;
+  nombre: string;
+  slug: string;
+  categoria: string | null;
+  productNames: string[];
+  coverUrl?: string | null;
+  logoUrl?: string | null;
+  showcaseDishes?: Array<{ name?: string; imageUrl?: string | null }>;
+};
+
+export type DirectoryCategoryStat = DirectoryCategoryChip & {
+  count: number;
+  strongCount: number;
+  coverUrl: string | null;
+  /** Ranking score used for “most important first”. */
+  score: number;
+};
+
+function pickCategoryCoverFromEntry(
+  entry: DirectoryCategoryStatEntry,
+  chipId: string,
+): string | null {
+  const tokens = CATEGORY_TOKENS[chipId] ?? [];
+  for (const dish of entry.showcaseDishes || []) {
+    const img = (dish.imageUrl || '').trim();
+    if (!img) continue;
+    const dishHay = foldCategoryHay(dish.name || '');
+    if (tokens.some((t) => hayHasCategoryToken(dishHay, t))) return img;
+  }
+  const firstDish = (entry.showcaseDishes || []).find((d) => (d.imageUrl || '').trim());
+  if (firstDish?.imageUrl) return firstDish.imageUrl.trim();
+  if (entry.coverUrl?.trim()) return entry.coverUrl.trim();
+  if (entry.logoUrl?.trim()) return entry.logoUrl.trim();
+  return null;
+}
+
+/**
+ * Real categories present in the directory pool, ranked by supply + priority.
+ * Drops chips with zero restaurants (never suggest what we do not have).
+ */
+export function buildDirectoryCategoryStats(
+  entries: DirectoryCategoryStatEntry[],
+): DirectoryCategoryStat[] {
+  const stats: DirectoryCategoryStat[] = [];
+
+  for (const chip of DIRECTORY_CATEGORY_CHIPS) {
+    let count = 0;
+    let strongCount = 0;
+    let coverUrl: string | null = null;
+
+    for (const entry of entries) {
+      const sectorHit =
+        categoryChipMatches(entry.categoria, chip.id) ||
+        categoryChipMatches(entry.nombre, chip.id) ||
+        categoryChipMatches(entry.slug, chip.id);
+      const dishHit = (entry.productNames || []).some((name) =>
+        categoryChipMatches(name, chip.id),
+      );
+      if (!sectorHit && !dishHit) continue;
+      count += 1;
+      if (sectorHit) strongCount += 1;
+      if (!coverUrl) {
+        coverUrl = pickCategoryCoverFromEntry(entry, chip.id);
+      }
+    }
+
+    if (count <= 0) continue;
+
+    const score = count * 12 + strongCount * 28 + chip.priority;
+    stats.push({
+      ...chip,
+      count,
+      strongCount,
+      coverUrl,
+      score,
+    });
+  }
+
+  return stats.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.count !== a.count) return b.count - a.count;
+    return a.label.localeCompare(b.label, 'es');
+  });
+}
+
+/** Initial portrait tiles in the assistant; more unlock via “Más”. */
+export const DISCOVERY_CATEGORY_INITIAL = 5;
+export const DISCOVERY_CATEGORY_MORE_BATCH = 4;
+export const DISCOVERY_MORE_CATEGORY_ID = 'mas';

@@ -15,6 +15,7 @@ import { buildDiscoverySystemPrompt } from './prompt';
 import { runSimulatedDiscoveryAgent } from './simulate';
 import { extractDiscoveryGeminiUsage } from './gemini-usage';
 import { consumeDiscoveryGeminiHttpSlot } from './quota';
+import { alignDiscoveryRestaurantsToReplyText } from './align-restaurants';
 import {
   DISCOVERY_TOOL_DECLARATIONS,
   executeDiscoveryTool,
@@ -223,10 +224,11 @@ async function runLiveDiscoveryGemini(params: {
           .filter(Boolean)
           .join('\n')
           .trim();
+        const reply = text || DISCOVERY_FALLBACK_MSG;
         return withUsage({
-          text: text || DISCOVERY_FALLBACK_MSG,
+          text: reply,
           model: modelUsed,
-          restaurants,
+          restaurants: alignDiscoveryRestaurantsToReplyText(reply, restaurants),
           toolCalls,
         });
       }

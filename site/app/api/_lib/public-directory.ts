@@ -11,7 +11,9 @@ import {
 } from './public-directory-featured';
 import { resolveBusinessScheduleStatus } from './business-hours';
 import {
+  buildDirectoryCategoryStats,
   categoryChipMatches,
+  dishMatchesDirectoryCategory,
   DIRECTORY_REGIONS,
   directoryEntryMatchesRegion,
   distanceKm,
@@ -24,7 +26,10 @@ import {
 import { tokenizeSearchText } from '../../_lib/search-text';
 import { loadPromoStatsWindow } from './directory-promo-events';
 import { rankPromotedDelivery } from './directory-promo-rank';
-import { pickRotatedShowcaseDishes } from './public-directory-showcase';
+import {
+  pickCategoryMatchedDishes,
+  pickRotatedShowcaseDishes,
+} from './public-directory-showcase';
 import { normalizeDirectoryQuery } from './public-directory-text';
 import { deriveDirectoryPaymentFacets } from './public-directory-payment-facets';
 import { getServiceSupabaseClient } from './supabase-server';
@@ -54,6 +59,8 @@ export type DirectoryShowcaseDish = {
   imageUrl: string;
   price: number;
   compareAtPrice: number | null;
+  /** Menu category label when known (e.g. “Hamburguesas”). */
+  categoryName?: string | null;
 };
 
 export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
@@ -141,6 +148,9 @@ const PRODUCT_NAMES_PER_BUSINESS = 48;
 const SHOWCASE_DISHES_PER_BUSINESS = 4;
 /** Candidates pulled per commerce before beverage filter + rotation. */
 const SHOWCASE_DISHES_CANDIDATE_CAP = 20;
+/** Wider pool when resolving dishes for a specific discovery category. */
+const CATEGORY_DISHES_CANDIDATE_CAP = 48;
+const CATEGORY_DISHES_PER_BUSINESS = 8;
 
 function mergeProductNames(base: string[], extra: string[]) {
   const out = [...base];
@@ -341,6 +351,108 @@ async function loadShowcaseDishes(comercioIds: string[]) {
 
   for (const [id, list] of candidates) {
     dishes.set(id, pickRotatedShowcaseDishes(list, id, SHOWCASE_DISHES_PER_BUSINESS));
+  }
+
+  return dishes;
+}
+
+/**
+ * For a discovery category chip, pull dishes that match by product name OR
+ * menu category name (not the generic showcase rotation).
+ */
+async function loadCategoryMatchedDishes(
+  comercioIds: string[],
+  categoryId: string,
+) {
+  const dishes = new Map<string, DirectoryShowcaseDish[]>();
+  if (comercioIds.length === 0 || !categoryId) return dishes;
+
+  const supabase = getServiceSupabaseClient();
+  const candidates = new Map<
+    string,
+    Array<{
+      name: string;
+      imageUrl: string;
+      price: number;
+      compareAtPrice: number | null;
+      categoryName: string | null;
+      categoryRole: string | null;
+    }>
+  >();
+
+  const BATCH = 16;
+  for (let offset = 0; offset < comercioIds.length; offset += BATCH) {
+    const chunk = comercioIds.slice(offset, offset + BATCH);
+    let rows: Array<{
+      comercio_id?: string | null;
+      nombre?: string | null;
+      imagen_url?: string | null;
+      precio?: number | string | null;
+      precio_comparacion?: number | string | null;
+      disponible?: boolean | null;
+      categorias?: ShowcaseCategoryJoin | ShowcaseCategoryJoin[];
+    }> | null = null;
+
+    const withCategory = await supabase
+      .from('productos')
+      .select(
+        'comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden,categorias(nombre,rol)',
+      )
+      .in('comercio_id', chunk)
+      .not('imagen_url', 'is', null)
+      .order('orden', { ascending: true })
+      .limit(CATEGORY_DISHES_CANDIDATE_CAP * chunk.length);
+
+    if (!withCategory.error && withCategory.data) {
+      rows = withCategory.data as typeof rows;
+    } else {
+      const fallback = await supabase
+        .from('productos')
+        .select('comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden')
+        .in('comercio_id', chunk)
+        .not('imagen_url', 'is', null)
+        .order('orden', { ascending: true })
+        .limit(CATEGORY_DISHES_CANDIDATE_CAP * chunk.length);
+      if (fallback.error || !fallback.data) continue;
+      rows = fallback.data as typeof rows;
+    }
+
+    for (const row of rows ?? []) {
+      if (row.disponible === false) continue;
+      const id = (row.comercio_id ?? '').toString().trim();
+      const name = (row.nombre ?? '').toString().trim();
+      const imageUrl = (row.imagen_url ?? '').toString().trim();
+      const price = Number(row.precio);
+      if (!id || !name || !imageUrl || !Number.isFinite(price) || price <= 0) continue;
+      const list = candidates.get(id) ?? [];
+      if (list.length >= CATEGORY_DISHES_CANDIDATE_CAP) continue;
+      const compareRaw = Number(row.precio_comparacion);
+      const compareAtPrice =
+        Number.isFinite(compareRaw) && compareRaw > price ? compareRaw : null;
+      const categoryRaw = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+      list.push({
+        name,
+        imageUrl,
+        price,
+        compareAtPrice,
+        categoryName: (categoryRaw?.nombre ?? '').toString().trim() || null,
+        categoryRole: (categoryRaw?.rol ?? '').toString().trim() || null,
+      });
+      candidates.set(id, list);
+    }
+  }
+
+  for (const [id, list] of candidates) {
+    dishes.set(
+      id,
+      pickCategoryMatchedDishes(
+        list,
+        id,
+        categoryId,
+        dishMatchesDirectoryCategory,
+        CATEGORY_DISHES_PER_BUSINESS,
+      ),
+    );
   }
 
   return dishes;
@@ -926,6 +1038,20 @@ export async function listClientDirectory(options: {
     );
   }
 
+  // Rank real cuisine supply before applying the active category filter.
+  const categories = buildDirectoryCategoryStats(
+    entries.map((entry) => ({
+      id: entry.id,
+      nombre: entry.nombre,
+      slug: entry.slug,
+      categoria: entry.categoria,
+      productNames: entry.productNames,
+      coverUrl: entry.coverUrl,
+      logoUrl: entry.logoUrl,
+      showcaseDishes: entry.showcaseDishes,
+    })),
+  );
+
   if (category && category !== 'mas') {
     entries = entries.filter(
       (entry) =>
@@ -977,13 +1103,37 @@ export async function listClientDirectory(options: {
     .slice(0, 12);
 
   const total = publicResults.length;
-  const page = publicResults.slice(offset, offset + limit);
+  let page = publicResults.slice(offset, offset + limit);
+
+  // Category browse: replace generic showcase with dishes that match by
+  // product name OR menu category (hamburguesa / burger / …).
+  if (category && category !== 'mas' && page.length > 0) {
+    try {
+      const matched = await loadCategoryMatchedDishes(
+        page.map((entry) => entry.id),
+        category,
+      );
+      page = page.map((entry) => {
+        const dishes = matched.get(entry.id);
+        if (!dishes || dishes.length === 0) return entry;
+        return {
+          ...entry,
+          showcaseDishes: dishes,
+          coverUrl: dishes[0]?.imageUrl ?? entry.coverUrl,
+        };
+      });
+    } catch {
+      // Keep cached showcase if category dish lookup fails.
+    }
+  }
+
   return {
     results: page,
     promoted: promoted.slice(0, 12),
     topRated,
     total,
     regions,
+    categories,
     offset,
     limit,
     hasMore: offset + page.length < total,

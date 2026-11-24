@@ -14,6 +14,7 @@ export type DiscoveryRestaurantCard = {
   slug: string;
   nombre: string;
   logoUrl: string | null;
+  coverUrl?: string | null;
   categoria: string | null;
   zona: string | null;
   isOpen: boolean | null;
@@ -24,6 +25,13 @@ export type DiscoveryRestaurantCard = {
   currencies: string[];
   paymentChannels: string[];
   acceptsVesBcv: boolean;
+  showcaseDishes?: Array<{
+    name: string;
+    imageUrl: string;
+    price: number;
+    compareAtPrice: number | null;
+    categoryName?: string | null;
+  }>;
 };
 
 export type DiscoveryToolContext = {
@@ -47,7 +55,7 @@ export const DISCOVERY_TOOL_DECLARATIONS = [
         category: {
           type: 'STRING',
           description:
-            'Directory category chip id: hamburguesas, tacos, pizzas, criolla, sushi, cafe, postres, bares',
+            'Directory category chip id: hamburguesas, pizzas, arepas, pollo, sushi, parrilla, cafe, criolla, postres, tacos, saludable, bares',
         },
         region: { type: 'STRING', description: 'Venezuela region / state label' },
         lat: { type: 'NUMBER' },
@@ -119,6 +127,7 @@ export function toDiscoveryRestaurantCard(
     slug: entry.slug,
     nombre: entry.nombre,
     logoUrl: entry.logoUrl,
+    coverUrl: entry.coverUrl ?? null,
     categoria: entry.categoria,
     zona: zonaLabel(entry),
     isOpen: entry.isOpen,
@@ -131,6 +140,7 @@ export function toDiscoveryRestaurantCard(
     currencies: entry.currencies ?? [],
     paymentChannels: entry.paymentChannels ?? [],
     acceptsVesBcv: entry.acceptsVesBcv === true,
+    showcaseDishes: (entry.showcaseDishes || []).slice(0, 4),
   };
   if (options?.includeChatLink !== false) {
     const chatUrl = buildServerDiscoveryChatUrl(entry.slug, entry.id);

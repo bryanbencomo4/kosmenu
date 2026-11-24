@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
 import { listClientDirectory, searchPublicDirectory } from '../../_lib/public-directory';
-import { DIRECTORY_CATEGORY_CHIPS } from '../../_lib/public-directory-geo';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 
 export async function GET(request: Request) {
@@ -40,7 +39,6 @@ export async function GET(request: Request) {
           data: {
             query,
             ...payload,
-            categories: DIRECTORY_CATEGORY_CHIPS,
           },
         },
         {

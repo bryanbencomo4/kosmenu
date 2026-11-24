@@ -1,5 +1,7 @@
 'use client';
 
+import { LayoutGrid } from 'lucide-react';
+
 import { VARIANT_WIDTHS } from '../../../../_lib/optimize-storage-image';
 import { ChatHorizontalScroller } from './ChatHorizontalScroller';
 import { ChatThumbImage } from './ChatThumbImage';
@@ -8,6 +10,9 @@ import type { ChatCatalogCategory } from './chat-types';
 type ChatCategoryCarouselProps = {
   categories: ChatCatalogCategory[];
   onSelectCategory: (categoryId: string) => void;
+  /** Trueno-style “Ver todos” when more categories remain. */
+  onSeeAll?: () => void;
+  seeAllLabel?: string;
 };
 
 /**
@@ -20,8 +25,12 @@ type ChatCategoryCarouselProps = {
 export function ChatCategoryCarousel({
   categories,
   onSelectCategory,
+  onSeeAll,
+  seeAllLabel = 'Ver todas las categorías',
 }: ChatCategoryCarouselProps) {
   if (categories.length === 0) return null;
+  const canSeeAll = typeof onSeeAll === 'function';
+
   return (
     <div data-chat-category-carousel="1">
       <ChatHorizontalScroller ariaLabel="Categorías del menú" className="py-1">
@@ -70,7 +79,38 @@ export function ChatCategoryCarousel({
             </span>
           </div>
         ))}
+        {canSeeAll ? (
+          <button
+            type="button"
+            data-chat-see-all-categories-inline="1"
+            onClick={onSeeAll}
+            className="flex w-[112px] shrink-0 snap-start flex-col items-center justify-center gap-2 self-stretch rounded-xl border border-[var(--chat-card-border)] bg-[color-mix(in_srgb,var(--chat-send)_12%,var(--chat-card))] px-2 text-center shadow-sm transition active:scale-[0.98] active:opacity-90"
+          >
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--chat-send)] text-[var(--chat-send-fg)] shadow-sm"
+              aria-hidden
+            >
+              <LayoutGrid className="h-5 w-5" strokeWidth={2.1} />
+            </span>
+            <span className="text-[12px] font-semibold leading-tight text-[var(--chat-text)]">
+              Ver todos
+            </span>
+          </button>
+        ) : null}
       </ChatHorizontalScroller>
+      {canSeeAll ? (
+        <div className="px-3 pb-1 pt-1.5">
+          <button
+            type="button"
+            data-chat-see-all-categories="1"
+            onClick={onSeeAll}
+            className="inline-flex w-full min-h-[42px] items-center justify-center gap-2 rounded-full bg-[var(--chat-send)] px-4 py-2 text-[13px] font-semibold text-[var(--chat-send-fg)] shadow-sm active:opacity-90"
+          >
+            <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={2.1} aria-hidden />
+            {seeAllLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

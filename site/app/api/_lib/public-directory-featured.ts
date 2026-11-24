@@ -27,7 +27,9 @@ const QUERY_EXPANDERS: Array<{ trigger: RegExp; aliases: string[] }> = [
   { trigger: /\b(sushi|japon|ramen)\b/, aliases: ['sushi', 'japon'] },
   { trigger: /\b(cafe|café|coffee|cafeteria)\b/, aliases: ['cafe', 'coffee', 'cafeter'] },
   { trigger: /\b(postre|postres|dulce|helado)\b/, aliases: ['postre', 'dulce', 'helado'] },
-  { trigger: /\b(arepa|arepas|criolla|pabellon)\b/, aliases: ['arepa', 'crioll', 'pabellon'] },
+  // Keep arepa ≠ criolla/pabellón: "quiero arepa" must not pull pastelitos pabellón.
+  { trigger: /\b(arepa|arepas|arepita|arepitas)\b/, aliases: ['arepa'] },
+  { trigger: /\b(criolla|criollo|pabellon|pabellón)\b/, aliases: ['crioll', 'pabellon', 'arepa'] },
   { trigger: /\b(pollo|chicken)\b/, aliases: ['pollo', 'chicken'] },
   { trigger: /\b(pasta|pastas|spaghetti|spagueti)\b/, aliases: ['pasta', 'spaghet'] },
 ];

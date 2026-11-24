@@ -55,19 +55,55 @@ function seededShuffle<T>(items: T[], seed: string): T[] {
   return copy;
 }
 
+export type ShowcaseDishPick = {
+  name: string;
+  imageUrl: string;
+  price: number;
+  compareAtPrice: number | null;
+  categoryName: string | null;
+};
+
+function toShowcasePick(item: ShowcaseDishCandidate): ShowcaseDishPick {
+  return {
+    name: item.name,
+    imageUrl: item.imageUrl,
+    price: item.price,
+    compareAtPrice: item.compareAtPrice,
+    categoryName: item.categoryName?.trim() || null,
+  };
+}
+
 export function pickRotatedShowcaseDishes<T extends ShowcaseDishCandidate>(
   candidates: T[],
   businessId: string,
   limit: number,
   nowMs = Date.now(),
-): Array<Pick<T, 'name' | 'imageUrl' | 'price' | 'compareAtPrice'>> {
+): ShowcaseDishPick[] {
   const food = candidates.filter((item) => !isBeverageShowcaseDish(item));
   const pool = food.length > 0 ? food : candidates;
   const rotated = seededShuffle(pool, `${businessId}:${showcaseRotationBucket(nowMs)}`);
-  return rotated.slice(0, Math.max(0, limit)).map((item) => ({
-    name: item.name,
-    imageUrl: item.imageUrl,
-    price: item.price,
-    compareAtPrice: item.compareAtPrice,
-  }));
+  return rotated.slice(0, Math.max(0, limit)).map(toShowcasePick);
+}
+
+/**
+ * Prefer dishes whose name OR menu category matches a discovery chip,
+ * with fair rotation so every matching SKU can surface over time.
+ */
+export function pickCategoryMatchedDishes<T extends ShowcaseDishCandidate>(
+  candidates: T[],
+  businessId: string,
+  chipId: string,
+  matchesChip: (dish: ShowcaseDishCandidate, chipId: string) => boolean,
+  limit: number,
+  nowMs = Date.now(),
+): ShowcaseDishPick[] {
+  const matched = candidates.filter(
+    (item) => !isBeverageShowcaseDish(item) && matchesChip(item, chipId),
+  );
+  if (matched.length === 0) return [];
+  const rotated = seededShuffle(
+    matched,
+    `${businessId}:${chipId}:${showcaseRotationBucket(nowMs)}`,
+  );
+  return rotated.slice(0, Math.max(0, limit)).map(toShowcasePick);
 }
