@@ -24,6 +24,8 @@ export function emptySummary(nowMs: number): WaMasterSummary {
     lastRestaurants: [],
     signupDraft: null,
     pendingAdminProposal: null,
+    lastHandoffUrl: null,
+    lastHandoffAtMs: null,
   };
 }
 
@@ -40,6 +42,8 @@ export function normalizeSummary(raw: Partial<WaMasterSummary> | null | undefine
     zone: raw.zone ?? null,
     signupDraft: raw.signupDraft ?? null,
     pendingAdminProposal: raw.pendingAdminProposal ?? null,
+    lastHandoffUrl: raw.lastHandoffUrl ?? null,
+    lastHandoffAtMs: raw.lastHandoffAtMs ?? null,
   };
 }
 

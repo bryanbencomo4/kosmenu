@@ -1,6 +1,8 @@
+import type { WaHandoffStore } from '../../../_lib/wa-handoff';
 import type { WaMasterAuthGate } from '../auth';
 import { unauthorizedAdminMessage } from '../auth';
 import type { WaMasterConfig } from '../config';
+import { issueMasterHandoff } from '../handoff';
 import type {
   WaMasterAdminProposal,
   WaMasterIdentity,
@@ -30,6 +32,7 @@ export type AdminSpecialistResult = {
   toolsUsed: string[];
   memoryPatch: Partial<WaMasterMemory['summary']>;
   escalateHuman?: boolean;
+  skipGeminiPolish?: boolean;
 };
 
 function fold(s: string) {
@@ -62,10 +65,57 @@ export async function runAdminSpecialist(params: {
   authGate: WaMasterAuthGate;
   loadMenu: AdminMenuLoader;
   nowMs: number;
+  handoffStore?: WaHandoffStore;
 }): Promise<AdminSpecialistResult> {
   const { text, intent, identity, memory, config, authGate, loadMenu, nowMs } = params;
   const t = fold(text);
   const toolsUsed: string[] = [];
+
+  // Receptionist: never run admin writes in WhatsApp — hand off with context.
+  if (
+    config.receptionistMode &&
+    (intent.startsWith('admin') ||
+      /\b(precio|tasa|producto|horarios|disponib|agregar|cambiar)\b/.test(t))
+  ) {
+    const candidate =
+      memory.summary.selectedComercioId ||
+      (identity.comercios.length === 1 ? identity.comercios[0].comercioId : null);
+    const shopName =
+      identity.comercios.find((c) => c.comercioId === candidate)?.publicName || null;
+    const handoff = await issueMasterHandoff({
+      store: params.handoffStore,
+      config,
+      destination: 'business_assistant',
+      fromDigits: identity.fromDigits,
+      nowMs,
+      payload: {
+        intent: intent.startsWith('admin') ? intent : 'admin.edit_price',
+        pendingOperation: intent === 'admin.edit_price' || /\bprecio\b/.test(t)
+          ? 'edit_price'
+          : 'admin_help',
+        candidateComercioId: candidate,
+        conversationHint: text.trim().slice(0, 160),
+      },
+    });
+    if (handoff) {
+      const known = shopName
+        ? `Te ayudo con tu menú${shopName ? ` (*${shopName}*)` : ''}. 😊\n\n`
+        : '¡Claro! 😊 ';
+      return {
+        replies: [
+          `${known}Nuestro asistente para negocios puede continuar contigo. Al abrirlo verificaremos tu cuenta de forma segura:\n${handoff.url}`,
+        ],
+        toolsUsed: ['handoff_business'],
+        memoryPatch: {
+          selectedComercioId: candidate,
+          activeService: 'admin',
+          lastHandoffUrl: handoff.url,
+          lastHandoffAtMs: nowMs,
+        },
+        skipGeminiPolish: true,
+      };
+    }
+  }
 
   if (!identity.comercios.length) {
     return {
@@ -74,6 +124,7 @@ export async function runAdminSpecialist(params: {
       ],
       toolsUsed: ['admin_identity_gate'],
       memoryPatch: {},
+      skipGeminiPolish: true,
     };
   }
 

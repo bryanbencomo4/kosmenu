@@ -5,6 +5,7 @@ import {
   isDiscoveryAssistantApiEnabled,
   normalizeDiscoveryRef,
 } from '../../_lib/discovery-assistant';
+import { detectCommercialIntentFromText } from '../_lib/wa-handoff';
 import { consumeRateLimit, getClientIp } from '../_lib/rate-limit';
 import { createRequestId, createSessionId } from '../chat/_lib/schema';
 import { runDiscoveryAgent } from './_lib/agent';
@@ -127,6 +128,26 @@ export async function POST(request: Request) {
       },
       400,
     );
+  }
+
+  const lastUserText = messages[messages.length - 1]?.text || '';
+  const commercial = detectCommercialIntentFromText(lastUserText);
+  if (commercial.commercial) {
+    const bizUrl =
+      (process.env.PLATFORM_WA_BUSINESS_ASSISTANT_URL || '').trim() ||
+      'https://elmenuxfa.com/asistente-negocio';
+    return json({
+      ok: true,
+      fallback: false,
+      text:
+        commercial.kind === 'register'
+          ? `¡Claro! Para registrar o crear tu menú usa nuestro asistente para negocios:\n${bizUrl}\n\nAquí en el directorio solo ayudamos a encontrar restaurantes.`
+          : `Eso suena a gestión de negocio. Continúa en el asistente para negocios (con acceso seguro):\n${bizUrl}\n\nDesde Discovery no ejecutamos cambios administrativos.`,
+      restaurants: [],
+      reason: 'commercial_handoff',
+      businessAssistantUrl: bizUrl,
+      commercialKind: commercial.kind,
+    });
   }
 
   const sessionId = body.sessionId || createSessionId();

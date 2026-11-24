@@ -5,6 +5,7 @@ import {
   isDiscoveryAssistantUiEnabled,
   normalizeDiscoveryRef,
 } from '../_lib/discovery-assistant';
+import { normalizeHandoffCode } from '../_lib/business-assistant';
 import { DiscoveryAssistantView } from './DiscoveryAssistantView';
 
 export const dynamic = 'force-dynamic';
@@ -21,9 +22,17 @@ function firstParam(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
+function sanitizeSeed(raw: string | null, max: number): string | null {
+  const v = (raw ?? '').trim().slice(0, max);
+  return v || null;
+}
+
 export default async function DiscoveryAssistantPage({ searchParams }: PageProps) {
   const params = await Promise.resolve(searchParams ?? {});
   const shareRef = normalizeDiscoveryRef(firstParam(params.ref));
+  const handoffCode = normalizeHandoffCode(firstParam(params.h));
+  const seedQuery = sanitizeSeed(firstParam(params.q), 120);
+  const seedZone = sanitizeSeed(firstParam(params.zone), 80);
 
   if (!isDiscoveryAssistantUiEnabled()) {
     return (
@@ -46,7 +55,13 @@ export default async function DiscoveryAssistantPage({ searchParams }: PageProps
 
   return (
     <main className="min-h-[100dvh] w-full">
-      <DiscoveryAssistantView shareRef={shareRef} apiEnabled={apiEnabled} />
+      <DiscoveryAssistantView
+        shareRef={shareRef}
+        apiEnabled={apiEnabled}
+        handoffCode={handoffCode}
+        seedQuery={seedQuery}
+        seedZone={seedZone}
+      />
     </main>
   );
 }

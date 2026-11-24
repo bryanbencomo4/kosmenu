@@ -49,4 +49,5 @@ export {
   type WaMasterAuthSession,
 } from './auth';
 export { runWaMasterAgentNlu } from './agent';
+export { issueMasterHandoff, getDefaultWaHandoffStore } from './handoff';
 export type * from './types';

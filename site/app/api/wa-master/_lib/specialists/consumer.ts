@@ -4,6 +4,8 @@ import type {
   WaMasterDiscoveryExecute,
   WaMasterDiscoveryCard,
 } from '../discovery-bridge';
+import { issueMasterHandoff } from '../handoff';
+import type { WaHandoffStore } from '../../../_lib/wa-handoff';
 import type { WaMasterMemory, WaMasterRestaurantRef } from '../types';
 
 function fold(s: string) {
@@ -61,10 +63,21 @@ function pickOrdinal(text: string, list: WaMasterRestaurantRef[]): WaMasterResta
   return null;
 }
 
+function foodQueryHint(text: string): string {
+  const t = fold(text);
+  if (/\bhamburg|burger/.test(t)) return 'hamburguesas';
+  if (/\bpizza/.test(t)) return 'pizza';
+  if (/\bsushi/.test(t)) return 'sushi';
+  if (/\barepa/.test(t)) return 'arepas';
+  return text.trim().slice(0, 80);
+}
+
 export type ConsumerSpecialistResult = {
   replies: string[];
   toolsUsed: string[];
   memoryPatch: Partial<WaMasterMemory['summary']>;
+  /** When true, orchestrator should skip Gemini polish (handoff already final). */
+  skipGeminiPolish?: boolean;
 };
 
 export async function runConsumerSpecialist(params: {
@@ -73,12 +86,34 @@ export async function runConsumerSpecialist(params: {
   config: WaMasterConfig;
   discoveryCtx: WaMasterDiscoveryCtx;
   executeTool: WaMasterDiscoveryExecute;
+  fromDigits?: string;
+  handoffStore?: WaHandoffStore;
+  nowMs?: number;
 }): Promise<ConsumerSpecialistResult> {
   const { text, memory, config, discoveryCtx, executeTool } = params;
   const t = fold(text);
   const toolsUsed: string[] = [];
   const zoneFromText = extractZone(text);
   const zone = zoneFromText || memory.summary.zone;
+
+  // Direct memory / simple answers — no link spam.
+  if (
+    /\b(recuerdas|recuerdas|como se llama|cómo se llama|nombre de mi (negocio|restaurante))\b/.test(
+      t,
+    )
+  ) {
+    const name = memory.summary.signupDraft?.businessName;
+    if (name) {
+      return {
+        replies: [
+          `¡Sí! 😊 Me comentaste que se llama *${name}*.\n\n¿Quieres que continuemos con su registro?`,
+        ],
+        toolsUsed: ['memory_recall'],
+        memoryPatch: {},
+        skipGeminiPolish: true,
+      };
+    }
+  }
 
   const picked = pickOrdinal(text, memory.summary.lastRestaurants || []);
   if (
@@ -95,15 +130,13 @@ export async function runConsumerSpecialist(params: {
     const menuUrl = links.menuUrl?.startsWith('http')
       ? links.menuUrl
       : publicMenuUrl(picked.slug);
-    const chatLine = links.chatUrl
-      ? `\nChat del restaurante: ${links.chatUrl.startsWith('http') ? links.chatUrl : `https://elmenuxfa.com${links.chatUrl}`}`
-      : '';
     return {
       replies: [
-        `Perfecto: *${picked.nombre}*.\n\nMenú: ${menuUrl}${chatLine}\n\nAhí puedes elegir productos y completar el pedido.`,
+        `Perfecto: *${picked.nombre}*.\n\nMenú: ${menuUrl}\n\nAhí puedes elegir y completar el pedido.`,
       ],
       toolsUsed,
       memoryPatch: { zone: zone ?? memory.summary.zone },
+      skipGeminiPolish: true,
     };
   }
 
@@ -111,6 +144,61 @@ export async function runConsumerSpecialist(params: {
     /\b(pizza|hamburgues|burger|sushi|arepa|mexicana|pollo|pedir|comer|delivery|cerca|restaurante)/.test(
       t,
     );
+
+  // Receptionist: hand off multi-step search to Discovery with real context code.
+  if (config.receptionistMode && foodSeek) {
+    const query = foodQueryHint(text);
+    if (!zone && discoveryCtx.lat == null && !discoveryCtx.region) {
+      return {
+        replies: [
+          '¡Claro! 🍔 ¿En qué ciudad o zona buscas? Con eso te dejo la búsqueda lista en nuestro asistente.',
+        ],
+        toolsUsed,
+        memoryPatch: { pendingQuestion: 'zone', activeService: 'consumer' },
+        skipGeminiPolish: true,
+      };
+    }
+    const handoff = await issueMasterHandoff({
+      store: params.handoffStore,
+      config,
+      destination: 'consumer_discovery',
+      fromDigits: params.fromDigits || memory.profile.fromDigits,
+      nowMs: params.nowMs,
+      payload: {
+        intent: 'consumer.search',
+        query,
+        zone: zone || discoveryCtx.region || null,
+        conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
+      },
+    });
+    if (handoff) {
+      const where = zone ? ` en ${zone}` : '';
+      return {
+        replies: [
+          `¡Claro! 🍔 Nuestro asistente te ayuda a encontrar ${query}${where} y comparar los restaurantes disponibles.\n\nTe dejo la búsqueda preparada para que continúes:\n${handoff.url}\n\n¡Ya puedes empezar! 😊`,
+        ],
+        toolsUsed: ['handoff_consumer'],
+        memoryPatch: {
+          zone: zone ?? memory.summary.zone,
+          pendingQuestion: null,
+          activeService: 'consumer',
+          lastHandoffUrl: handoff.url,
+          lastHandoffAtMs: params.nowMs ?? Date.now(),
+        },
+        skipGeminiPolish: true,
+      };
+    }
+    // Honest fallback if handoff could not be issued
+    return {
+      replies: [
+        `Puedes continuar la búsqueda en nuestro asistente:\n${config.consumerAssistantUrl}\n\n(Aún no pude preparar un enlace con contexto en este momento.)`,
+      ],
+      toolsUsed: ['handoff_consumer_fallback'],
+      memoryPatch: { zone: zone ?? memory.summary.zone, activeService: 'consumer' },
+      skipGeminiPolish: true,
+    };
+  }
+
   if (foodSeek && !zone && discoveryCtx.lat == null && !discoveryCtx.region) {
     return {
       replies: [
@@ -152,10 +240,6 @@ export async function runConsumerSpecialist(params: {
     args.openOnly = true;
   }
 
-  if (/\beconomic|barat|barato|barata/.test(t)) {
-    args.query = typeof args.query === 'string' ? `${args.query} economico` : 'economico';
-  }
-
   const result = await executeTool(toolName, args, discoveryCtx);
   toolsUsed.push(toolName);
   const restaurants = result.restaurants ?? [];
@@ -164,7 +248,7 @@ export async function runConsumerSpecialist(params: {
   if (!restaurants.length) {
     return {
       replies: [
-        `No encontré restaurantes con eso en el directorio de elmenuxfa.com.${zone ? ` Zona: ${zone}.` : ''} Prueba otra categoría o zona, o mira el asistente: ${config.consumerAssistantUrl}`,
+        `No encontré restaurantes con eso en el directorio de elmenuxfa.com.${zone ? ` Zona: ${zone}.` : ''} Prueba en nuestro asistente: ${config.consumerAssistantUrl}`,
       ],
       toolsUsed,
       memoryPatch: {
@@ -179,7 +263,7 @@ export async function runConsumerSpecialist(params: {
   const zoneNote = zone ? ` en ${zone}` : '';
   return {
     replies: [
-      `Encontré estas opciones${zoneNote}:\n${lines}\n\nDime el número o “la segunda” y te paso el menú. No invento locales: esto sale del directorio real.`,
+      `Encontré estas opciones${zoneNote}:\n${lines}\n\nDime el número o “la segunda” y te paso el menú.`,
     ],
     toolsUsed,
     memoryPatch: {

@@ -55,7 +55,7 @@ export function classifyWaMasterIntents(params: {
   }
 
   if (
-    /\b(registrar|poner mi (restaurante|negocio|menu)|crear (mi )?menu|quiero vender|unirme a (la )?plataforma)\b/.test(
+    /\b(registrar|poner mi (restaurante|negocio|menu|men[uú])|poner el men[uú]|crear (mi )?men[uú]|quiero vender|unirme a (la )?plataforma|men[uú] de mi restaurante)\b/.test(
       t,
     )
   ) {

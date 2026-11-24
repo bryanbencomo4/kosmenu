@@ -111,6 +111,9 @@ export type WaMasterSummary = {
   lastRestaurants: WaMasterRestaurantRef[];
   signupDraft: WaMasterSignupDraft | null;
   pendingAdminProposal: WaMasterAdminProposal | null;
+  /** Last issued handoff URL (avoid repeat spam). */
+  lastHandoffUrl: string | null;
+  lastHandoffAtMs: number | null;
 };
 
 /** L3 — durable contact profile (no secrets) */

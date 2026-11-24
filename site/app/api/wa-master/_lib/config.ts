@@ -10,6 +10,11 @@ export type WaMasterConfig = {
   allowGemini: boolean;
   /** Simulate NLU/tools path without Google HTTP (default true when Gemini off). */
   simulateAgent: boolean;
+  /**
+   * Receptionist mode: brief answers + opaque handoff links to specialized assistants.
+   * Default OFF — fail closed until Preview/pilot review.
+   */
+  receptionistMode: boolean;
   maxTurnsInPrompt: number;
   maxRepliesPerTurn: number;
   maxMonthlyGeminiRequests: number;
@@ -21,6 +26,8 @@ export type WaMasterConfig = {
   businessLandingUrl: string;
   businessRegisterUrl: string;
   businessManageUrl: string;
+  /** Next-hosted business assistant (Preview path). Flutter app host redirects later. */
+  businessAssistantUrl: string;
 };
 
 function envBool(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
@@ -45,6 +52,7 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     shadowMode: envBool(env, 'PLATFORM_WA_MASTER_SHADOW', false),
     allowGemini: envBool(env, 'PLATFORM_WA_MASTER_ALLOW_GEMINI', false),
     simulateAgent: envBool(env, 'PLATFORM_WA_MASTER_SIMULATE', true),
+    receptionistMode: envBool(env, 'PLATFORM_WA_MASTER_RECEPTIONIST', false),
     maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', 12),
     maxRepliesPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_REPLIES', 2),
     maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 200),
@@ -70,6 +78,11 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
       env,
       'PLATFORM_WA_BUSINESS_MANAGE_URL',
       'https://app.elmenuxfa.com/',
+    ),
+    businessAssistantUrl: envStr(
+      env,
+      'PLATFORM_WA_BUSINESS_ASSISTANT_URL',
+      'https://elmenuxfa.com/asistente-negocio',
     ),
   };
 }

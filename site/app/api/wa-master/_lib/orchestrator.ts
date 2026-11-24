@@ -15,6 +15,7 @@ import {
   rememberAskedField,
   setLastIntent,
 } from './memory';
+import type { WaHandoffStore } from '../../_lib/wa-handoff';
 import { createMemoryWaMasterQuotaStore, type WaMasterQuotaStore } from './quota';
 import { buildDeterministicReplies } from './replies';
 import {
@@ -37,6 +38,7 @@ export type WaMasterOrchestratorDeps = {
   authGate?: WaMasterAuthGate;
   loadMenu?: AdminMenuLoader;
   quota?: WaMasterQuotaStore;
+  handoffStore?: WaHandoffStore;
   maxMonthlyGeminiRequests?: number;
   forceSimulateAgent?: boolean;
   forceAgentFail?: boolean;
@@ -67,7 +69,7 @@ export async function runWaMasterOrchestrator(
   let specialist = classified.specialist;
 
   const looksCommercial =
-    /\b(registrar|poner mi|crear.*menu|plataforma|tengo una? (pizzer|hamburg|restaurante|negocio)|planes|precios del servicio)\b/i.test(
+    /\b(registrar|poner mi|poner el men[uú]|crear.*men[uú]|plataforma|tengo una? (pizzer|hamburg|restaurante|negocio)|planes|precios del servicio|men[uú] de mi restaurante)\b/i.test(
       text,
     );
   const looksZoneOnly =
@@ -166,9 +168,23 @@ export async function runWaMasterOrchestrator(
   let toolsUsed: string[] = [];
   let escalateHuman = false;
   let askedFields: string[] = [];
+  let skipGeminiPolish = false;
 
   try {
-    if (intents.includes('support.human') || primary === 'support.human') {
+    // Simple memory answers first (receptionist + legacy) — no link spam.
+    if (
+      /\b(recuerdas|como se llama|cómo se llama|nombre de mi (negocio|restaurante))\b/i.test(
+        text,
+      ) &&
+      memory.summary.signupDraft?.businessName
+    ) {
+      replies = [
+        `¡Sí! 😊 Me comentaste que se llama *${memory.summary.signupDraft.businessName}*.\n\n¿Quieres que continuemos con su registro?`,
+      ];
+      toolsUsed = ['memory_recall'];
+      skipGeminiPolish = true;
+      specialist = 'orchestrator';
+    } else if (intents.includes('support.human') || primary === 'support.human') {
       const built = buildDeterministicReplies({
         intents: ['support.human'],
         specialist: 'support',
@@ -204,11 +220,15 @@ export async function runWaMasterOrchestrator(
         config,
         discoveryCtx,
         executeTool: executeDiscovery,
+        fromDigits: input.fromDigits,
+        handoffStore: deps.handoffStore,
+        nowMs,
       });
       replies = out.replies;
       toolsUsed = out.toolsUsed;
       memory = patchSummary(memory, out.memoryPatch, nowMs);
       specialist = 'consumer';
+      skipGeminiPolish = Boolean(out.skipGeminiPolish);
       if (out.memoryPatch.pendingQuestion === 'zone') askedFields.push('zone');
     } else if (
       primary === 'commercial.info' ||
@@ -228,11 +248,21 @@ export async function runWaMasterOrchestrator(
       toolsUsed = built.toolsUsed;
       askedFields = built.askedFields;
       specialist = 'orchestrator';
+      skipGeminiPolish = config.receptionistMode;
     } else if (primary.startsWith('commercial') || specialist === 'commercial') {
-      const out = runCommercialSpecialist({ text, memory, config, intent: primary });
+      const out = await runCommercialSpecialist({
+        text,
+        memory,
+        config,
+        intent: primary,
+        fromDigits: input.fromDigits,
+        handoffStore: deps.handoffStore,
+        nowMs,
+      });
       replies = out.replies;
       toolsUsed = out.toolsUsed;
       memory = patchSummary(memory, out.memoryPatch, nowMs);
+      skipGeminiPolish = Boolean(out.skipGeminiPolish);
       if (out.memoryPatch.pendingQuestion === 'business_name') askedFields.push('business_name');
       specialist = 'commercial';
     } else if (primary.startsWith('admin') || specialist === 'admin') {
@@ -245,11 +275,13 @@ export async function runWaMasterOrchestrator(
         authGate,
         loadMenu,
         nowMs,
+        handoffStore: deps.handoffStore,
       });
       replies = out.replies;
       toolsUsed = out.toolsUsed;
       memory = patchSummary(memory, out.memoryPatch, nowMs);
       escalateHuman = Boolean(out.escalateHuman);
+      skipGeminiPolish = Boolean(out.skipGeminiPolish);
       specialist = 'admin';
     } else if (primary === 'support.issue' || primary === 'consumer.complaint' || primary.startsWith('privacy')) {
       const built = buildDeterministicReplies({
@@ -295,11 +327,13 @@ export async function runWaMasterOrchestrator(
   }
 
   // Live Gemini polish (1 HTTP typical): natural wording grounded in specialist facts.
-  // Skipped for admin/auth and human escalate so gates stay deterministic.
+  // Skipped for admin/auth, human escalate, and receptionist handoff replies.
   const softForGemini =
     !primary.startsWith('admin') &&
     primary !== 'support.human' &&
-    !escalateHuman;
+    !escalateHuman &&
+    !skipGeminiPolish &&
+    !config.receptionistMode;
   if (!input.forceDeterministic && softForGemini && replies.length) {
     const factsBlock = replies.join('\n');
     const agent = await runWaMasterAgentNlu({

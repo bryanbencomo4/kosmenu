@@ -16,6 +16,7 @@ import {
 const EXCLUDED_PREFIXES = [
   '/api',
   '/asistente',
+  '/asistente-negocio',
   '/business',
   '/kit',
   '/d',
@@ -374,6 +375,12 @@ export function middleware(request: NextRequest) {
 
   // Business marketing site lives on business.* (local/dev can use /business).
   if (isBusinessHost) {
+    // Alias: business.*/asistente → Next business assistant implementation.
+    if (pathname === '/asistente' || pathname.startsWith('/asistente/')) {
+      const rewriteUrl = request.nextUrl.clone();
+      rewriteUrl.pathname = '/asistente-negocio';
+      return applySecurityHeaders(NextResponse.rewrite(rewriteUrl), pathname);
+    }
     if (pathname === '/' || pathname === '') {
       const rewriteUrl = request.nextUrl.clone();
       rewriteUrl.pathname = '/business';

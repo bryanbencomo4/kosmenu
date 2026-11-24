@@ -1,16 +1,16 @@
+import type { WaHandoffStore } from '../../../_lib/wa-handoff';
 import type { WaMasterConfig } from '../config';
+import { issueMasterHandoff } from '../handoff';
 import type { WaMasterMemory, WaMasterSignupDraft } from '../types';
 
 /**
  * Commercial specialist — no invented plans/promos.
- * Conversational registration create-comercio remains PENDING (no safe WA signup API).
- * We persist draft progress and deep-link to the real panel register.
+ * Receptionist mode: brief reply + opaque handoff to business assistant.
+ * Create-comercio from WhatsApp remains pending without a secure API.
  */
 
-const SERVICE_BLURB = [
-  'Con *elmenuxfa.com* tu negocio tiene menú digital para que clientes vean productos, precios y pidan más fácil — por web y WhatsApp cuando lo actives.',
-  'Tú controlas el catálogo desde el panel; nosotros no inventamos planes ni pruebas gratis que no estén publicadas.',
-].join('\n');
+const SERVICE_BLURB =
+  'Con *elmenuxfa.com* tu negocio tiene menú digital para que clientes vean productos, precios y pidan más fácil.';
 
 function fold(s: string) {
   return s
@@ -19,12 +19,22 @@ function fold(s: string) {
     .toLowerCase();
 }
 
-function extractBusinessName(text: string): string | null {
+function extractBusinessName(text: string, allowBare: boolean): string | null {
   const m =
     text.match(/(?:negocio|restaurante)\s+se\s+llama\s+(.+)$/i) ||
     text.match(/se\s+llama\s+(.+)$/i) ||
     text.match(/me\s+llamo\s+(.+)$/i);
   if (m?.[1]) return m[1].trim().slice(0, 80);
+  // Bare name only when we explicitly asked for business_name.
+  if (
+    allowBare &&
+    text.trim().length >= 2 &&
+    text.trim().length <= 80 &&
+    !/\?/.test(text) &&
+    !/\b(registrar|quiero|poner|crear|menu|menú|retomo|hola|negocio)\b/i.test(text)
+  ) {
+    return text.trim();
+  }
   return null;
 }
 
@@ -32,14 +42,18 @@ export type CommercialSpecialistResult = {
   replies: string[];
   toolsUsed: string[];
   memoryPatch: Partial<WaMasterMemory['summary']>;
+  skipGeminiPolish?: boolean;
 };
 
-export function runCommercialSpecialist(params: {
+export async function runCommercialSpecialist(params: {
   text: string;
   memory: WaMasterMemory;
   config: WaMasterConfig;
   intent: string;
-}): CommercialSpecialistResult {
+  fromDigits?: string;
+  handoffStore?: WaHandoffStore;
+  nowMs?: number;
+}): Promise<CommercialSpecialistResult> {
   const { text, memory, config, intent } = params;
   const t = fold(text);
   const draft: WaMasterSignupDraft = memory.summary.signupDraft || {
@@ -48,40 +62,129 @@ export function runCommercialSpecialist(params: {
     category: null,
     stage: 'intro',
   };
-  const name = extractBusinessName(text);
-  if (name) draft.businessName = name;
+
+  {
+    const allowBare = memory.summary.pendingQuestion === 'business_name';
+    const name = extractBusinessName(text, allowBare);
+    if (name && !/\b(registrar|poner mi|crear|quiero|menu|menú|retomo)\b/i.test(name)) {
+      draft.businessName = name;
+    }
+  }
+
+  // Memory-only: already have name and user asks again
+  if (
+    draft.businessName &&
+    /\b(recuerdas|como se llama|cómo se llama|nombre)\b/.test(t)
+  ) {
+    return {
+      replies: [
+        `¡Sí! 😊 Me comentaste que se llama *${draft.businessName}*.\n\n¿Quieres que continuemos con su registro?`,
+      ],
+      toolsUsed: ['memory_recall'],
+      memoryPatch: { signupDraft: draft },
+      skipGeminiPolish: true,
+    };
+  }
+
+  const handoffBusiness = async (payload: {
+    intent: string;
+    pendingOperation?: string;
+    businessNameDraft?: string | null;
+    conversationHint?: string;
+  }) => {
+    const handoff = await issueMasterHandoff({
+      store: params.handoffStore,
+      config,
+      destination: 'business_assistant',
+      fromDigits: params.fromDigits || memory.profile.fromDigits,
+      nowMs: params.nowMs,
+      payload: {
+        intent: payload.intent,
+        pendingOperation: payload.pendingOperation ?? null,
+        businessNameDraft: payload.businessNameDraft ?? draft.businessName,
+        conversationHint: payload.conversationHint ?? null,
+      },
+    });
+    return handoff;
+  };
 
   if (intent === 'commercial.pricing' || /\b(precio|plan|tarifa|cuanto cuesta)\b/.test(t)) {
     draft.stage = 'pricing';
+    if (config.receptionistMode) {
+      const handoff = await handoffBusiness({
+        intent: 'commercial.pricing',
+        pendingOperation: 'review_plans',
+        conversationHint: 'Consultar planes del servicio',
+      });
+      if (handoff) {
+        return {
+          replies: [
+            `¡Claro! 😊 Nuestro asistente para negocios te orienta con el servicio y los planes publicados.\n\nContinúa aquí:\n${handoff.url}`,
+          ],
+          toolsUsed: ['handoff_business'],
+          memoryPatch: {
+            signupDraft: draft,
+            activeService: 'commercial',
+            lastHandoffUrl: handoff.url,
+            lastHandoffAtMs: params.nowMs ?? Date.now(),
+          },
+          skipGeminiPolish: true,
+        };
+      }
+    }
     return {
       replies: [
-        `${SERVICE_BLURB}\n\nLos planes y condiciones vigentes están en:\n${config.businessLandingUrl}\n\nNo te cito precios inventados por chat. Si quieres, dime el tamaño aproximado de tu menú y te oriento sobre el proceso.`,
+        `${SERVICE_BLURB}\n\nPlanes y condiciones vigentes:\n${config.businessLandingUrl}\n\nNo cito precios inventados por chat.`,
       ],
       toolsUsed: ['commercial_pricing_link'],
       memoryPatch: { signupDraft: draft, activeService: 'commercial' },
+      skipGeminiPolish: true,
     };
   }
 
-  if (intent === 'commercial.resume_signup' || draft.stage === 'waiting_panel') {
-    const nameBit = draft.businessName ? ` de *${draft.businessName}*` : '';
-    return {
-      replies: [
-        `Retomamos el registro${nameBit}. Completa la cuenta aquí (nunca pidas/contraseñas por WhatsApp):\n${config.businessRegisterUrl}\n\nCuando entres al panel puedes armar el menú. Si te trabas, escribe y te guío.`,
-      ],
-      toolsUsed: ['handoff_register_url'],
-      memoryPatch: {
-        signupDraft: { ...draft, stage: 'waiting_panel' },
-        activeService: 'commercial',
-      },
-    };
-  }
+  if (
+    intent === 'commercial.register' ||
+    intent === 'commercial.resume_signup' ||
+    /\b(registrar|poner mi|crear.*menu|unirme|menu de mi restaurante|menú de mi)\b/.test(t) ||
+    memory.summary.pendingQuestion === 'business_name'
+  ) {
+    if (
+      config.receptionistMode &&
+      (draft.businessName || memory.summary.askedFields.includes('business_name'))
+    ) {
+      draft.stage = 'waiting_panel';
+      const handoff = await handoffBusiness({
+        intent: 'commercial.register',
+        pendingOperation: 'register_business',
+        businessNameDraft: draft.businessName,
+        conversationHint: draft.businessName
+          ? `Registrar ${draft.businessName}`
+          : 'Registrar restaurante',
+      });
+      const nameBit = draft.businessName ? ` *${draft.businessName}*` : '';
+      if (handoff) {
+        return {
+          replies: [
+            `¡Excelente! 🙌 Nuestro asistente te acompaña para registrar${nameBit} y comenzar a crear tu menú.\n\nPuedes continuar aquí:\n${handoff.url}\n\n¡Te estará esperando para comenzar! 😊`,
+          ],
+          toolsUsed: ['handoff_business'],
+          memoryPatch: {
+            signupDraft: draft,
+            pendingQuestion: null,
+            activeService: 'commercial',
+            lastHandoffUrl: handoff.url,
+            lastHandoffAtMs: params.nowMs ?? Date.now(),
+          },
+          skipGeminiPolish: true,
+        };
+      }
+    }
 
-  if (intent === 'commercial.register' || /\b(registrar|poner mi|crear.*menu|unirme)\b/.test(t)) {
     if (!draft.businessName && !memory.summary.askedFields.includes('business_name')) {
       draft.stage = 'need';
       return {
         replies: [
-          `¡Excelente! 🙌 ${SERVICE_BLURB}\n\n¿Cómo se llama tu negocio? (Así lo recuerdo cuando vuelvas.)`,
+          `¡Excelente! 🙌 ${SERVICE_BLURB}\n\n¿Cómo se llama tu negocio?`,
         ],
         toolsUsed: ['commercial_qualify'],
         memoryPatch: {
@@ -89,24 +192,72 @@ export function runCommercialSpecialist(params: {
           pendingQuestion: 'business_name',
           activeService: 'commercial',
         },
+        skipGeminiPolish: true,
       };
     }
-    draft.stage = 'ready_register';
-    const nameBit = draft.businessName ? `*${draft.businessName}*: ` : '';
+
+    if (config.receptionistMode) {
+      draft.stage = 'waiting_panel';
+      const handoff = await handoffBusiness({
+        intent: 'commercial.register',
+        pendingOperation: 'register_business',
+        businessNameDraft: draft.businessName,
+      });
+      if (handoff) {
+        return {
+          replies: [
+            `¡Perfecto${draft.businessName ? `, *${draft.businessName}*` : ''}! 🙌 Continúa el registro con nuestro asistente para negocios:\n${handoff.url}`,
+          ],
+          toolsUsed: ['handoff_business'],
+          memoryPatch: {
+            signupDraft: draft,
+            pendingQuestion: null,
+            activeService: 'commercial',
+            lastHandoffUrl: handoff.url,
+            lastHandoffAtMs: params.nowMs ?? Date.now(),
+          },
+          skipGeminiPolish: true,
+        };
+      }
+    }
+
+    draft.stage = 'waiting_panel';
     return {
       replies: [
-        `${nameBit}el siguiente paso seguro es crear la cuenta en el panel:\n${config.businessRegisterUrl}\n\nMás info del servicio: ${config.businessLandingUrl}\n\nEl registro 100% por chat (crear comercio sin panel) sigue pendiente de una API segura — por ahora conservo tu avance y te dejo el enlace correcto.`,
+        `Siguiente paso seguro: crear la cuenta en el panel.\n${config.businessRegisterUrl}\n\nInfo: ${config.businessLandingUrl}`,
       ],
       toolsUsed: ['handoff_register_url'],
       memoryPatch: {
-        signupDraft: { ...draft, stage: 'waiting_panel' },
+        signupDraft: draft,
         pendingQuestion: null,
         activeService: 'commercial',
       },
+      skipGeminiPolish: true,
     };
   }
 
-  // generic info
+  if (config.receptionistMode) {
+    const handoff = await handoffBusiness({
+      intent: 'commercial.info',
+      conversationHint: 'Información del servicio para negocios',
+    });
+    if (handoff) {
+      return {
+        replies: [
+          `¡Claro! ${SERVICE_BLURB}\n\nNuestro asistente para negocios te orienta paso a paso:\n${handoff.url}`,
+        ],
+        toolsUsed: ['handoff_business'],
+        memoryPatch: {
+          signupDraft: draft,
+          activeService: 'commercial',
+          lastHandoffUrl: handoff.url,
+          lastHandoffAtMs: params.nowMs ?? Date.now(),
+        },
+        skipGeminiPolish: true,
+      };
+    }
+  }
+
   return {
     replies: [
       `¡Claro! ${SERVICE_BLURB}\n\n¿Quieres registrar tu menú o solo entender el servicio?\nInfo: ${config.businessLandingUrl}`,
