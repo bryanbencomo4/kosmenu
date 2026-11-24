@@ -79,12 +79,12 @@ function digitsOf(raw: string): string {
   return String(raw || '').replace(/\D/g, '');
 }
 
-function useSupabase(): boolean {
+function inboxSupabaseEnabled(): boolean {
   return String(process.env.PLATFORM_WA_INBOX_SUPABASE || '').trim() === '1';
 }
 
 function sb(): SupabaseClient | null {
-  if (!useSupabase()) return null;
+  if (!inboxSupabaseEnabled()) return null;
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
   const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!url || !key) return null;
