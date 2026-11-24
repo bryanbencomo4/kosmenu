@@ -17,15 +17,20 @@ import {
 import {
   autoRetryDelayMs,
   IMAGE_MAX_AUTO_RETRIES,
-  IMAGE_PHASE_TIMEOUT_MS,
   IMAGE_TOTAL_BUDGET_MS,
   initialPhase,
   nextPhase,
-  shouldAdvanceAfterFailure,
   urlForPhase,
   type ImageCascadeUrls,
   type ImageLoadPhase,
 } from '../../_lib/kiosk-image-load';
+
+/** Chat thumbs: fail cold/hot faster and always fall through to original. */
+const CHAT_PHASE_TIMEOUT_MS: Record<ImageLoadPhase, number> = {
+  cold: 4_000,
+  hot: 5_000,
+  original: 8_000,
+};
 
 type ChatThumbImageProps = {
   /** Preferred display URL (often cold WebP). */
@@ -145,7 +150,7 @@ export function ChatThumbImage({
 
   function phaseWaitMs(phase: ImageLoadPhase, elapsedMs: number): number {
     const remaining = Math.max(0, IMAGE_TOTAL_BUDGET_MS - elapsedMs);
-    return Math.min(IMAGE_PHASE_TIMEOUT_MS[phase], remaining);
+    return Math.min(CHAT_PHASE_TIMEOUT_MS[phase], remaining);
   }
 
   function armPhaseTimer(gen: number, currentPhase: ImageLoadPhase) {
@@ -167,13 +172,12 @@ export function ChatThumbImage({
   function advanceOrFail(
     gen: number,
     fromPhase: ImageLoadPhase,
-    why: 'error' | 'timeout',
+    _why: 'error' | 'timeout',
   ) {
     if (gen !== loadGenRef.current) return;
-    if (!shouldAdvanceAfterFailure(why)) {
-      finalizeFailure(gen);
-      return;
-    }
+    // Always try the next URL in chat. Cold WebP variants are often missing or
+    // slow; the original Storage object usually loads. (Kiosk keeps the stricter
+    // "timeout does not advance" rule — chat must stay resilient.)
     const urls = urlsRef.current;
     const upcoming = nextPhase(urls, fromPhase);
     if (upcoming) {
@@ -284,8 +288,12 @@ export function ChatThumbImage({
   );
 
   function handleManualRetry(event: MouseEvent | PointerEvent) {
-    event.preventDefault();
+    // Do NOT preventDefault on pointerdown — that cancels the synthetic click
+    // on touch/mobile and made "Reintentar" appear dead.
     event.stopPropagation();
+    if ('preventDefault' in event && event.type === 'click') {
+      event.preventDefault();
+    }
     autoRetriesRef.current = 0;
     beginCascade(true);
   }
@@ -293,7 +301,7 @@ export function ChatThumbImage({
   if (failed || !activeSrc) {
     return (
       <span
-        className="relative flex h-full w-full flex-col items-center justify-center gap-1 bg-[var(--chat-input)] text-[var(--chat-text-muted)]"
+        className="relative z-20 flex h-full w-full flex-col items-center justify-center gap-1 bg-[var(--chat-input)] text-[var(--chat-text-muted)]"
         data-chat-thumb="error"
       >
         <span className="text-xl font-semibold leading-none" aria-hidden>
@@ -303,11 +311,11 @@ export function ChatThumbImage({
           type="button"
           data-chat-thumb-retry="1"
           data-chat-no-swipe="1"
+          data-chat-no-drag="1"
           aria-label="Reintentar carga de imagen"
-          className="relative z-10 inline-flex items-center gap-1 rounded-full bg-[var(--chat-send)] px-2 py-0.5 text-[10px] font-bold text-[var(--chat-send-fg)] shadow-sm pointer-events-auto"
+          className="relative z-30 inline-flex items-center gap-1 rounded-full bg-[var(--chat-send)] px-2.5 py-1 text-[10px] font-bold text-[var(--chat-send-fg)] shadow-sm pointer-events-auto"
           onClick={handleManualRetry}
           onPointerDown={(event) => {
-            event.preventDefault();
             event.stopPropagation();
           }}
           onPointerUp={(event) => event.stopPropagation()}

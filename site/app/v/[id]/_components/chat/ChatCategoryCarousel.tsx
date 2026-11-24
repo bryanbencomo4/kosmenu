@@ -41,7 +41,17 @@ export function ChatCategoryCarousel({
             tabIndex={0}
             data-chat-category={c.id}
             data-chat-category-card="1"
-            onClick={() => onSelectCategory(c.id)}
+            onClick={(event) => {
+              // Retry control lives inside the card; don't treat it as a category tap.
+              if (
+                (event.target as Element | null)?.closest?.(
+                  '[data-chat-thumb-retry]',
+                )
+              ) {
+                return;
+              }
+              onSelectCategory(c.id);
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();

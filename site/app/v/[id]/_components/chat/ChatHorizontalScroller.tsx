@@ -134,7 +134,11 @@ export function ChatHorizontalScroller({
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = ref.current;
     if (!el || el.scrollWidth <= el.clientWidth) return;
-    if ((e.target as Element | null)?.closest('input,textarea,select,[data-chat-no-drag]')) {
+    if (
+      (e.target as Element | null)?.closest(
+        'input,textarea,select,button,[data-chat-no-drag],[data-chat-thumb-retry],[data-chat-no-swipe]',
+      )
+    ) {
       return;
     }
     drag.current = {
