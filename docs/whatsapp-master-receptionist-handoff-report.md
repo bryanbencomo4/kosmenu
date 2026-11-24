@@ -3,7 +3,7 @@
 **Fecha:** 2026-11-24  
 **Rama:** `feature/wa-master-assistant`  
 **Base previa:** `f74d557`  
-**Commit final:** *(ver `git rev-parse HEAD` tras el commit de este cierre)*  
+**Commit final (implementación):** `1711ae4`  
 **Producción:** sin deploy, sin migraciones, flags públicos sin activar.
 
 ---
