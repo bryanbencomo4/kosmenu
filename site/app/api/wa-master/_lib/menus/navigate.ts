@@ -8,6 +8,7 @@ import type {
   WaMasterMemory,
   WaMasterSpecialist,
 } from '../types';
+import { formatConsumerOrderGuide } from '../specialists/consumer';
 import { buildMenuText, invalidChoiceReply, rootMenuIdForProfile } from './copy';
 import { resolveMenuProfile } from './profile';
 import { WA_MENU_STALE_MS, type WaMenuId, type WaMenuProfile } from './types';
@@ -150,6 +151,7 @@ async function consumerHandoff(
   payload: WaHandoffPayload,
   label: string,
 ): Promise<string> {
+  void label;
   const fallback =
     config.consumerAssistantUrl || 'https://elmenuxfa.com/asistente?ref=wa';
   const issued = await issueMasterHandoff({
@@ -160,10 +162,12 @@ async function consumerHandoff(
     payload,
     nowMs,
   });
-  if (!issued?.url) {
-    return `${label}\n\n${fallback}`;
-  }
-  return `${label}\n\n${issued.url}`;
+  return formatConsumerOrderGuide({
+    assistantUrl: fallback,
+    handoffUrl: issued?.url ?? null,
+    zone: typeof payload.zone === 'string' ? payload.zone : null,
+    queryHint: typeof payload.query === 'string' ? payload.query : null,
+  });
 }
 
 function primaryComercio(identity: WaMasterIdentity, memory: WaMasterMemory) {
@@ -258,12 +262,11 @@ export async function tryHandleSmartMenu(params: {
     return showRoot(profile);
   }
 
-  // Greeting / "menú" / empty → always re-open profile root.
-  // Must not require !menuId: after support/human or mid-session, "Hola" was
-  // falling through to Gemini and skipping the numbered smart menu.
+  // Greeting-only / "menú" / empty → re-open profile root (even if menuId set).
+  // Keep this STRICT: "hola, quiero delivery" must reach consumer CTAs, not root.
   if (
     digit === null &&
-    (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|hi|hello)(\b|$)/.test(t) ||
+    (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|hi|hello)([!?.\s]*)$/.test(t) ||
       t === 'menu' ||
       t === 'menú' ||
       !t)
@@ -290,7 +293,14 @@ export async function tryHandleSmartMenu(params: {
 
   // Free-text clear intents without forcing the root walk.
   if (digit === null && !nav.menuId) {
-    if (/\b(pedir|comida|restaurante|delivery|domicilio|hamburguesa|pizza|arepa)\b/.test(t)) {
+    const looksMerchantEdit =
+      /\b(precio|tasa|tarif|agotado|disponible|agregar|editar|modificar)\b/.test(t) ||
+      /\b(cambia(?:r)?|actualiza(?:r)?|pon(?:er)?)\s+(el\s+)?precio\b/.test(t) ||
+      /\bprecio de\b/.test(t);
+    if (
+      !looksMerchantEdit &&
+      /\b(pedir|comida|restaurante|delivery|domicilio|hamburguesa|pizza|arepa)\b/.test(t)
+    ) {
       return {
         handled: true,
         replies: [],

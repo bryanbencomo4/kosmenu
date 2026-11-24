@@ -87,34 +87,20 @@ export function buildDeterministicReplies(params: {
 
   if (primary.startsWith('consumer')) {
     toolsUsed.push('consumer_guidance');
-    if (primary === 'consumer.delivery') {
-      if (!memory.summary.askedFields.includes('zone')) {
-        askedFields.push('zone');
-        return {
-          replies: [
-            '¡Qué buena idea! 🍔 Dime en qué ciudad o zona estás y buscamos opciones. Solo confirmo delivery cuando el restaurante lo tenga activado.',
-          ],
-          escalateHuman,
-          toolsUsed,
-          askedFields,
-        };
-      }
-    }
-    if (!memory.summary.askedFields.includes('zone') && primary === 'consumer.search') {
-      askedFields.push('zone');
-      return {
-        replies: [
-          '¡Te ayudo! 🍕 ¿En qué zona estás? Así te muestro opciones cercanas. También puedes explorar aquí:\n' +
-            config.consumerAssistantUrl,
-        ],
-        escalateHuman,
-        toolsUsed,
-        askedFields,
-      };
-    }
+    // Deterministic fallback only — live path uses consumer specialist CTAs.
     return {
       replies: [
-        `Puedo ayudarte a encontrar opciones en elmenuxfa.com. Sigue aquí con el asistente de búsqueda:\n${config.consumerAssistantUrl}`,
+        [
+          '¡Claro! 🛵 Para pedir delivery o explorar locales, entra a *elmenuxfa.com*:',
+          '',
+          '*Hablar con el asistente*',
+          'https://elmenuxfa.com/asistente',
+          '',
+          '*Explorar restaurantes*',
+          'https://elmenuxfa.com',
+          '',
+          'Ahí eliges zona, ves menús y pides con delivery cuando el local lo tenga activo.',
+        ].join('\n'),
       ],
       escalateHuman,
       toolsUsed,

@@ -236,22 +236,18 @@ describe('wa-master closure sprint', () => {
     dirs.length = 0;
   });
 
-  it('nuevo + info + consumidor + zona persistida', async () => {
+  it('nuevo + info + consumidor guía a asistente y explorar', async () => {
     const mem = createMemoryWaMasterStore();
     const a = await processMaster('Hola, quiero información', { mem });
-    expect(a.result.replies[0]?.text).toMatch(/menú digital|pedir comida/i);
+    expect(a.result.replies[0]?.text).toMatch(/menú digital|pedir comida|asistente|Explorar/i);
 
     const b = await processMaster('Quiero unas hamburguesas', { mem, from: a.from });
-    expect(b.result.replies[0]?.text).toMatch(/zona|ciudad/i);
-
-    const c = await processMaster('San Cristóbal', { mem, from: a.from });
-    expect(c.result.replies[0]?.text).toMatch(/Burger|opciones|Menú/i);
-
-    const saved = await mem.get(a.from);
-    expect(saved?.summary.zone?.toLowerCase()).toMatch(/san crist/);
+    expect(b.result.replies[0]?.text).toMatch(/Hablar con el asistente/i);
+    expect(b.result.replies[0]?.text).toMatch(/Explorar restaurantes/i);
+    expect(b.result.replies[0]?.text).toMatch(/elmenuxfa\.com/);
   });
 
-  it('búsqueda pizza con mock directorio realista', async () => {
+  it('búsqueda pizza guía a web en vez de listar locales en WA', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: '584140000200', catalog: [] });
     const out = await runWaMasterOrchestrator(
       {
@@ -265,9 +261,10 @@ describe('wa-master closure sprint', () => {
       masterCfg(),
       { executeDiscovery: mockDiscoveryExecute() },
     );
-    expect(out.toolsUsed).toContain('search_restaurants');
-    expect(out.replies[0]).toMatch(/Pizza San Cristóbal/);
-    expect(out.memory.summary.lastRestaurants[0]?.slug).toBe('pizza-sc');
+    expect(out.toolsUsed).not.toContain('search_restaurants');
+    expect(out.replies[0]).toMatch(/Hablar con el asistente|Explorar restaurantes/i);
+    expect(out.replies[0]).toMatch(/San Cristóbal|pizza/i);
+    expect(out.memory.summary.zone?.toLowerCase()).toMatch(/san crist/);
   });
 
   it('segunda opción / memoria de lista', async () => {
@@ -509,7 +506,8 @@ describe('wa-master closure sprint', () => {
     const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584140000600',
-        text: 'Hola',
+        // Not a bare greeting (those stay deterministic via smart menu).
+        text: 'Tengo una pregunta sobre la plataforma',
         messageId: 'm-q',
         nowMs: Date.now(),
         identity,
