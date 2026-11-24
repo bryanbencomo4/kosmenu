@@ -9,13 +9,14 @@ void listenBusinessAssistantHashChange(void Function(String hash) onHash) {
 
 /// Prefer window.location — Uri.base can omit the fragment on some Flutter web boots.
 String? readBusinessAssistantHandoffFromLocation() {
-  final hash = (html.window.location.hash ?? '').replaceFirst('#', '');
+  final hash = html.window.location.hash.replaceFirst('#', '');
   if (hash.startsWith('h=')) {
     return Uri.decodeComponent(hash.substring(2)).trim();
   }
   final fromHash = Uri.splitQueryString(hash)['h']?.trim();
   if (fromHash != null && fromHash.isNotEmpty) return fromHash;
-  final params = Uri.splitQueryString(html.window.location.search.replaceFirst('?', ''));
+  final search = html.window.location.search ?? '';
+  final params = Uri.splitQueryString(search.replaceFirst('?', ''));
   final fromQuery = params['h']?.trim();
   if (fromQuery != null && fromQuery.isNotEmpty) return fromQuery;
   return null;
