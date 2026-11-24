@@ -122,6 +122,10 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       if (fromLoc != null && fromLoc.isNotEmpty) {
         _handoffCode = fromLoc;
       }
+      // Drop visible ?h= / #h= after capture (continuity kept in memory).
+      if (_handoffCode != null && _handoffCode!.isNotEmpty) {
+        scrubBusinessAssistantHandoffFromUrl();
+      }
     }
     setState(() {
       _busy = true;

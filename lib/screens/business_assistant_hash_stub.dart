@@ -2,3 +2,5 @@
 void listenBusinessAssistantHashChange(void Function(String hash) onHash) {}
 
 String? readBusinessAssistantHandoffFromLocation() => null;
+
+void scrubBusinessAssistantHandoffFromUrl() {}
