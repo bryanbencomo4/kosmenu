@@ -174,6 +174,33 @@ export function createPreparedWasenderSender(params: {
         throw new Error('wa_entry_refused: recipient not in PLATFORM_WA_ALLOWLIST_DIGITS');
       }
 
+      // Final gate before enqueue: human take / global mute (orders use other sources).
+      {
+        const { describeConversationControl, readGlobalBotMute, shouldSuppressBotReply } =
+          await import('./operator-control');
+        const nowMs = Date.now();
+        const global = await readGlobalBotMute(asyncStore, nowMs);
+        const thread = await asyncStore.getThread(digits);
+        const control = describeConversationControl(digits, thread, nowMs);
+        const gate = shouldSuppressBotReply(control, global, nowMs);
+        if (gate.suppress) {
+          const record: WaOutboundRecord = {
+            id: `suppressed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            to: digits,
+            text: req.text,
+            eventId: req.eventId,
+            dedupeKey: req.dedupeKey,
+            result: 'refused',
+            atMs: nowMs,
+            attempt: 1,
+            origin: 'wa_entry_bot',
+            textHash: hashOutboundText(req.text),
+          };
+          await asyncStore.appendOutbound(record);
+          return { ok: false, alreadySent: false, record };
+        }
+      }
+
       // Poll payloads are documented on WaSender, but our production queue/Edge
       // worker only sends text. Refuse armed poll send; otherwise fall back.
       const decodedPoll = tryDecodePollReply(req.text);

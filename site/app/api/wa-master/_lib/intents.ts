@@ -62,8 +62,27 @@ export function classifyWaMasterIntents(params: {
     intents.push('commercial.register');
   }
 
-  if (/\b(planes|precios del servicio|cuanto cuesta (elmenuxfa|la plataforma)|tarifas)\b/.test(t)) {
+  if (
+    /\b(planes|precios del servicio|cuanto cuesta|cuánto cuesta|tarifas|costo.*(menu|menú|plataforma|servicio))\b/.test(
+      t,
+    ) ||
+    /\bcuanto cuesta tener (un )?men[uú]\b/.test(t)
+  ) {
     intents.push('commercial.pricing');
+  }
+
+  if (
+    /\b(enlace|link|url).*(menu|menú|qr|delivery|pedido)/.test(t) ||
+    /\b(menu|menú|qr|delivery).*(enlace|link|url)\b/.test(t) ||
+    /\b(pasame|pásame|envia|envía|manda|necesito).*(enlace|link|qr|delivery|menu|menú)\b/.test(t) ||
+    /\blos dos enlaces\b/.test(t) ||
+    /\benlace(s)? de mi (menu|menú)\b/.test(t)
+  ) {
+    intents.push('admin.menu_links');
+  }
+
+  if (/\b(tengo una pregunta|una pregunta|quiero preguntar)\b/.test(t)) {
+    intents.push('support.question');
   }
 
   if (
@@ -154,9 +173,11 @@ function pickPrimary(intents: WaMasterIntent[], identity: WaMasterIdentity): WaM
   if (nonGreeting.includes('admin.edit_price') || nonGreeting.includes('admin.edit_product')) {
     return nonGreeting.includes('admin.edit_price') ? 'admin.edit_price' : 'admin.edit_product';
   }
+  if (nonGreeting.includes('admin.menu_links')) return 'admin.menu_links';
   if (nonGreeting.some((i) => i.startsWith('admin'))) {
     return nonGreeting.find((i) => i.startsWith('admin'))!;
   }
+  if (nonGreeting.includes('support.question')) return 'support.question';
   if (nonGreeting.some((i) => i.startsWith('consumer'))) {
     return nonGreeting.find((i) => i.startsWith('consumer'))!;
   }

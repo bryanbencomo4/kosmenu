@@ -3,6 +3,7 @@ import type { WaMasterAuthGate } from '../auth';
 import { unauthorizedAdminMessage } from '../auth';
 import type { WaMasterConfig } from '../config';
 import { issueMasterHandoff } from '../handoff';
+import { buildPublicMenuLinks, formatMenuLinksReply } from '../menu-links';
 import type {
   WaMasterAdminProposal,
   WaMasterIdentity,
@@ -71,9 +72,18 @@ export async function runAdminSpecialist(params: {
   const t = fold(text);
   const toolsUsed: string[] = [];
 
+  // Public menu links are safe to answer in WhatsApp (no admin privilege).
+  const linkIntentEarly =
+    intent === 'admin.menu_links' ||
+    (/\b(enlace|link|url)\b/.test(t) && /\b(menu|menú|qr|delivery|pedido)\b/.test(t)) ||
+    /\b(pasame|pásame|envia|envía|manda|necesito).*(enlace|link|menu|menú|qr|delivery)\b/.test(t) ||
+    /\blos dos enlaces\b/.test(t);
+
   // Receptionist: never run admin writes in WhatsApp — hand off with context.
+  // Exception: public menu/QR/delivery link requests (read-only URLs).
   if (
     config.receptionistMode &&
+    !linkIntentEarly &&
     (intent.startsWith('admin') ||
       /\b(precio|tasa|producto|horarios|disponib|agregar|cambiar)\b/.test(t))
   ) {
@@ -193,6 +203,94 @@ export async function runAdminSpecialist(params: {
       ],
       toolsUsed,
       memoryPatch,
+    };
+  }
+
+  // Public menu / QR / delivery links (never app.elmenuxfa.com admin URLs).
+  const wantsLinks =
+    intent === 'admin.menu_links' ||
+    /\b(enlace|link|url)\b/.test(t) &&
+      /\b(menu|menú|qr|delivery|pedido|pedidos)\b/.test(t) ||
+    /\b(pasame|pásame|envia|envía|manda|necesito).*(enlace|link|menu|menú|qr|delivery)\b/.test(t) ||
+    /\blos dos enlaces\b/.test(t) ||
+    /\benlace(s)? de mi (menu|menú)\b/.test(t);
+
+  if (wantsLinks && shop.slug) {
+    const links = buildPublicMenuLinks({
+      slug: shop.slug,
+      permiteDelivery: snapshot.permiteDelivery,
+    });
+    const which =
+      /\bqr\b/.test(t) && !/\bdelivery\b/.test(t) && !/\bpedido/.test(t)
+        ? 'qr'
+        : /\b(delivery|pedido)/.test(t) && !/\bqr\b/.test(t)
+          ? 'orders'
+          : /\b(dos|ambos|los enlaces)\b/.test(t)
+            ? 'both'
+            : /\bqr\b/.test(t) && /\b(delivery|pedido)/.test(t)
+              ? 'both'
+              : 'both';
+    return {
+      replies: [
+        formatMenuLinksReply({
+          businessName: shop.publicName,
+          links,
+          which: which as 'qr' | 'orders' | 'both' | 'menu',
+        }),
+      ],
+      toolsUsed: [...toolsUsed, 'admin_public_menu_links'],
+      memoryPatch,
+      skipGeminiPolish: true,
+    };
+  }
+
+  if (wantsLinks && !shop.slug) {
+    return {
+      replies: [
+        `Tengo *${shop.publicName}* ligado, pero aún no confirmo su slug público. Revisa el panel: ${config.businessManageUrl}`,
+      ],
+      toolsUsed,
+      memoryPatch,
+      skipGeminiPolish: true,
+    };
+  }
+
+  // How to upload products — guide + optional business assistant handoff.
+  if (/\b(subo|subir|cargar|agregar).*(producto|productos|menu|menú)\b/.test(t) || /\bcomo (hago|hago para) subir\b/.test(t)) {
+    const handoff = await issueMasterHandoff({
+      store: params.handoffStore,
+      config,
+      destination: 'business_assistant',
+      fromDigits: identity.fromDigits,
+      nowMs,
+      payload: {
+        intent: 'admin.edit_product',
+        pendingOperation: 'edit_products',
+        candidateComercioId: comercioId,
+        conversationHint: text.trim().slice(0, 160),
+      },
+    });
+    const base =
+      `Para subir productos de *${shop.publicName}* entra al panel de elmenuxfa.com, abre tu negocio y usa la gestión de productos del menú.\n\nPanel: ${config.businessManageUrl}`;
+    if (handoff) {
+      return {
+        replies: [
+          `${base}\n\nTambién puedes continuar con el asistente para negocios (verificaremos tu cuenta):\n${handoff.url}`,
+        ],
+        toolsUsed: [...toolsUsed, 'handoff_business', 'admin_upload_guide'],
+        memoryPatch: {
+          ...memoryPatch,
+          lastHandoffUrl: handoff.url,
+          lastHandoffAtMs: nowMs,
+        },
+        skipGeminiPolish: true,
+      };
+    }
+    return {
+      replies: [base],
+      toolsUsed: [...toolsUsed, 'admin_upload_guide'],
+      memoryPatch,
+      skipGeminiPolish: true,
     };
   }
 

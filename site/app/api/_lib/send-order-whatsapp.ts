@@ -135,11 +135,32 @@ export async function sendWhatsappText(
   }
 
   const recipient = normalizePhoneToE164(phone);
+  const source = metadata.source?.trim() || 'next-api';
+  // Bot mute / human take: only gate platform-wa-entry. Never block order / supervision.
+  if (source === 'platform-wa-entry') {
+    const { resolveWaEntryControlStore } = await import('../wa-entry/_lib/control-store');
+    const {
+      describeConversationControl,
+      readGlobalBotMute,
+      shouldSuppressBotReply,
+    } = await import('../wa-entry/_lib/operator-control');
+    const store = resolveWaEntryControlStore();
+    const nowMs = Date.now();
+    const digits = recipient.replace(/\D/g, '');
+    const global = await readGlobalBotMute(store, nowMs);
+    const thread = await store.getThread(digits);
+    const control = describeConversationControl(digits, thread, nowMs);
+    const gate = shouldSuppressBotReply(control, global, nowMs);
+    if (gate.suppress) {
+      throw new Error(`wa_entry_suppressed_before_enqueue:${gate.reason || 'muted'}`);
+    }
+  }
+
   const dedupeKey = metadata.dedupeKey?.trim() || createHash('sha256')
     .update(`${recipient}\n${text}`)
     .digest('hex');
   const { data, error } = await getServiceSupabaseClient().rpc('enqueue_wasender_message', {
-    p_source: metadata.source?.trim() || 'next-api',
+    p_source: source,
     p_recipient: recipient,
     p_message: text,
     p_dedupe_key: dedupeKey,

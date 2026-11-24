@@ -32,8 +32,14 @@ export type WaEntryConfig = {
   /** Run Master path but caller should suppress outbound (shadow). */
   masterAssistantShadow: boolean;
   /**
+   * When Master is on and allowlist empty: if true, all contacts get Master.
+   * Default false (fail-closed). Requires explicit PLATFORM_WA_MASTER_PUBLIC=1.
+   */
+  masterPublic: boolean;
+  /**
    * Pilot gate: Master only for these digits when Master is enabled.
-   * Fail-closed: empty list ⇒ nobody receives Master (classic router for all).
+   * Fail-closed: empty list ⇒ nobody receives Master (classic router for all),
+   * unless masterPublic.
    */
   masterAllowlistDigits: string[];
   adapter: WaEntryAdapterKind;
@@ -125,6 +131,8 @@ export function loadWaEntryConfig(env: NodeJS.ProcessEnv = process.env): WaEntry
     pollSendEnabled: envBool(env, 'PLATFORM_WA_POLL_SEND', false),
     masterAssistantEnabled: envBool(env, 'PLATFORM_WA_MASTER', false),
     masterAssistantShadow: envBool(env, 'PLATFORM_WA_MASTER_SHADOW', false),
+    /** When true + Master on + empty allowlist → all contacts (still fail-closed default). */
+    masterPublic: envBool(env, 'PLATFORM_WA_MASTER_PUBLIC', false),
     masterAllowlistDigits: parseAllowlist(
       envStr(env, 'PLATFORM_WA_MASTER_ALLOWLIST_DIGITS', ''),
     ),
@@ -262,11 +270,14 @@ export function isAllowlisted(config: WaEntryConfig, fromDigits: string): boolea
 
 /**
  * Master pilot gate — independent from PLATFORM_WA_ALLOWLIST_DIGITS.
- * Fail-closed: Master enabled + empty master allowlist ⇒ no Master for anyone.
+ * Fail-closed: Master enabled + empty master allowlist ⇒ no Master for anyone,
+ * unless PLATFORM_WA_MASTER_PUBLIC=1 (explicit public open).
  */
 export function isMasterPilotAllowlisted(config: WaEntryConfig, fromDigits: string): boolean {
   if (!config.masterAssistantEnabled) return false;
-  if (config.masterAllowlistDigits.length === 0) return false;
+  if (config.masterAllowlistDigits.length === 0) {
+    return Boolean(config.masterPublic);
+  }
   const digits = (fromDigits || '').replace(/\D/g, '');
   return config.masterAllowlistDigits.includes(digits);
 }

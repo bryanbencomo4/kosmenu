@@ -27,6 +27,14 @@ import {
 } from '../../wa-master/_lib';
 import type { WaMasterDiscoveryCtx, WaMasterDiscoveryExecute } from '../../wa-master/_lib/discovery-bridge';
 import type { AdminMenuLoader } from '../../wa-master/_lib/specialists/admin';
+import {
+  describeConversationControl,
+  readGlobalBotMute,
+  shouldDiscardInFlightBotReply,
+  shouldSuppressBotReply,
+  takeConversation,
+} from './operator-control';
+import { createSupportTicket, markSupportTicketNotified } from './support-tickets';
 
 export type WaEntryProcessResult = {
   accepted: boolean;
@@ -143,7 +151,7 @@ export async function processWaEntryEvent(
     };
   }
 
-  // Bot echo vs human operator (fromMe)
+  // Bot echo vs human operator (fromMe). Bot echoes never trigger human take.
   if (event.fromMe) {
     const isEcho = await store.matchBotEcho({
       toDigits: event.fromDigits,
@@ -163,6 +171,25 @@ export async function processWaEntryEvent(
         metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
       };
     }
+    // Human outbound from official session → take conversation indefinitely.
+    await takeConversation({
+      store,
+      fromDigits: event.fromDigits,
+      controllerId: 'wasender:fromMe',
+      nowMs,
+      threadTtlMs: config.threadTtlMs,
+    });
+    storeOps += 2;
+    return {
+      accepted: true,
+      action: 'ignored',
+      reason: 'from_me',
+      eventId: event.messageId,
+      chatId: event.fromDigits,
+      state: 'human_handling',
+      replies: [],
+      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+    };
   }
 
   // Passive reception: durable claim + classify without auto-replies.
@@ -189,36 +216,6 @@ export async function processWaEntryEvent(
         metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
       };
     }
-    if (event.fromMe) {
-      const thread = (await store.getThread(event.fromDigits)) || {
-        fromDigits: event.fromDigits,
-        state: 'human_handling' as const,
-        updatedAtMs: nowMs,
-        expiresAtMs: nowMs + config.threadTtlMs,
-        humanPausedUntilMs: nowMs + config.humanPauseMs,
-        repliesLastHour: [] as number[],
-        lastOutboundDedupeKey: null as string | null,
-      };
-      const paused = {
-        ...thread,
-        state: 'human_handling' as const,
-        humanPausedUntilMs: nowMs + config.humanPauseMs,
-        updatedAtMs: nowMs,
-        expiresAtMs: nowMs + config.threadTtlMs,
-      };
-      await store.saveThread(paused);
-      storeOps += 2;
-      return {
-        accepted: true,
-        action: 'ignored',
-        reason: 'from_me',
-        eventId: event.messageId,
-        chatId: event.fromDigits,
-        state: 'human_handling',
-        replies: [],
-        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-      };
-    }
     return {
       accepted: true,
       action: 'ignored',
@@ -228,6 +225,23 @@ export async function processWaEntryEvent(
       replies: [],
       metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
     };
+  }
+
+  // Global bot mute (orders / Wasender session stay up).
+  {
+    const globalMute = await readGlobalBotMute(store, nowMs);
+    storeOps += 1;
+    if (globalMute.effective) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: 'global_bot_mute',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
   }
 
   if (!isAllowlisted(config, event.fromDigits) && !event.fromMe) {
@@ -302,6 +316,11 @@ export async function processWaEntryEvent(
     nowMs,
     storeOps,
     forceSendFail: params.forceSendFail,
+    expectedAttentionVersion: describeConversationControl(
+      event.fromDigits,
+      threadBefore,
+      nowMs,
+    ).attentionVersion,
   });
 }
 
@@ -327,46 +346,25 @@ async function processMasterAssistantBranch(params: {
   const { config, store, sender, event, nowMs } = params;
   let storeOps = params.storeOps;
 
-  // Preserve human pause semantics from existing thread state.
-  if (
-    params.threadBefore?.humanPausedUntilMs != null &&
-    params.threadBefore.humanPausedUntilMs > nowMs
-  ) {
-    return {
-      accepted: true,
-      action: 'ignored',
-      reason: 'human_handling',
-      eventId: event.messageId,
-      chatId: event.fromDigits,
-      state: 'human_handling',
-      replies: [],
-      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-    };
+  // Human / closed / timed pause — bot stays silent until authorized return.
+  {
+    const control = describeConversationControl(event.fromDigits, params.threadBefore, nowMs);
+    const gate = shouldSuppressBotReply(control, { effective: false }, nowMs);
+    if (gate.suppress) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: gate.reason || 'human_handling',
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        state: control.closed ? 'closed' : 'human_handling',
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
   }
 
-  if (event.fromMe) {
-    const paused = {
-      fromDigits: event.fromDigits,
-      state: 'human_handling' as const,
-      updatedAtMs: nowMs,
-      expiresAtMs: nowMs + config.threadTtlMs,
-      humanPausedUntilMs: nowMs + config.humanPauseMs,
-      repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
-      lastOutboundDedupeKey: params.threadBefore?.lastOutboundDedupeKey ?? null,
-    };
-    await store.saveThread(paused);
-    storeOps += 1;
-    return {
-      accepted: true,
-      action: 'ignored',
-      reason: 'from_me',
-      eventId: event.messageId,
-      chatId: event.fromDigits,
-      state: 'human_handling',
-      replies: [],
-      metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
-    };
-  }
+  // fromMe already handled upstream; keep defensive no-op.
 
   if (event.isGroup) {
     return {
@@ -398,6 +396,11 @@ async function processMasterAssistantBranch(params: {
     nowMs,
     masterConfig.profileTtlMs,
   );
+  const expectedAttentionVersion = describeConversationControl(
+    event.fromDigits,
+    params.threadBefore,
+    nowMs,
+  ).attentionVersion;
 
   // Privacy erase request — wipe L1/L2/L3 for this contact when asked.
   if (/\b(borrar mis datos|eliminar mi informacion|eliminar mis datos)\b/i.test(event.text)) {
@@ -447,19 +450,48 @@ async function processMasterAssistantBranch(params: {
   await memStore.save(event.fromDigits, orch.memory);
   storeOps += 1;
 
+  // Send the user-facing escalate notice BEFORE taking (take bumps attention version).
+  const attentionForSend = expectedAttentionVersion;
+  let escalateReplies = orch.replies;
+  if (orch.escalateHuman) {
+    const ticket = createSupportTicket({
+      fromDigits: event.fromDigits,
+      text: event.text,
+      context: orch.replies.join('\n').slice(0, 500),
+      nowMs,
+    });
+    // Honest copy: only claim notification when we marked the ticket.
+    markSupportTicketNotified(ticket.id, true);
+    escalateReplies = [
+      'Quiero darte la información correcta. 😊 Dejé tu consulta registrada para que un agente de elmenuxfa.com pueda ayudarte lo antes posible.\n\nPauso el asistente automático en esta conversación.',
+    ];
+  }
+  if (!orch.escalateHuman) {
+    await store.saveThread({
+      fromDigits: event.fromDigits,
+      state: 'awaiting_audience',
+      updatedAtMs: nowMs,
+      expiresAtMs: nowMs + config.threadTtlMs,
+      humanPausedUntilMs: null,
+      repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
+      lastOutboundDedupeKey: orch.dedupeKey,
+    });
+    storeOps += 1;
+  }
+
   const nextState: WaThreadState = orch.escalateHuman ? 'human_handling' : 'awaiting_audience';
-  await store.saveThread({
-    fromDigits: event.fromDigits,
-    state: nextState,
-    updatedAtMs: nowMs,
-    expiresAtMs: nowMs + config.threadTtlMs,
-    humanPausedUntilMs: orch.escalateHuman ? nowMs + config.humanPauseMs : null,
-    repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
-    lastOutboundDedupeKey: orch.dedupeKey,
-  });
-  storeOps += 1;
 
   if (config.masterAssistantShadow || masterConfig.shadowMode) {
+    if (orch.escalateHuman) {
+      await takeConversation({
+        store,
+        fromDigits: event.fromDigits,
+        controllerId: 'master:escalate',
+        nowMs,
+        threadTtlMs: config.threadTtlMs,
+      });
+      storeOps += 1;
+    }
     return {
       accepted: true,
       action: 'ignored',
@@ -472,17 +504,33 @@ async function processMasterAssistantBranch(params: {
     };
   }
 
-  return dispatchReplies({
+  const dispatched = await dispatchReplies({
     sender,
     store,
     event,
-    nextState,
-    repliesText: orch.replies,
+    nextState: orch.escalateHuman ? 'awaiting_audience' : nextState,
+    repliesText: escalateReplies,
     dedupeKey: orch.dedupeKey,
     nowMs,
     storeOps,
     forceSendFail: params.forceSendFail,
+    expectedAttentionVersion: attentionForSend,
   });
+  storeOps = dispatched.metrics.storeOps;
+
+  if (orch.escalateHuman) {
+    await takeConversation({
+      store,
+      fromDigits: event.fromDigits,
+      controllerId: 'master:escalate',
+      nowMs,
+      threadTtlMs: config.threadTtlMs,
+    });
+    storeOps += 1;
+    return { ...dispatched, state: 'human_handling', metrics: { ...dispatched.metrics, storeOps } };
+  }
+
+  return dispatched;
 }
 
 async function dispatchReplies(params: {
@@ -495,9 +543,33 @@ async function dispatchReplies(params: {
   nowMs: number;
   storeOps: number;
   forceSendFail?: boolean;
+  expectedAttentionVersion?: number;
 }): Promise<WaEntryProcessResult> {
   const { sender, store, event, nowMs } = params;
   let storeOps = params.storeOps;
+
+  // Race: operator take / global mute while Gemini (or router) prepared a reply.
+  {
+    const race = await shouldDiscardInFlightBotReply({
+      store,
+      fromDigits: event.fromDigits,
+      expectedAttentionVersion: params.expectedAttentionVersion ?? 0,
+      nowMs,
+    });
+    storeOps += 1;
+    if (race.discard) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: `discarded_${race.reason || 'takeover'}`,
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        state: race.control.closed ? 'closed' : 'human_handling',
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+  }
 
   const locked = await store.tryAcquireSendLock(event.fromDigits, nowMs, 15_000);
   storeOps += 1;
@@ -516,6 +588,27 @@ async function dispatchReplies(params: {
 
   const replies: WaEntryProcessResult['replies'] = [];
   try {
+    // Re-check immediately before first send (takeover during lock wait).
+    const race2 = await shouldDiscardInFlightBotReply({
+      store,
+      fromDigits: event.fromDigits,
+      expectedAttentionVersion: params.expectedAttentionVersion ?? 0,
+      nowMs,
+    });
+    storeOps += 1;
+    if (race2.discard) {
+      return {
+        accepted: true,
+        action: 'ignored',
+        reason: `discarded_${race2.reason || 'takeover'}`,
+        eventId: event.messageId,
+        chatId: event.fromDigits,
+        state: race2.control.closed ? 'closed' : 'human_handling',
+        replies: [],
+        metrics: { receivedAtMs: nowMs, repliedAtMs: null, storeOps },
+      };
+    }
+
     for (const text of params.repliesText) {
       const outbound = await sendWithBoundedRetry({
         sender,

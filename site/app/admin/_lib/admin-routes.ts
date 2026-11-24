@@ -96,6 +96,12 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     icon: 'android',
     permission: 'settings.read',
   },
+  {
+    label: 'WhatsApp control',
+    href: '/admin/wa-control',
+    icon: 'security',
+    permission: 'orders.write',
+  },
 ] as const;
 
 export function sanitizeAdminNextPath(value: string | null | undefined) {

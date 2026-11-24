@@ -108,35 +108,18 @@ export async function runCommercialSpecialist(params: {
     return handoff;
   };
 
-  if (intent === 'commercial.pricing' || /\b(precio|plan|tarifa|cuanto cuesta)\b/.test(t)) {
+  if (intent === 'commercial.pricing' || /\b(precio|plan|tarifa|cuanto cuesta|cuánto cuesta)\b/.test(t)) {
     draft.stage = 'pricing';
-    if (config.receptionistMode) {
-      const handoff = await handoffBusiness({
-        intent: 'commercial.pricing',
-        pendingOperation: 'review_plans',
-        conversationHint: 'Consultar planes del servicio',
-      });
-      if (handoff) {
-        return {
-          replies: [
-            `¡Claro! 😊 Nuestro asistente para negocios te orienta con el servicio y los planes publicados.\n\nContinúa aquí:\n${handoff.url}`,
-          ],
-          toolsUsed: ['handoff_business'],
-          memoryPatch: {
-            signupDraft: draft,
-            activeService: 'commercial',
-            lastHandoffUrl: handoff.url,
-            lastHandoffAtMs: params.nowMs ?? Date.now(),
-          },
-          skipGeminiPolish: true,
-        };
-      }
-    }
+    // Published business landing prices (business.elmenuxfa.com) — do not invent others.
+    const pricingCopy =
+      `¡Claro! 😊 Hoy elmenuxfa.com publica:\n` +
+      `• *Kit Portamenú Inteligente* de lanzamiento: *$10*\n` +
+      `• *Plataforma:* *$10/mes* o *$90/año*\n\n` +
+      `Detalle y condiciones: ${config.businessLandingUrl}\n` +
+      `Si quieres registrar tu menú, dímelo y te oriento.`;
     return {
-      replies: [
-        `${SERVICE_BLURB}\n\nPlanes y condiciones vigentes:\n${config.businessLandingUrl}\n\nNo cito precios inventados por chat.`,
-      ],
-      toolsUsed: ['commercial_pricing_link'],
+      replies: [pricingCopy],
+      toolsUsed: ['commercial_pricing_published'],
       memoryPatch: { signupDraft: draft, activeService: 'commercial' },
       skipGeminiPolish: true,
     };

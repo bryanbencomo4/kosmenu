@@ -36,7 +36,25 @@ export function buildDeterministicReplies(params: {
     };
   }
 
+  if (intents.includes('support.question') || /\btengo una pregunta\b/i.test(params.text)) {
+    return {
+      replies: ['¡Hola! 😊 Claro, dime, ¿en qué puedo ayudarte?'],
+      escalateHuman,
+      toolsUsed: ['open_question'],
+      askedFields,
+    };
+  }
+
   if (primary === 'greeting' || (intents.length === 1 && intents[0] === 'greeting')) {
+    // Avoid rigid numbered menus — invite the real question.
+    if (/\bpregunta\b/i.test(params.text)) {
+      return {
+        replies: ['¡Hola! 😊 Claro, dime, ¿en qué puedo ayudarte?'],
+        escalateHuman,
+        toolsUsed: ['open_question'],
+        askedFields,
+      };
+    }
     return {
       replies: [greetingForIdentity(identity.role, names)],
       escalateHuman,
@@ -121,7 +139,7 @@ export function buildDeterministicReplies(params: {
     if (primary === 'commercial.pricing') {
       return {
         replies: [
-          `Te cuento con gusto los planes vigentes. La información comercial actualizada está aquí:\n${config.businessLandingUrl}\n\nSi quieres, dime el tamaño de tu menú y te oriento sin inventar promociones.`,
+          `¡Claro! 😊 Hoy elmenuxfa.com publica:\n• Kit Portamenú Inteligente de lanzamiento: *$10*\n• Plataforma: *$10/mes* o *$90/año*\n\nDetalle: ${config.businessLandingUrl}`,
         ],
         escalateHuman,
         toolsUsed,
