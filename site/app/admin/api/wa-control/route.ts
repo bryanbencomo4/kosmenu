@@ -416,11 +416,11 @@ export async function POST(request: Request) {
     try {
       const uploaded = await uploadWasenderMedia({ base64, mimetype: mime });
       publicUrl = uploaded.publicUrl;
-      // Wasender voice notes: AAC/MP3/OGG/AMR. Browser often records webm/opus → document fallback.
-      const mimeLower = (mime || '').toLowerCase();
+      // Wasender voice notes: AAC/MP3/OGG/AMR. WAV (converted from webm) goes as document.
+      const mimeLower = (mime || '').toLowerCase().split(';')[0]!.trim();
       const audioAsVoice =
         kind === 'audio' &&
-        (/audio\/(mpeg|mp3|aac|ogg|amr|mp4)/.test(mimeLower) ||
+        (/^audio\/(mpeg|mp3|aac|ogg|amr|mp4|x-m4a)$/.test(mimeLower) ||
           /\.(mp3|aac|ogg|amr|m4a)$/i.test(mediaName || ''));
       const sent = await sendWasenderDirect({
         toDigits: digits,
@@ -440,6 +440,18 @@ export async function POST(request: Request) {
       sendError = e instanceof Error ? e.message : String(e);
     }
 
+    if (sendError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'send_failed',
+          detail: sendError,
+          elapsedMs: Date.now() - started,
+        },
+        { status: 502 },
+      );
+    }
+
     const msg = await appendInboxMessage({
       fromDigits: digits,
       role: 'operator',
@@ -455,19 +467,6 @@ export async function POST(request: Request) {
       replyTo,
     });
     const conversation = await getInboxConversation(digits);
-    if (sendError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'send_failed',
-          detail: sendError,
-          message: msg,
-          conversation,
-          elapsedMs: Date.now() - started,
-        },
-        { status: 502 },
-      );
-    }
     return NextResponse.json({
       ok: true,
       message: msg,

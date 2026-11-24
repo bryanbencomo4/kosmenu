@@ -86,6 +86,11 @@ type ChatComposerProps = {
   sendTestId?: string;
   /** Input placeholder (default WhatsApp-like copy). */
   placeholder?: string;
+  /**
+   * Prefer formats WhatsApp providers accept (ogg/mp4/aac) over browser-default webm.
+   * Used by the platform WA inbox (Wasender rejects audio/webm uploads).
+   */
+  preferWhatsappVoiceMime?: boolean;
 };
 
 /** Live state of a mic press, kept in a ref so pointer handlers never go stale. */
@@ -104,15 +109,25 @@ type VoiceGesture = {
   done: boolean;
 };
 
-function pickRecorderMime(): string {
+function pickRecorderMime(preferWhatsapp = false): string {
   if (typeof MediaRecorder === 'undefined') return '';
-  const candidates = [
+  const whatsappFirst = [
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/aac',
+    'audio/mpeg',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+  ];
+  const browserFirst = [
     'audio/webm;codecs=opus',
     'audio/webm',
     'audio/mp4',
     'audio/aac',
     'audio/ogg;codecs=opus',
   ];
+  const candidates = preferWhatsapp ? whatsappFirst : browserFirst;
   for (const mime of candidates) {
     try {
       if (MediaRecorder.isTypeSupported(mime)) return mime;
@@ -147,6 +162,7 @@ export function ChatComposer({
   inputTestId = 'chat-composer-input',
   sendTestId = 'chat-composer-send',
   placeholder = 'Escribe un mensaje',
+  preferWhatsappVoiceMime = false,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -388,7 +404,7 @@ export function ChatComposer({
         return false;
       }
 
-      const mime = pickRecorderMime();
+      const mime = pickRecorderMime(preferWhatsappVoiceMime);
       const recorder = mime
         ? new MediaRecorder(stream, { mimeType: mime })
         : new MediaRecorder(stream);

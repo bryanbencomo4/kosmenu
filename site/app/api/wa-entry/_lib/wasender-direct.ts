@@ -60,11 +60,18 @@ export async function uploadWasenderMedia(input: {
   const raw = String(input.base64 || '').trim();
   if (!raw) throw new Error('media_base64_required');
   const body: Record<string, string> = {};
+  // Strip codecs params — Wasender rejects e.g. audio/webm;codecs=opus at upload.
+  const mime = (input.mimetype || '').split(';')[0]!.trim() || undefined;
   if (raw.startsWith('data:')) {
-    body.base64 = raw;
+    // Normalize data-URL mime if codecs were embedded.
+    const normalized = mime
+      ? raw.replace(/^data:[^;]+/, `data:${mime}`)
+      : raw;
+    body.base64 = normalized;
+    if (mime) body.mimetype = mime;
   } else {
     body.base64 = raw;
-    if (input.mimetype) body.mimetype = input.mimetype;
+    if (mime) body.mimetype = mime;
   }
   const { ok, status, json } = await wasenderFetch('/api/upload', {
     method: 'POST',

@@ -194,6 +194,83 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
+
+/** Encode AudioBuffer as 16-bit mono WAV (Wasender accepts this as a document; webm is rejected). */
+function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+  const sampleRate = buffer.sampleRate;
+  const channels = 1;
+  const samples = buffer.length;
+  const dataSize = samples * channels * 2;
+  const array = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(array);
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * 2, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  const left = buffer.getChannelData(0);
+  const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+  let offset = 44;
+  for (let i = 0; i < samples; i++) {
+    const sample = right ? (left[i]! + right[i]!) / 2 : left[i]!;
+    const s = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([array], { type: 'audio/wav' });
+}
+
+async function voiceBlobForWasender(blob: Blob): Promise<{
+  dataUrl: string;
+  mime: string;
+  name: string;
+}> {
+  const rawType = (blob.type || 'audio/webm').toLowerCase();
+  const mime = rawType.split(';')[0]!.trim();
+  if (/^audio\/(mpeg|mp3|aac|mp4|ogg|amr|x-m4a)$/.test(mime)) {
+    const ext =
+      mime.includes('ogg')
+        ? 'ogg'
+        : mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')
+          ? 'm4a'
+          : mime.includes('amr')
+            ? 'amr'
+            : 'mp3';
+    return {
+      dataUrl: await blobToDataUrl(blob),
+      mime,
+      name: `nota-de-voz.${ext}`,
+    };
+  }
+
+  // Chrome usually records webm/opus — Wasender upload rejects it. Convert → WAV.
+  const ctx = new AudioContext();
+  try {
+    const ab = await blob.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(ab.slice(0));
+    const wav = audioBufferToWavBlob(decoded);
+    return {
+      dataUrl: await blobToDataUrl(wav),
+      mime: 'audio/wav',
+      name: 'nota-de-voz.wav',
+    };
+  } finally {
+    void ctx.close().catch(() => undefined);
+  }
+}
+
 function loadInboxTheme(): ChatThemeMode {
   if (typeof window === 'undefined') return 'dark';
   try {
@@ -475,14 +552,14 @@ export function WaControlClient() {
     setBusy(true);
     setError(null);
     try {
-      const dataUrl = await blobToDataUrl(payload.blob);
+      const prepared = await voiceBlobForWasender(payload.blob);
       const json = await postAction({
         action: 'send_media',
         fromDigits: selected,
         mediaKind: 'audio',
-        mediaBase64: dataUrl,
-        mediaMime: payload.blob.type || 'audio/webm',
-        mediaName: 'nota-de-voz.webm',
+        mediaBase64: prepared.dataUrl,
+        mediaMime: prepared.mime,
+        mediaName: prepared.name,
         text: payload.transcript || undefined,
         ...(replyTo ? { replyToMessageId: replyTo.messageId } : {}),
       });
@@ -903,6 +980,7 @@ export function WaControlClient() {
                   inputTestId="wa-composer"
                   sendTestId="wa-send"
                   placeholder="Escribe un mensaje"
+                  preferWhatsappVoiceMime
                 />
               ) : (
                 <p className="px-4 py-3 text-center text-[13px]" style={{ color: textMuted }}>
