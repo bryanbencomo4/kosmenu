@@ -117,11 +117,21 @@ export function hashOutboundText(text: string): string {
 /**
  * Normalize a WaSender webhook body (docs + legacy fixtures).
  * Returns null when messageId / chat identity cannot be resolved.
+ *
+ * Also accepts documented `poll.results` (Using Polls as Buttons):
+ * https://www.wasenderapi.com/help/messaging/using-polls-as-buttons
+ * Note: sample payloads set key.fromMe=true on the poll message; votes are
+ * attributed from `pollResult[].voters` / remoteJid and must NOT trigger
+ * human-handling pause.
  */
 export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | null {
   if (!raw || typeof raw !== 'object') return null;
   const root = raw as Record<string, unknown>;
   const eventType = String(root.event ?? root.type ?? 'message').trim();
+
+  if (eventType === 'poll.results') {
+    return normalizePollResultsPayload(root, eventType);
+  }
 
   const data =
     root.data && typeof root.data === 'object'
@@ -209,6 +219,108 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
     isStatus,
     eventType,
     raw,
+  };
+}
+
+/**
+ * Documented poll.results shape → synthetic inbound text = selected option name.
+ * Stable id: `${pollMsgId}:pollvote:${fromDigits}:${optionSlug}` for dedupe.
+ */
+export function normalizePollResultsPayload(
+  root: Record<string, unknown>,
+  eventType = 'poll.results',
+): WaNormalizedEvent | null {
+  const data =
+    root.data && typeof root.data === 'object'
+      ? (root.data as Record<string, unknown>)
+      : root;
+
+  const key =
+    data.key && typeof data.key === 'object'
+      ? (data.key as Record<string, unknown>)
+      : {};
+
+  const pollMsgId = String(key.id ?? data.id ?? root.messageId ?? '').trim();
+  if (!pollMsgId) return null;
+
+  const remoteJid = String(key.remoteJid ?? data.remoteJid ?? '').trim();
+  const pollResult = Array.isArray(data.pollResult) ? data.pollResult : [];
+
+  const remoteDigits = digitsOnly(remoteJid.split('@')[0] || '');
+  let selectedName = '';
+  let voterDigits = '';
+
+  for (const row of pollResult) {
+    if (!row || typeof row !== 'object') continue;
+    const item = row as Record<string, unknown>;
+    const name = String(item.name ?? '').trim();
+    const voters = Array.isArray(item.voters) ? item.voters : [];
+    for (const voter of voters) {
+      const v = String(voter ?? '').trim();
+      if (!v) continue;
+      const digits = digitsOnly(v.split('@')[0] || v);
+      if (!digits) continue;
+      // Prefer the chat partner when remoteJid is a phone JID.
+      if (remoteDigits && digits !== remoteDigits) continue;
+      selectedName = name;
+      voterDigits = digits;
+      break;
+    }
+    if (selectedName) break;
+  }
+
+  // 1:1 fallback: any single voter if remoteJid was @lid / unmatched.
+  if (!selectedName) {
+    for (const row of pollResult) {
+      if (!row || typeof row !== 'object') continue;
+      const item = row as Record<string, unknown>;
+      const name = String(item.name ?? '').trim();
+      const voters = Array.isArray(item.voters) ? item.voters : [];
+      for (const voter of voters) {
+        const digits = digitsOnly(String(voter ?? '').split('@')[0] || '');
+        if (!digits || !name) continue;
+        selectedName = name;
+        voterDigits = digits;
+        break;
+      }
+      if (selectedName) break;
+    }
+  }
+
+  if (!selectedName || !voterDigits) return null;
+
+  const optionSlug = selectedName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 48);
+
+  const tsRaw = Number(root.timestamp ?? data.timestamp ?? Date.now());
+  const timestampMs =
+    Number.isFinite(tsRaw) && tsRaw > 0
+      ? tsRaw < 1e12
+        ? Math.floor(tsRaw * 1000)
+        : Math.floor(tsRaw)
+      : Date.now();
+
+  const sessionId = String(root.sessionId ?? root.session ?? data.sessionId ?? 'unknown').trim();
+
+  return {
+    provider: 'wasender',
+    messageId: `${pollMsgId}:pollvote:${voterDigits}:${optionSlug || 'opt'}`,
+    sessionId,
+    from: remoteJid || `${voterDigits}@s.whatsapp.net`,
+    fromDigits: voterDigits,
+    text: selectedName,
+    timestampMs,
+    // Critical: sample docs set key.fromMe=true; vote is customer selection.
+    fromMe: false,
+    isGroup: remoteJid.includes('@g.us'),
+    isStatus: false,
+    eventType,
+    raw: root,
   };
 }
 

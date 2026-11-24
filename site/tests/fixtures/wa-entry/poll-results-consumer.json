@@ -1,0 +1,22 @@
+{
+  "event": "poll.results",
+  "sessionId": "ELMENUXFA1",
+  "data": {
+    "key": {
+      "remoteJid": "584120000001@s.whatsapp.net",
+      "fromMe": true,
+      "id": "POLLMSGCONSUMER001"
+    },
+    "pollResult": [
+      {
+        "name": "🍔 Pedir comida",
+        "voters": ["584120000001@s.whatsapp.net"]
+      },
+      {
+        "name": "🏪 Tengo un negocio",
+        "voters": []
+      }
+    ]
+  },
+  "timestamp": 1753277070225
+}

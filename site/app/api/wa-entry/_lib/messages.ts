@@ -2,7 +2,7 @@ import type { WaEntryConfig } from './config';
 
 export function welcomeMessage(): string {
   return [
-    '¡Hola! 👋 Bienvenido a *El Menú XFA*.',
+    '¡Hola! 👋 Bienvenido a *elmenuxfa.com*.',
     '',
     '¿Qué te gustaría hacer hoy? 😊',
     '',
@@ -17,9 +17,9 @@ export function consumerLinkMessage(config: WaEntryConfig): string {
   return [
     '¡Perfecto! 😋🍕',
     '',
-    'Con *El Menú XFA* puedes descubrir restaurantes, buscar tus comidas favoritas y explorar sus menús desde un solo lugar.',
+    'En *elmenuxfa.com* puedes descubrir restaurantes, buscar tus comidas favoritas y explorar sus menús desde un solo lugar.',
     '',
-    '🤖 Nuestro asistente virtual te ayuda a encontrar lo que se te antoja.',
+    '🤖 Nuestro asistente virtual te ayudará a encontrar lo que se te antoja.',
     '',
     '👇 *¡Encuentra tu próximo antojo aquí!*',
     '',

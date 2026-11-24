@@ -9,6 +9,7 @@ export {
 } from './config';
 export {
   normalizeWaInboundPayload,
+  normalizePollResultsPayload,
   digitsOnly,
   hashOutboundText,
   type WaNormalizedEvent,
@@ -24,7 +25,21 @@ export {
   businessRegisterMessage,
   businessManageMessage,
 } from './messages';
+export {
+  welcomePoll,
+  businessMenuPoll,
+  encodePollReply,
+  tryDecodePollReply,
+  toWasenderPollBody,
+  POLL_OPTION_CONSUMER,
+  POLL_OPTION_BUSINESS,
+  POLL_OPTION_BIZ_REGISTER,
+  POLL_OPTION_BIZ_MANAGE,
+  type WaInteractiveMode,
+  type WaPollPayload,
+} from './interactive';
 export { routeWaEntryEvent, createInitialThread } from './router';
+export { resolveWasenderOutboundText } from './sender';
 export {
   createMemoryWaEntryStore,
   createFileWaEntryStore,

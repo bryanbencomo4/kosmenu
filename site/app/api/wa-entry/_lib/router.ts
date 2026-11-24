@@ -15,6 +15,15 @@ import {
   unexpectedBusinessMessage,
   welcomeMessage,
 } from './messages';
+import {
+  businessMenuPoll,
+  encodePollReply,
+  POLL_OPTION_BIZ_MANAGE,
+  POLL_OPTION_BIZ_REGISTER,
+  POLL_OPTION_BUSINESS,
+  POLL_OPTION_CONSUMER,
+  welcomePoll,
+} from './interactive';
 
 function fold(text: string): string {
   return text
@@ -45,6 +54,8 @@ function isGreeting(text: string): boolean {
 }
 
 function isConsumerIntent(text: string): boolean {
+  const raw = text.trim();
+  if (raw === POLL_OPTION_CONSUMER) return true;
   const t = fold(text);
   if (t === '1' || t === '1️⃣') return true;
   return (
@@ -55,6 +66,8 @@ function isConsumerIntent(text: string): boolean {
 }
 
 function isBusinessIntent(text: string): boolean {
+  const raw = text.trim();
+  if (raw === POLL_OPTION_BUSINESS) return true;
   const t = fold(text);
   if (t === '2' || t === '2️⃣') return true;
   return /\b(tengo un negocio|soy restaurante|registrar mi restaurante|administrar menu|negocio|restaurante|comercio)\b/.test(
@@ -63,15 +76,32 @@ function isBusinessIntent(text: string): boolean {
 }
 
 function isBusinessRegisterIntent(text: string): boolean {
+  const raw = text.trim();
+  if (raw === POLL_OPTION_BIZ_MANAGE) return false;
+  if (raw === POLL_OPTION_BIZ_REGISTER) return true;
   const t = fold(text);
   if (t === '1' || t === '1️⃣') return true;
   return /\b(registrar|registro|crear menu|nuevo menu|abrir cuenta)\b/.test(t);
 }
 
 function isBusinessManageIntent(text: string): boolean {
+  const raw = text.trim();
+  // Exact poll labels win — "Registrar mi menú" must not match "mi menu".
+  if (raw === POLL_OPTION_BIZ_REGISTER) return false;
+  if (raw === POLL_OPTION_BIZ_MANAGE) return true;
   const t = fold(text);
   if (t === '2' || t === '2️⃣') return true;
   return /\b(gestionar|administrar|panel|iniciar sesion|login|mi menu)\b/.test(t);
+}
+
+function audienceMenuReply(config: { interactiveMode: string }): string {
+  if (config.interactiveMode === 'poll') return encodePollReply(welcomePoll());
+  return welcomeMessage();
+}
+
+function businessSubmenuReply(config: { interactiveMode: string }): string {
+  if (config.interactiveMode === 'poll') return encodePollReply(businessMenuPoll());
+  return businessMenuMessage();
 }
 
 function pruneHour(window: number[], nowMs: number): number[] {
@@ -165,7 +195,7 @@ export function routeWaEntryEvent(params: {
       nowMs,
       config,
       nextState: 'awaiting_audience',
-      replies: [welcomeMessage()],
+      replies: [audienceMenuReply(config)],
       dedupeKey: `welcome:${event.fromDigits}:${event.messageId}`,
       repliesWindow,
     });
@@ -185,7 +215,7 @@ export function routeWaEntryEvent(params: {
           nowMs,
           config,
           nextState: 'awaiting_audience',
-          replies: [welcomeMessage()],
+          replies: [audienceMenuReply(config)],
           dedupeKey: `welcome:${event.fromDigits}:${event.messageId}`,
           repliesWindow,
         });
@@ -200,7 +230,7 @@ export function routeWaEntryEvent(params: {
       nowMs,
       config,
       nextState: 'awaiting_audience',
-      replies: [welcomeMessage()],
+      replies: [audienceMenuReply(config)],
       dedupeKey: `welcome:${event.fromDigits}:${event.messageId}`,
       repliesWindow,
     });
@@ -224,7 +254,7 @@ export function routeWaEntryEvent(params: {
         nowMs,
         config,
         nextState: 'awaiting_business_action',
-        replies: [businessMenuMessage()],
+        replies: [businessSubmenuReply(config)],
         dedupeKey: `bizmenu:${event.fromDigits}:${event.messageId}`,
         repliesWindow,
       });
@@ -315,7 +345,7 @@ export function routeWaEntryEvent(params: {
     nowMs,
     config,
     nextState: 'awaiting_audience',
-    replies: [welcomeMessage()],
+    replies: [audienceMenuReply(config)],
     dedupeKey: `welcome:${event.fromDigits}:${event.messageId}`,
     repliesWindow,
   });

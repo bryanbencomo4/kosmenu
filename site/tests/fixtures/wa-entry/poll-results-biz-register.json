@@ -1,0 +1,22 @@
+{
+  "event": "poll.results",
+  "sessionId": "ELMENUXFA1",
+  "data": {
+    "key": {
+      "remoteJid": "584120000001@s.whatsapp.net",
+      "fromMe": true,
+      "id": "POLLMSGBIZREG001"
+    },
+    "pollResult": [
+      {
+        "name": "Registrar mi menú",
+        "voters": ["584120000001@s.whatsapp.net"]
+      },
+      {
+        "name": "Gestionar mi menú",
+        "voters": []
+      }
+    ]
+  },
+  "timestamp": 1753277070225
+}

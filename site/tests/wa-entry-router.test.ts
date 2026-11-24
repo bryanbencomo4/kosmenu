@@ -12,6 +12,12 @@ import {
 } from '../app/api/wa-entry/_lib/config';
 import { normalizeWaInboundPayload } from '../app/api/wa-entry/_lib/contract';
 import {
+  encodePollReply,
+  POLL_OPTION_CONSUMER,
+  tryDecodePollReply,
+  welcomePoll,
+} from '../app/api/wa-entry/_lib/interactive';
+import {
   businessManageMessage,
   businessMenuMessage,
   businessRegisterMessage,
@@ -23,6 +29,7 @@ import {
   createPreparedWasenderSender,
   createRefusingWasenderSender,
   createSimWaEntrySender,
+  resolveWasenderOutboundText,
 } from '../app/api/wa-entry/_lib/sender';
 import { createMemoryWaEntryStore } from '../app/api/wa-entry/_lib/store';
 
@@ -253,6 +260,19 @@ describe('wa-entry router (local sim)', () => {
     expect(store.listOutbound()).toHaveLength(0);
   });
 
+  it('P2) inbound on / router off → claim pasivo sin respuesta', async () => {
+    const config = testConfig({ inboundEnabled: true, routerEnabled: false });
+    const { result } = await run(fixture('hello.json'), { store, config });
+    expect(result.action).toBe('ignored');
+    expect(result.reason).toBe('router_off');
+    expect(result.eventId).toBeTruthy();
+    expect(store.listOutbound()).toHaveLength(0);
+    expect(store.hasSeenMessage(String(result.eventId))).toBe(true);
+
+    const dup = await run(fixture('hello.json'), { store, config });
+    expect(dup.result.reason).toBe('duplicate');
+  });
+
   it('Q) webhook inválido → rechazo seguro + firma Wasender oficial', () => {
     const config = testConfig();
     const rawBody = JSON.stringify(fixture('hello.json'));
@@ -417,5 +437,118 @@ describe('wa-entry router (local sim)', () => {
       'utf8',
     );
     expect(senderSrc).not.toMatch(/wasenderapi\.com|service_role/);
+  });
+
+  it('interactive default is text; poll flag off', () => {
+    const cfg = loadWaEntryConfig({} as NodeJS.ProcessEnv);
+    expect(cfg.interactiveMode).toBe('text');
+    expect(cfg.pollSendEnabled).toBe(false);
+  });
+
+  it('poll.results normalize: fromMe doc sample → customer vote, not human pause', () => {
+    const n = normalizeWaInboundPayload(fixture('poll-results-consumer.json'));
+    expect(n).not.toBeNull();
+    expect(n?.fromMe).toBe(false);
+    expect(n?.fromDigits).toBe('584120000001');
+    expect(n?.text).toBe(POLL_OPTION_CONSUMER);
+    expect(n?.eventType).toBe('poll.results');
+    expect(n?.messageId).toContain('pollvote');
+  });
+
+  it('poll mode: Hola → encoded welcome poll; vote → consumer link', async () => {
+    const config = testConfig({ interactiveMode: 'poll' });
+    const { result: hello } = await run(fixture('hello.json'), { store, config });
+    expect(hello.action).toBe('replied');
+    const poll = tryDecodePollReply(hello.replies[0]?.text || '');
+    expect(poll).toEqual(welcomePoll());
+
+    const { result: voted, config: cfg } = await run(fixture('poll-results-consumer.json'), {
+      store,
+      config,
+    });
+    expect(voted.action).toBe('replied');
+    expect(voted.reason).toBe('ok');
+    expect(voted.replies[0]?.text).toBe(consumerLinkMessage(cfg));
+    expect(voted.state).toBe('consumer_link_sent');
+    expect(store.getThread('584120000001')?.state).not.toBe('human_handling');
+  });
+
+  it('poll mode: business vote → submenu poll; register vote → register URLs', async () => {
+    const config = testConfig({ interactiveMode: 'poll' });
+    await run(fixture('hello.json'), { store, config });
+    const { result: biz } = await run(fixture('poll-results-business.json'), { store, config });
+    expect(biz.action).toBe('replied');
+    expect(biz.state).toBe('awaiting_business_action');
+    expect(tryDecodePollReply(biz.replies[0]?.text || '')?.options).toEqual([
+      'Registrar mi menú',
+      'Gestionar mi menú',
+    ]);
+
+    const { result: reg, config: cfg } = await run(fixture('poll-results-biz-register.json'), {
+      store,
+      config,
+    });
+    expect(reg.action).toBe('replied');
+    expect(reg.replies[0]?.text).toBe(businessRegisterMessage(cfg));
+    expect(reg.replies[0]?.text).toContain('https://app.elmenuxfa.com/?tab=register');
+  });
+
+  it('poll mode keeps text 1/2 and MENÚ', async () => {
+    const config = testConfig({ interactiveMode: 'poll' });
+    await run(fixture('hello.json'), { store, config });
+    const { result, config: cfg } = await run(fixture('choose-consumer.json'), { store, config });
+    expect(result.replies[0]?.text).toBe(consumerLinkMessage(cfg));
+  });
+
+  it('wasender sender falls back poll encode → text menu; refuses armed poll send', async () => {
+    expect(resolveWasenderOutboundText(encodePollReply(welcomePoll()))).toBe(welcomeMessage());
+
+    const config = testConfig({
+      adapter: 'wasender',
+      allowRealWasender: true,
+      allowlistDigits: ['584120000001'],
+      interactiveMode: 'poll',
+      pollSendEnabled: true,
+    });
+    const sender = createPreparedWasenderSender({
+      config,
+      store,
+      enqueue: async () => ({ ok: true as const, queued: true, response: {} }),
+    });
+    await expect(
+      sender.send({
+        to: '584120000001',
+        text: encodePollReply(welcomePoll()),
+        eventId: 'e-poll',
+        dedupeKey: 'd-poll',
+      }),
+    ).rejects.toThrow(/POLL_SEND/);
+
+    const safe = createPreparedWasenderSender({
+      config: { ...config, pollSendEnabled: false },
+      store,
+      enqueue: async (_phone, text) => {
+        expect(text).toBe(welcomeMessage());
+        return { ok: true as const, queued: true, response: {} };
+      },
+    });
+    const out = await safe.send({
+      to: '584120000001',
+      text: encodePollReply(welcomePoll()),
+      eventId: 'e-poll2',
+      dedupeKey: 'd-poll2',
+    });
+    expect(out.ok).toBe(true);
+    expect(out.record.text).toBe(welcomeMessage());
+  });
+
+  it('poll.results duplicate vote → deduped', async () => {
+    const config = testConfig({ interactiveMode: 'poll' });
+    await run(fixture('hello.json'), { store, config });
+    const first = await run(fixture('poll-results-consumer.json'), { store, config });
+    expect(first.result.action).toBe('replied');
+    const second = await run(fixture('poll-results-consumer.json'), { store, config });
+    expect(second.result.action).toBe('ignored');
+    expect(second.result.reason).toBe('duplicate');
   });
 });

@@ -108,3 +108,9 @@ site/.env.wa-entry.local
 
 # Wa-entry Preview deploy secrets
 site/.wa-entry-preview-deploy/
+
+# Wa-entry production deploy secrets / session inspect
+site/.wa-entry-prod-deploy/
+
+# Wa Master pilot deploy artifacts / conversation dumps
+site/.wa-master-prod-deploy/

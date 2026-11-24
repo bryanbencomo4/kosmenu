@@ -1,9 +1,51 @@
 import { hashOutboundText, type WaOutboundRecord } from './contract';
 import type { WaEntryConfig } from './config';
 import { isAllowlisted } from './config';
+import {
+  businessMenuPoll,
+  tryDecodePollReply,
+  welcomePoll,
+  type WaPollPayload,
+} from './interactive';
+import { businessMenuMessage, welcomeMessage } from './messages';
 import type { WaEntryAsyncStore } from './store-async';
 import { asAsyncStore } from './store-async';
 import type { WaEntryStore } from './store';
+
+/**
+ * Real Wasender text queue cannot send polls today. Map encoded poll replies
+ * back to the traditional numbered menus until Edge + authorization exist.
+ */
+export function resolveWasenderOutboundText(text: string): string {
+  const poll = tryDecodePollReply(text);
+  if (!poll) return text;
+  return fallbackTextForPoll(poll);
+}
+
+function fallbackTextForPoll(poll: WaPollPayload): string {
+  const welcome = welcomePoll();
+  if (
+    poll.options.length === welcome.options.length &&
+    poll.options.every((o, i) => o === welcome.options[i])
+  ) {
+    return welcomeMessage();
+  }
+  const biz = businessMenuPoll();
+  if (
+    poll.options.length === biz.options.length &&
+    poll.options.every((o, i) => o === biz.options[i])
+  ) {
+    return businessMenuMessage();
+  }
+  // Unknown poll shape: surface question + numbered options as safe text.
+  return [
+    poll.question,
+    '',
+    ...poll.options.map((o, i) => `*${i + 1}️⃣ ${o}*`),
+    '',
+    'Responde con el número de tu opción.',
+  ].join('\n');
+}
 
 export type WaSendRequest = {
   to: string;
@@ -122,22 +164,38 @@ export function createPreparedWasenderSender(params: {
       }
 
       const digits = req.to.replace(/\D/g, '');
-      if (!isAllowlisted({ ...config, enforceAllowlist: true }, digits)) {
+      // Public mode (enforce off + empty list): process already gated inbound.
+      // If a list exists, still require membership before real send.
+      const sendGate =
+        config.allowlistDigits.length > 0
+          ? { ...config, enforceAllowlist: true }
+          : config;
+      if (!isAllowlisted(sendGate, digits)) {
         throw new Error('wa_entry_refused: recipient not in PLATFORM_WA_ALLOWLIST_DIGITS');
       }
+
+      // Poll payloads are documented on WaSender, but our production queue/Edge
+      // worker only sends text. Refuse armed poll send; otherwise fall back.
+      const decodedPoll = tryDecodePollReply(req.text);
+      if (decodedPoll && config.pollSendEnabled) {
+        throw new Error(
+          'wa_entry_refused: PLATFORM_WA_POLL_SEND is set but Edge queue poll delivery is not armed',
+        );
+      }
+      const outboundText = resolveWasenderOutboundText(req.text);
 
       // Register bot outbound BEFORE enqueue so fromMe echo can match.
       const pending: WaOutboundRecord = {
         id: `queued_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         to: digits,
-        text: req.text,
+        text: outboundText,
         eventId: req.eventId,
         dedupeKey: req.dedupeKey,
         result: 'queued',
         atMs: Date.now(),
         attempt: 1,
         origin: 'wa_entry_bot',
-        textHash: hashOutboundText(req.text),
+        textHash: hashOutboundText(outboundText),
       };
       await asyncStore.appendOutbound(pending);
 
@@ -151,7 +209,7 @@ export function createPreparedWasenderSender(params: {
           });
         });
 
-      const result = await enqueue(req.to, req.text, {
+      const result = await enqueue(req.to, outboundText, {
         source: 'platform-wa-entry',
         dedupeKey: `wa-entry:${req.dedupeKey}`,
       });
