@@ -40,6 +40,28 @@ describe('wa smart menus', () => {
     expect(isUniversalSupport('8')).toBe(true);
     expect(isUniversalSupport('tengo un problema')).toBe(true);
     expect(isUniversalSupport('no me funciona')).toBe(true);
+    expect(isUniversalSupport('ayuda')).toBe(true);
+    expect(isUniversalSupport('necesito ayuda para pedir pizza')).toBe(false);
+    expect(isUniversalSupport('necesito ayuda para registrar mi negocio')).toBe(false);
+  });
+
+  it('register mi restaurante is commercial, not consumer shortcut', async () => {
+    const now = Date.now();
+    const config = loadWaMasterConfig({
+      PLATFORM_WA_MASTER: '1',
+    } as unknown as NodeJS.ProcessEnv);
+    const memory = createEmptyMemory('584140821633', now, 86_400_000);
+    const out = await tryHandleSmartMenu({
+      text: 'Quiero registrar mi restaurante',
+      identity: identity(),
+      memory,
+      config,
+      nowMs: now,
+      fromDigits: '584140821633',
+    });
+    expect(out.handled).toBe(true);
+    expect(out.delegate?.specialist).toBe('commercial');
+    expect(out.intents).toContain('commercial.register');
   });
 
   it('resolves menu profiles from identity', () => {

@@ -128,11 +128,18 @@ export async function runWaMasterOrchestrator(
     intents = ['consumer.search'];
     specialist = 'consumer';
   }
-  if (
-    memory.summary.pendingQuestion === 'business_name' ||
-    (memory.summary.signupDraft &&
-      !intents.some((i) => i.startsWith('commercial')) &&
-      /se llama|negocio|restaurante/i.test(text))
+  // Only resume signup when explicitly naming / continuing — bare "restaurante"
+  // must not trap leftover signupDraft into commercial forever.
+  if (memory.summary.pendingQuestion === 'business_name') {
+    intents = ['commercial.register'];
+    specialist = 'commercial';
+  } else if (
+    memory.summary.signupDraft &&
+    !intents.some((i) => i.startsWith('commercial')) &&
+    /\b(se llama|continuar (mi )?registro|retomar (el )?registro|seguir con (el )?registro)\b/i.test(
+      text,
+    ) &&
+    !/\b(pedir|delivery|domicilio|hamburg|pizza|buscar|cerca)\b/i.test(text)
   ) {
     intents = ['commercial.register'];
     specialist = 'commercial';
@@ -144,7 +151,8 @@ export async function runWaMasterOrchestrator(
     intents = ['consumer.search'];
     specialist = 'consumer';
   }
-  if (memory.summary.pendingAdminProposal && /\b(confirmo|confirmado|dale|hazlo)\b/i.test(text)) {
+  // Require explicit confirm — "dale/ok" are too loose for stale proposals.
+  if (memory.summary.pendingAdminProposal && /\b(confirmo|confirmado)\b/i.test(text)) {
     intents = ['admin.edit_price'];
     specialist = 'admin';
   }
@@ -385,10 +393,12 @@ export async function runWaMasterOrchestrator(
       text: [
         `Mensaje del usuario: ${text}`,
         '',
-        'HECHOS VERIFICADOS (úsalos tal cual; no inventes restaurantes ni acciones completadas):',
+        'HECHOS VERIFICADOS (úsalos tal cual; no inventes nada fuera de este bloque):',
         factsBlock,
         '',
-        'Escribe UNA respuesta breve y natural en español para WhatsApp basada solo en esos hechos.',
+        'Escribe UNA respuesta breve y natural en español para WhatsApp basada SOLO en esos hechos.',
+        'Prohibido inventar: ciudad/zona, productos, precios, estado del menú, restaurantes o acciones completadas.',
+        'Si el hecho no menciona una ciudad, no asumas ninguna.',
       ].join('\n'),
       identity,
       memory,
@@ -397,6 +407,8 @@ export async function runWaMasterOrchestrator(
       forceSimulate: deps.forceSimulateAgent ?? (!config.allowGemini || config.simulateAgent),
       forceFail: deps.forceAgentFail,
       enableTools: false,
+      // Polish must not re-inject stale zone/shop claims from prior turns.
+      omitMemoryPrompt: true,
       maxHttpCalls: config.maxGeminiHttpPerTurn,
       requestId: `wm_${messageId}`,
     });

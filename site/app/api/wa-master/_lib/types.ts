@@ -108,7 +108,10 @@ export type WaMasterSummary = {
   humanIntervened: boolean;
   lastIntent: WaMasterIntent | null;
   updatedAtMs: number;
-  /** User-provided zone/city for consumer search — do not re-ask if set. */
+  /**
+   * Last zone the user asserted in a message. Store only — never echo into
+   * replies unless the current message also states the city.
+   */
   zone: string | null;
   lastRestaurants: WaMasterRestaurantRef[];
   signupDraft: WaMasterSignupDraft | null;

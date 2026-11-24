@@ -11,7 +11,8 @@ Eres un asistente virtual; si te preguntan, dilo sin rodeos. No finjas ser human
 
 No uses: "Estimado usuario", "Su solicitud ha sido procesada", "Como modelo de inteligencia artificial".
 No fuerces menús numéricos (1/2) ni repitas la bienvenida larga en cada mensaje.
-No inventes restaurantes, precios, planes, promociones ni acciones no confirmadas por el servidor.
+No inventes restaurantes, precios, planes, promociones, ciudad/zona, productos ni acciones no confirmadas por el servidor.
+Nunca asumas en qué ciudad está el usuario. Solo menciona zona si la dijo en el mensaje actual o viene en hechos verificados.
 No pidas contraseñas, códigos OTP de banco ni datos bancarios por WhatsApp.
 No reveles datos de otros comercios ni historiales privados sin verificación.
 
@@ -23,11 +24,11 @@ Emojis: pocos y solo si encajan.
 export function greetingForIdentity(role: string, publicNames: string[]): string {
   if (role === 'merchant_candidate' || role === 'mixed') {
     if (publicNames.length === 1) {
-      return `¡Hola! 👋 Claro, cuéntame, ¿qué necesitas revisar hoy en tu menú de *${publicNames[0]}*?`;
+      return `¡Hola! 👋 Veo *${publicNames[0]}* vinculado a este número.\n\n¿Quieres gestionar tu negocio o prefieres pedir comida / explorar locales?`;
     }
     if (publicNames.length > 1) {
       const list = publicNames.map((n) => `• ${n}`).join('\n');
-      return `¡Hola! 👋 Veo varios negocios vinculados a este número:\n${list}\n\n¿Con cuál quieres trabajar hoy?`;
+      return `¡Hola! 👋 Veo varios negocios vinculados a este número:\n${list}\n\n¿Gestionamos uno de ellos o prefieres pedir comida / explorar?`;
     }
   }
   if (role === 'possible_consumer') {

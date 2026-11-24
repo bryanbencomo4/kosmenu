@@ -85,19 +85,26 @@ async function callGemini(params: {
   }
 }
 
-function buildSystemPrompt(identity: WaMasterIdentity, memory: WaMasterMemory): string {
+function buildSystemPrompt(
+  identity: WaMasterIdentity,
+  memory: WaMasterMemory,
+  opts?: { omitMemoryPrompt?: boolean },
+): string {
   const shops = identity.comercios.map((c) => c.publicName).join(', ') || '—';
-  return [
+  const lines = [
     WA_MASTER_PERSONALITY,
     '',
     `Contacto: roles=${identity.role}; comercios_señal=${shops}; consumer_signal=${identity.possibleConsumer}; notes=${identity.provenanceNotes.join(',')}`,
     'IMPORTANTE: coincidencia telefónica ≠ autorización para modificar menús.',
-    'No inventes restaurantes, precios, planes ni acciones completadas.',
+    'No inventes restaurantes, precios, planes, ciudad/zona, productos ni acciones completadas.',
+    'Nunca asumas la ciudad del usuario. Solo menciona zona si está en HECHOS o en el mensaje actual.',
     'Si te dan HECHOS verificados, responde solo con esos hechos. No agregues locales inventados.',
     'Responde en español breve, natural, sin markdown pesado.',
-    '',
-    formatMemoryForPrompt(memory, 8),
-  ].join('\n');
+  ];
+  if (!opts?.omitMemoryPrompt) {
+    lines.push('', formatMemoryForPrompt(memory, 8));
+  }
+  return lines.join('\n');
 }
 
 export async function runWaMasterAgentNlu(params: {
@@ -114,6 +121,8 @@ export async function runWaMasterAgentNlu(params: {
   executeDiscovery?: WaMasterDiscoveryExecute;
   /** When false, no function calling — polish / soft replies only. */
   enableTools?: boolean;
+  /** Skip prior-turn memory dump (use for facts-only polish). */
+  omitMemoryPrompt?: boolean;
   maxHttpCalls?: number;
   timeoutMs?: number;
 }): Promise<WaMasterAgentResult> {
@@ -209,7 +218,13 @@ export async function runWaMasterAgentNlu(params: {
 
       const body: Record<string, unknown> = {
         systemInstruction: {
-          parts: [{ text: buildSystemPrompt(identity, memory) }],
+          parts: [
+            {
+              text: buildSystemPrompt(identity, memory, {
+                omitMemoryPrompt: Boolean(params.omitMemoryPrompt),
+              }),
+            },
+          ],
         },
         contents,
         generationConfig: {

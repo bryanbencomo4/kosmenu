@@ -169,10 +169,10 @@ export async function runAdminSpecialist(params: {
     activeService: 'admin',
   };
 
-  // Confirm pending proposal
+  // Confirm pending proposal — require explicit confirmo (not loose dale/ok/sí).
   if (
     memory.summary.pendingAdminProposal &&
-    /\b(confirmo|confirmado|si\b|sí\b|dale|hazlo|ok)\b/.test(t)
+    /\b(confirmo|confirmado)\b/.test(t)
   ) {
     const proposal = memory.summary.pendingAdminProposal;
     const session = await authGate.getSession(identity.fromDigits, proposal.comercioId, nowMs);

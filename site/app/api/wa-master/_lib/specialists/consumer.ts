@@ -18,26 +18,53 @@ function publicMenuUrl(slug: string): string {
   return `https://elmenuxfa.com/v/${encodeURIComponent(slug)}`;
 }
 
-function extractZone(text: string): string | null {
+const KNOWN_CITIES = [
+  'san cristobal',
+  'san cristóbal',
+  'tachira',
+  'táchira',
+  'caracas',
+  'maracaibo',
+  'valencia',
+  'barquisimeto',
+  'merida',
+  'mérida',
+] as const;
+
+/** User is correcting / rejecting a prior city — never treat as current zone. */
+export function isZoneCorrection(text: string): boolean {
   const t = fold(text);
-  const m =
-    t.match(/\ben\s+([a-záéíóúñ\s]{3,40})$/i) ||
-    t.match(/\bzona\s+([a-záéíóúñ\s]{3,40})/i) ||
-    t.match(/\bciudad\s+([a-záéíóúñ\s]{3,40})/i);
-  if (m?.[1]) return m[1].trim().replace(/\s+/g, ' ');
-  for (const city of [
-    'san cristobal',
-    'san cristóbal',
-    'tachira',
-    'táchira',
-    'caracas',
-    'maracaibo',
-    'valencia',
-    'barquisimeto',
-    'merida',
-    'mérida',
-  ]) {
-    if (t.includes(fold(city))) return city;
+  return (
+    /\b(no estoy|no vivo|no soy de|no estoy en|no es (mi )?(ciudad|zona)|otra (ciudad|zona)|cambio de (ciudad|zona)|me equivoque de (ciudad|zona)|me equivoqué de (ciudad|zona))\b/.test(
+      t,
+    ) || /\bno\s+(estoy|vivo|soy)\s+(en|de)\b/.test(t)
+  );
+}
+
+/**
+ * Extract zone only when the user asserts location in THIS message.
+ * Ignores corrections ("no estoy en Caracas") and bare substring traps.
+ */
+export function extractZone(text: string): string | null {
+  const t = fold(text);
+  if (isZoneCorrection(t)) return null;
+
+  const explicit =
+    t.match(/\ben\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})\b/i) ||
+    t.match(/\bzona\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})\b/i) ||
+    t.match(/\bciudad\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})\b/i);
+  if (explicit?.[1]) {
+    const raw = explicit[1].trim().replace(/\s+/g, ' ');
+    // Reject filler like "en general" / "en realidad"
+    if (/^(general|realidad|serio|verdad|casa|linea|línea)$/.test(raw)) return null;
+    const hit = KNOWN_CITIES.find((c) => fold(c) === fold(raw));
+    return hit || raw;
+  }
+
+  for (const city of KNOWN_CITIES) {
+    const c = fold(city);
+    const re = new RegExp(`\\b${c.replace(/\s+/g, '\\s+')}\\b`);
+    if (re.test(t)) return city;
   }
   return null;
 }
@@ -183,11 +210,7 @@ export async function runConsumerSpecialist(params: {
   // Ordering / discovery belongs on web (asistente + explorar), not a short WA list.
   if (foodSeek) {
     const query = foodQueryHint(text);
-    // Clear mistaken prior city if the user corrects it.
-    const clearsZone =
-      /\b(no estoy|no vivo|no soy de|no estoy en|otra (ciudad|zona)|cambio de (ciudad|zona))\b/.test(
-        t,
-      );
+    const clearsZone = isZoneCorrection(text);
     const handoff = await issueMasterHandoff({
       store: params.handoffStore,
       config,
@@ -204,7 +227,8 @@ export async function runConsumerSpecialist(params: {
     const guide = formatConsumerOrderGuide({
       assistantUrl: config.consumerAssistantUrl,
       handoffUrl: handoff?.url ?? null,
-      zone: zone || null,
+      // Never echo zone on correction turns.
+      zone: clearsZone ? null : zone || null,
       queryHint: query,
     });
     return {
@@ -212,6 +236,8 @@ export async function runConsumerSpecialist(params: {
       toolsUsed: [...toolsUsed, handoff ? 'handoff_consumer' : 'consumer_explore_guide'],
       memoryPatch: {
         ...(zone ? { zone } : clearsZone ? { zone: null } : {}),
+        // Drop stale WA restaurant lists — ordering is on web now.
+        lastRestaurants: [],
         pendingQuestion: null,
         activeService: 'consumer',
         lastHandoffUrl: handoff?.url ?? memory.summary.lastHandoffUrl ?? null,

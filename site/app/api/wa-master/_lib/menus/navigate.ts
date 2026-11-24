@@ -83,12 +83,24 @@ export function isUniversalHuman(text: string): boolean {
 
 export function isUniversalSupport(text: string): boolean {
   const t = fold(text);
-  return (
-    /^(8)$/.test(t.trim()) ||
-    /\b(reportar (un )?problema|tengo un problema|no me funciona|necesito ayuda|ayuda|soporte|incidencia)\b/.test(
-      t,
-    )
-  );
+  if (/^(8)$/.test(t.trim())) return true;
+  if (
+    /\b(reportar (un )?problema|tengo un problema|no me funciona|soporte|incidencia)\b/.test(t)
+  ) {
+    return true;
+  }
+  // Bare "ayuda" must not steal food/register intents ("necesito ayuda para pedir pizza").
+  if (/\b(necesito ayuda|ayuda)\b/.test(t)) {
+    if (
+      /\b(pedir|delivery|domicilio|pizza|hamburg|sushi|arepa|restaurante|registrar|crear.*(menu|menú)|negocio|precio|menu|menú)\b/.test(
+        t,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 function navFromSummary(memory: WaMasterMemory, profile: WaMenuProfile, nowMs: number) {
@@ -297,23 +309,12 @@ export async function tryHandleSmartMenu(params: {
       /\b(precio|tasa|tarif|agotado|disponible|agregar|editar|modificar)\b/.test(t) ||
       /\b(cambia(?:r)?|actualiza(?:r)?|pon(?:er)?)\s+(el\s+)?precio\b/.test(t) ||
       /\bprecio de\b/.test(t);
-    if (
-      !looksMerchantEdit &&
-      /\b(pedir|comida|restaurante|delivery|domicilio|hamburguesa|pizza|arepa)\b/.test(t)
-    ) {
-      return {
-        handled: true,
-        replies: [],
-        memoryPatch: patchMenu('root_consumer', 'consumer', nowMs),
-        escalateHuman: false,
-        specialist: 'consumer',
-        intents: ['consumer.search'],
-        toolsUsed: ['smart_menu', 'intent_shortcut'],
-        skipGeminiPolish: false,
-        delegate: { specialist: 'consumer', intent: 'consumer.search' },
-      };
-    }
-    if (/\b(registrar|crear.*(menu|menú)|poner mi negocio|planes|precios del servicio)\b/.test(t)) {
+    const looksRegister =
+      /\b(registrar|crear.*(menu|menú)|poner mi negocio|planes|precios del servicio|mi (propio )?restaurante)\b/.test(
+        t,
+      ) || /\bregistrar\b.*\b(restaurante|negocio|menu|menú)\b/.test(t);
+    // Commercial first — "registrar mi restaurante" must not become consumer.search.
+    if (looksRegister) {
       return {
         handled: true,
         replies: [],
@@ -327,6 +328,26 @@ export async function tryHandleSmartMenu(params: {
           specialist: 'commercial',
           intent: /\bplanes|precio/.test(t) ? 'commercial.pricing' : 'commercial.register',
         },
+      };
+    }
+    if (
+      !looksMerchantEdit &&
+      (/\b(pedir|comida|delivery|domicilio|hamburguesa|pizza|arepa|restaurantes)\b/.test(t) ||
+        /\b(buscar|busco|quiero|pido|necesito).{0,24}restaurante\b/.test(t))
+    ) {
+      return {
+        handled: true,
+        replies: [],
+        memoryPatch: patchMenu('root_consumer', 'consumer', nowMs, {
+          zone: null,
+          lastRestaurants: [],
+        }),
+        escalateHuman: false,
+        specialist: 'consumer',
+        intents: ['consumer.search'],
+        toolsUsed: ['smart_menu', 'intent_shortcut'],
+        skipGeminiPolish: false,
+        delegate: { specialist: 'consumer', intent: 'consumer.search' },
       };
     }
   }

@@ -266,6 +266,69 @@ describe('Master receptionist handoff', () => {
     expect(out.replies[0]).toMatch(/https:\/\/elmenuxfa\.com(?:\n|$)/);
     expect(out.replies[0]).not.toMatch(/Demo Burger/i);
   });
+
+  it('does not echo stale Caracas; correction clears assumed city', async () => {
+    const identity = resolveWaMasterIdentity({ fromDigits: PILOT, catalog: [] });
+    const memory = createEmptyMemory(PILOT, Date.now(), 86400000);
+    memory.summary.zone = 'caracas';
+    const stale = await runWaMasterOrchestrator(
+      {
+        fromDigits: PILOT,
+        text: 'Quiero un delivery',
+        messageId: 'z1',
+        nowMs: Date.now(),
+        identity,
+        memory,
+        forceDeterministic: true,
+      },
+      masterCfg({ PLATFORM_WA_MASTER_RECEPTIONIST: '0' }),
+      { forceSimulateAgent: true, executeDiscovery: mockDiscovery },
+    );
+    expect(stale.replies[0]).not.toMatch(/caracas/i);
+
+    const corrected = await runWaMasterOrchestrator(
+      {
+        fromDigits: PILOT,
+        text: 'No estoy en Caracas, quiero pedir delivery',
+        messageId: 'z2',
+        nowMs: Date.now() + 1,
+        identity,
+        memory: stale.memory,
+        forceDeterministic: true,
+      },
+      masterCfg({ PLATFORM_WA_MASTER_RECEPTIONIST: '0' }),
+      { forceSimulateAgent: true, executeDiscovery: mockDiscovery },
+    );
+    expect(corrected.replies[0]).not.toMatch(/caracas/i);
+    expect(corrected.memory.summary.zone).toBeNull();
+  });
+
+  it('leftover signupDraft does not trap "busco restaurante" into commercial', async () => {
+    const identity = resolveWaMasterIdentity({ fromDigits: PILOT, catalog: [] });
+    const memory = createEmptyMemory(PILOT, Date.now(), 86400000);
+    memory.summary.signupDraft = {
+      businessName: 'Pizza Nova Pilot',
+      city: null,
+      category: null,
+      stage: 'waiting_panel',
+    };
+    const out = await runWaMasterOrchestrator(
+      {
+        fromDigits: PILOT,
+        text: 'Busco un restaurante para pedir',
+        messageId: 's1',
+        nowMs: Date.now(),
+        identity,
+        memory,
+        forceDeterministic: true,
+      },
+      masterCfg({ PLATFORM_WA_MASTER_RECEPTIONIST: '0' }),
+      { forceSimulateAgent: true, executeDiscovery: mockDiscovery },
+    );
+    expect(out.specialist).toBe('consumer');
+    expect(out.replies[0]).toMatch(/Hablar con el asistente|Explorar restaurantes/i);
+    expect(out.replies[0]).not.toMatch(/registro|registrar/i);
+  });
 });
 
 describe('Discovery commercial detection', () => {

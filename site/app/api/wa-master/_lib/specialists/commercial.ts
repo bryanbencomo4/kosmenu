@@ -71,10 +71,10 @@ export async function runCommercialSpecialist(params: {
     }
   }
 
-  // Memory-only: already have name and user asks again
+  // Memory-only: already have name and user asks again (not bare "nombre" alone).
   if (
     draft.businessName &&
-    /\b(recuerdas|como se llama|cómo se llama|nombre)\b/.test(t)
+    /\b(recuerdas|como se llama|cómo se llama|nombre de mi (negocio|restaurante))\b/.test(t)
   ) {
     return {
       replies: [
