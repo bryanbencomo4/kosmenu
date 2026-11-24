@@ -69,7 +69,7 @@ export function AdminShell({
       className={[
         'min-h-dvh text-slate-900',
         isWaInbox
-          ? 'bg-[#111b21]'
+          ? 'bg-[var(--chat-bg,#111b21)]'
           : 'bg-[linear-gradient(180deg,#f7f5ff_0%,#f2f4ff_45%,#eef2ff_100%)]',
       ].join(' ')}
     >

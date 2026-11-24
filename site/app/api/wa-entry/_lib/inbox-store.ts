@@ -24,6 +24,27 @@ export type InboxStatus =
 
 export type InboxMessageRole = 'contact' | 'assistant' | 'operator' | 'system';
 
+export type InboxMediaKind = 'image' | 'file' | 'audio';
+
+export type InboxReplyTo = {
+  messageId: string;
+  preview: string;
+  authorLabel?: string | null;
+  role?: InboxMessageRole | null;
+};
+
+export type InboxReaction = {
+  emoji: string;
+  party: 'operator' | 'contact';
+};
+
+export type InboxWaKey = {
+  id: string;
+  remoteJid: string;
+  fromMe: boolean;
+  participant?: string;
+};
+
 export type InboxMessage = {
   id: string;
   fromDigits: string;
@@ -34,6 +55,14 @@ export type InboxMessage = {
   operatorId?: string | null;
   operatorLabel?: string | null;
   outboundId?: string | null;
+  /** Wasender integer msgId when known (for native quoted replies). */
+  wasenderMsgId?: number | string | null;
+  waKey?: InboxWaKey | null;
+  mediaKind?: InboxMediaKind | null;
+  mediaUrl?: string | null;
+  mediaName?: string | null;
+  replyTo?: InboxReplyTo | null;
+  reactions?: InboxReaction[];
 };
 
 export type InboxConversation = {
@@ -210,21 +239,44 @@ export async function appendInboxMessage(input: {
   operatorLabel?: string | null;
   outboundId?: string | null;
   id?: string;
+  wasenderMsgId?: number | string | null;
+  waKey?: InboxWaKey | null;
+  mediaKind?: InboxMediaKind | null;
+  mediaUrl?: string | null;
+  mediaName?: string | null;
+  replyTo?: InboxReplyTo | null;
+  reactions?: InboxReaction[];
 }): Promise<InboxMessage> {
   const fromDigits = digitsOf(input.fromDigits);
   const atMs = input.atMs ?? Date.now();
   const id =
     input.id || `waim_${atMs}_${Math.random().toString(36).slice(2, 10)}`;
+  const previewText =
+    String(input.text || '').trim() ||
+    (input.mediaKind === 'image'
+      ? '📷 Foto'
+      : input.mediaKind === 'audio'
+        ? '🎤 Nota de voz'
+        : input.mediaKind === 'file'
+          ? `📎 ${input.mediaName || 'Archivo'}`
+          : '');
   const msg: InboxMessage = {
     id,
     fromDigits,
     role: input.role,
-    text: String(input.text || '').slice(0, 4000),
+    text: previewText.slice(0, 4000),
     atMs,
     clientMessageId: input.clientMessageId || null,
     operatorId: input.operatorId || null,
     operatorLabel: input.operatorLabel || null,
     outboundId: input.outboundId || null,
+    wasenderMsgId: input.wasenderMsgId ?? null,
+    waKey: input.waKey || null,
+    mediaKind: input.mediaKind || null,
+    mediaUrl: input.mediaUrl || null,
+    mediaName: input.mediaName || null,
+    replyTo: input.replyTo || null,
+    reactions: input.reactions || [],
   };
 
   const list = msgMap().get(fromDigits) || [];
@@ -391,6 +443,36 @@ export async function markInboxRead(fromDigitsRaw: string): Promise<void> {
   const prev = convMap().get(fromDigits);
   if (!prev) return;
   convMap().set(fromDigits, { ...prev, unreadCount: 0, updatedAtMs: Date.now() });
+}
+
+export async function getInboxMessage(
+  fromDigitsRaw: string,
+  messageId: string,
+): Promise<InboxMessage | null> {
+  const fromDigits = digitsOf(fromDigitsRaw);
+  const list = msgMap().get(fromDigits) || [];
+  return list.find((m) => m.id === messageId) || null;
+}
+
+export async function setInboxMessageReaction(input: {
+  fromDigits: string;
+  messageId: string;
+  emoji: string;
+  party?: 'operator' | 'contact';
+}): Promise<InboxMessage | null> {
+  const fromDigits = digitsOf(input.fromDigits);
+  const list = msgMap().get(fromDigits) || [];
+  const idx = list.findIndex((m) => m.id === input.messageId);
+  if (idx < 0) return null;
+  const party = input.party || 'operator';
+  const emoji = String(input.emoji || '').trim();
+  const prev = list[idx]!;
+  const reactions = [...(prev.reactions || [])].filter((r) => r.party !== party);
+  if (emoji) reactions.push({ emoji, party });
+  const next: InboxMessage = { ...prev, reactions };
+  list[idx] = next;
+  msgMap().set(fromDigits, list);
+  return next;
 }
 
 export async function inboxTakeConversation(input: {

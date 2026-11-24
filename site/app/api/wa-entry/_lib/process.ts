@@ -248,6 +248,7 @@ export async function processWaEntryEvent(
       text: event.text,
       atMs: nowMs,
       clientMessageId: event.messageId,
+      waKey: event.waKey || null,
     });
   } catch {
     /* inbox best-effort — never block reception */

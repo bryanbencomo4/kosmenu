@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import type { CurrentAdmin } from '../_lib/admin-auth';
 import { logoutAdminAction } from '../_lib/admin-logout-action';
@@ -21,18 +22,44 @@ export function AdminTopbar({
   compact?: boolean;
 }) {
   const canCreateBusiness = hasAdminPermission(admin.role, 'businesses.write');
+  const [inboxDark, setInboxDark] = useState(true);
+
+  useEffect(() => {
+    if (!compact) return;
+    const read = () => {
+      try {
+        const v = window.localStorage.getItem('elmenuxfa:wa-inbox-theme-v1');
+        setInboxDark(v !== 'light');
+      } catch {
+        setInboxDark(true);
+      }
+    };
+    read();
+    window.addEventListener('storage', read);
+    const id = window.setInterval(read, 800);
+    return () => {
+      window.removeEventListener('storage', read);
+      window.clearInterval(id);
+    };
+  }, [compact]);
 
   if (compact) {
+    const bg = inboxDark ? '#202c33' : '#f0f2f5';
+    const border = inboxDark ? '#222d34' : 'rgba(0,0,0,0.08)';
+    const fg = inboxDark ? '#e9edef' : '#111b21';
+    const muted = inboxDark ? '#8696a0' : '#667781';
+    const hover = inboxDark ? '#2a3942' : '#e9edef';
     return (
       <header
         className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 sm:px-3"
-        style={{ backgroundColor: '#202c33', borderColor: '#222d34' }}
+        style={{ backgroundColor: bg, borderColor: border }}
       >
         {onOpenMenu ? (
           <button
             type="button"
             onClick={onOpenMenu}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#e9edef] lg:hidden"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full lg:hidden"
+            style={{ color: fg }}
             aria-label="Abrir menu"
           >
             <Menu className="h-5 w-5" />
@@ -42,7 +69,14 @@ export function AdminTopbar({
           <button
             type="button"
             onClick={onToggleSidebar}
-            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#8696a0] hover:bg-[#2a3942] lg:inline-flex"
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full lg:inline-flex"
+            style={{ color: muted }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = hover;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
             aria-label={sidebarCollapsed ? 'Expandir menu lateral' : 'Plegar menu lateral'}
           >
             {sidebarCollapsed ? (
@@ -53,12 +87,15 @@ export function AdminTopbar({
           </button>
         ) : null}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-[#e9edef]">Admin · WhatsApp</p>
+          <p className="truncate text-[13px] font-medium" style={{ color: fg }}>
+            Admin · WhatsApp
+          </p>
         </div>
         <form action={logoutAdminAction}>
           <button
             type="submit"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#8696a0] hover:bg-[#2a3942]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full"
+            style={{ color: muted }}
             aria-label="Cerrar sesion"
           >
             <LogOut className="h-4 w-4" />

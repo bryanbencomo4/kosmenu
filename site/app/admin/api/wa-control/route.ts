@@ -8,13 +8,17 @@ import { resolveWaEntryControlStore } from '../../../api/wa-entry/_lib/control-s
 import {
   appendInboxMessage,
   getInboxConversation,
+  getInboxMessage,
   inboxCloseConversation,
   inboxReturnConversation,
   inboxTakeConversation,
   listInboxConversations,
   listInboxMessages,
   markInboxRead,
+  setInboxMessageReaction,
   upsertInboxConversationOnInbound,
+  type InboxMediaKind,
+  type InboxReplyTo,
 } from '../../../api/wa-entry/_lib/inbox-store';
 import {
   describeConversationControl,
@@ -24,6 +28,11 @@ import {
   takeConversation,
 } from '../../../api/wa-entry/_lib/operator-control';
 import { listPendingSupportTickets } from '../../../api/wa-entry/_lib/support-tickets';
+import {
+  reactWasenderMessage,
+  sendWasenderDirect,
+  uploadWasenderMedia,
+} from '../../../api/wa-entry/_lib/wasender-direct';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,6 +49,8 @@ const bodySchema = z.object({
     'list_conversations',
     'get_messages',
     'send_message',
+    'send_media',
+    'send_reaction',
     'mark_read',
     'poll',
   ]),
@@ -49,7 +60,51 @@ const bodySchema = z.object({
   q: z.string().optional(),
   afterMs: z.number().optional(),
   clientMessageId: z.string().optional(),
+  replyToMessageId: z.string().optional(),
+  mediaBase64: z.string().optional(),
+  mediaMime: z.string().optional(),
+  mediaName: z.string().optional(),
+  mediaKind: z.enum(['image', 'file', 'audio']).optional(),
+  targetMessageId: z.string().optional(),
+  emoji: z.string().optional(),
 });
+
+async function ensureHumanTake(input: {
+  store: ReturnType<typeof resolveWaEntryControlStore>;
+  digits: string;
+  controllerId: string;
+  operatorLabel: string;
+  nowMs: number;
+}) {
+  await takeConversation({
+    store: input.store,
+    fromDigits: input.digits,
+    controllerId: input.controllerId,
+    nowMs: input.nowMs,
+  });
+  await inboxTakeConversation({
+    fromDigits: input.digits,
+    operatorId: input.controllerId,
+    operatorLabel: input.operatorLabel,
+  });
+}
+
+function buildReplyTo(
+  source: Awaited<ReturnType<typeof getInboxMessage>>,
+): InboxReplyTo | null {
+  if (!source) return null;
+  return {
+    messageId: source.id,
+    preview: (source.text || source.mediaName || 'Mensaje').slice(0, 120),
+    authorLabel:
+      source.role === 'contact'
+        ? 'Contacto'
+        : source.role === 'assistant'
+          ? 'Asistente'
+          : 'Tú',
+    role: source.role,
+  };
+}
 
 /**
  * Authenticated platform operator inbox + mute / take controls.
@@ -258,30 +313,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'text_required' }, { status: 400 });
     }
     const started = Date.now();
-    // Take conversation so bot cannot race the human reply.
-    await takeConversation({
-      store,
-      fromDigits: digits,
-      controllerId,
-      nowMs,
-    });
-    await inboxTakeConversation({
-      fromDigits: digits,
-      operatorId: controllerId,
-      operatorLabel,
-    });
+    await ensureHumanTake({ store, digits, controllerId, operatorLabel, nowMs });
 
     const clientMessageId =
       parsed.data.clientMessageId ||
       `op_${nowMs}_${Math.random().toString(36).slice(2, 8)}`;
 
+    const replySource = parsed.data.replyToMessageId
+      ? await getInboxMessage(digits, parsed.data.replyToMessageId)
+      : null;
+    const replyTo = buildReplyTo(replySource);
+    const replyToMsgId = replySource?.wasenderMsgId
+      ? Number(replySource.wasenderMsgId)
+      : null;
+
     let sendError: string | null = null;
+    let wasenderMsgId: number | string | null = null;
     try {
-      const { sendWhatsappText } = await import('../../../api/_lib/send-order-whatsapp');
-      await sendWhatsappText(digits, text, {
-        source: 'platform-wa-inbox-human',
-        dedupeKey: `wa-inbox-human:${clientMessageId}`,
+      const sent = await sendWasenderDirect({
+        toDigits: digits,
+        text,
+        replyToMsgId:
+          replyToMsgId != null && Number.isFinite(replyToMsgId) ? replyToMsgId : null,
       });
+      if (!sent.ok) {
+        // Fallback to durable text queue if direct API fails.
+        const { sendWhatsappText } = await import('../../../api/_lib/send-order-whatsapp');
+        await sendWhatsappText(digits, text, {
+          source: 'platform-wa-inbox-human',
+          dedupeKey: `wa-inbox-human:${clientMessageId}`,
+        });
+        if (sent.error) sendError = null; // queue accepted
+      } else {
+        wasenderMsgId = sent.msgId ?? null;
+      }
     } catch (e) {
       sendError = e instanceof Error ? e.message : String(e);
     }
@@ -294,6 +359,8 @@ export async function POST(request: Request) {
       clientMessageId,
       operatorId: controllerId,
       operatorLabel,
+      wasenderMsgId,
+      replyTo,
     });
     const conversation = await getInboxConversation(digits);
 
@@ -319,6 +386,140 @@ export async function POST(request: Request) {
     });
   }
 
+  if (action === 'send_media') {
+    const kind = (parsed.data.mediaKind || 'file') as InboxMediaKind;
+    const base64 = String(parsed.data.mediaBase64 || '').trim();
+    const mime = String(parsed.data.mediaMime || '').trim() || undefined;
+    const mediaName = String(parsed.data.mediaName || '').trim() || null;
+    const caption = String(parsed.data.text || '').trim();
+    if (!base64) {
+      return NextResponse.json({ ok: false, error: 'media_required' }, { status: 400 });
+    }
+    const started = Date.now();
+    await ensureHumanTake({ store, digits, controllerId, operatorLabel, nowMs });
+
+    const replySource = parsed.data.replyToMessageId
+      ? await getInboxMessage(digits, parsed.data.replyToMessageId)
+      : null;
+    const replyTo = buildReplyTo(replySource);
+    const replyToMsgId = replySource?.wasenderMsgId
+      ? Number(replySource.wasenderMsgId)
+      : null;
+
+    const clientMessageId =
+      parsed.data.clientMessageId ||
+      `op_media_${nowMs}_${Math.random().toString(36).slice(2, 8)}`;
+
+    let sendError: string | null = null;
+    let publicUrl: string | null = null;
+    let wasenderMsgId: number | string | null = null;
+    try {
+      const uploaded = await uploadWasenderMedia({ base64, mimetype: mime });
+      publicUrl = uploaded.publicUrl;
+      // Wasender voice notes: AAC/MP3/OGG/AMR. Browser often records webm/opus → document fallback.
+      const mimeLower = (mime || '').toLowerCase();
+      const audioAsVoice =
+        kind === 'audio' &&
+        (/audio\/(mpeg|mp3|aac|ogg|amr|mp4)/.test(mimeLower) ||
+          /\.(mp3|aac|ogg|amr|m4a)$/i.test(mediaName || ''));
+      const sent = await sendWasenderDirect({
+        toDigits: digits,
+        text:
+          caption ||
+          (kind === 'audio' && !audioAsVoice ? '🎤 Nota de voz' : undefined),
+        imageUrl: kind === 'image' ? publicUrl : undefined,
+        documentUrl:
+          kind === 'file' || (kind === 'audio' && !audioAsVoice) ? publicUrl : undefined,
+        audioUrl: kind === 'audio' && audioAsVoice ? publicUrl : undefined,
+        replyToMsgId:
+          replyToMsgId != null && Number.isFinite(replyToMsgId) ? replyToMsgId : null,
+      });
+      if (!sent.ok) sendError = sent.error || 'send_failed';
+      else wasenderMsgId = sent.msgId ?? null;
+    } catch (e) {
+      sendError = e instanceof Error ? e.message : String(e);
+    }
+
+    const msg = await appendInboxMessage({
+      fromDigits: digits,
+      role: 'operator',
+      text: caption,
+      atMs: Date.now(),
+      clientMessageId,
+      operatorId: controllerId,
+      operatorLabel,
+      wasenderMsgId,
+      mediaKind: kind,
+      mediaUrl: publicUrl,
+      mediaName,
+      replyTo,
+    });
+    const conversation = await getInboxConversation(digits);
+    if (sendError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'send_failed',
+          detail: sendError,
+          message: msg,
+          conversation,
+          elapsedMs: Date.now() - started,
+        },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      message: msg,
+      conversation,
+      elapsedMs: Date.now() - started,
+    });
+  }
+
+  if (action === 'send_reaction') {
+    const targetMessageId = String(parsed.data.targetMessageId || '').trim();
+    const emoji = String(parsed.data.emoji || '').trim();
+    if (!targetMessageId || !emoji) {
+      return NextResponse.json({ ok: false, error: 'reaction_required' }, { status: 400 });
+    }
+    await ensureHumanTake({ store, digits, controllerId, operatorLabel, nowMs });
+    const target = await getInboxMessage(digits, targetMessageId);
+    if (!target) {
+      return NextResponse.json({ ok: false, error: 'message_not_found' }, { status: 404 });
+    }
+
+    let sendError: string | null = null;
+    if (target.waKey?.id) {
+      const reacted = await reactWasenderMessage({ key: target.waKey, emoji });
+      if (!reacted.ok) sendError = reacted.error || 'react_failed';
+    } else {
+      // No WhatsApp key yet — keep reaction local + notify as emoji text.
+      try {
+        await sendWasenderDirect({
+          toDigits: digits,
+          text: `Reacción: ${emoji}`,
+        });
+      } catch (e) {
+        sendError = e instanceof Error ? e.message : String(e);
+      }
+    }
+
+    const message = await setInboxMessageReaction({
+      fromDigits: digits,
+      messageId: targetMessageId,
+      emoji,
+      party: 'operator',
+    });
+    const conversation = await getInboxConversation(digits);
+    if (sendError) {
+      return NextResponse.json(
+        { ok: false, error: 'react_failed', detail: sendError, message, conversation },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ ok: true, message, conversation });
+  }
+
   return NextResponse.json({ ok: false, error: 'unknown_action' }, { status: 400 });
 }
 
@@ -337,9 +538,11 @@ export async function GET() {
       'list_conversations',
       'get_messages',
       'send_message',
+      'send_media',
+      'send_reaction',
       'mark_read',
       'poll',
     ],
-    note: 'Use POST with admin session. Global mute does not stop order notifications. Human sends use source platform-wa-inbox-human (not gated by auto-reply allowlist).',
+    note: 'Use POST with admin session. Global mute does not stop order notifications. Human sends use Wasender direct (text/media/reactions).',
   });
 }

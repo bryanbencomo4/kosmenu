@@ -34,6 +34,13 @@ export type WaNormalizedEvent = {
   isStatus: boolean;
   /** Raw event type string from provider. */
   eventType: string;
+  /** WhatsApp message key — needed for reactions / native quotes. */
+  waKey?: {
+    id: string;
+    remoteJid: string;
+    fromMe: boolean;
+    participant?: string;
+  } | null;
   raw: unknown;
 };
 
@@ -206,6 +213,8 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
       'unknown',
   ).trim();
 
+  const participant = String(key.participant ?? '').trim() || undefined;
+
   return {
     provider: 'wasender',
     messageId,
@@ -218,6 +227,14 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
     isGroup,
     isStatus,
     eventType,
+    waKey: messageId
+      ? {
+          id: messageId,
+          remoteJid: remoteJid || `${fromDigits}@s.whatsapp.net`,
+          fromMe,
+          ...(participant ? { participant } : {}),
+        }
+      : null,
     raw,
   };
 }
