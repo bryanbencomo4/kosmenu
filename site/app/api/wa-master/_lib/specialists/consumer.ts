@@ -120,8 +120,10 @@ export async function runConsumerSpecialist(params: {
   const { text, memory, config, discoveryCtx, executeTool } = params;
   const t = fold(text);
   const toolsUsed: string[] = [];
+  // Only trust zone when the user said it in THIS message — never echo a
+  // stale memory zone (e.g. old "caracas") into delivery CTAs.
   const zoneFromText = extractZone(text);
-  const zone = zoneFromText || memory.summary.zone;
+  const zone = zoneFromText;
 
   // Direct memory / simple answers — no link spam.
   if (
@@ -162,7 +164,7 @@ export async function runConsumerSpecialist(params: {
         `Perfecto: *${picked.nombre}*.\n\nMenú: ${menuUrl}\n\nAhí puedes elegir y completar el pedido.`,
       ],
       toolsUsed,
-      memoryPatch: { zone: zone ?? memory.summary.zone },
+      memoryPatch: zone ? { zone } : {},
       skipGeminiPolish: true,
     };
   }
@@ -181,6 +183,11 @@ export async function runConsumerSpecialist(params: {
   // Ordering / discovery belongs on web (asistente + explorar), not a short WA list.
   if (foodSeek) {
     const query = foodQueryHint(text);
+    // Clear mistaken prior city if the user corrects it.
+    const clearsZone =
+      /\b(no estoy|no vivo|no soy de|no estoy en|otra (ciudad|zona)|cambio de (ciudad|zona))\b/.test(
+        t,
+      );
     const handoff = await issueMasterHandoff({
       store: params.handoffStore,
       config,
@@ -190,21 +197,21 @@ export async function runConsumerSpecialist(params: {
       payload: {
         intent: 'consumer.search',
         query,
-        zone: zone || discoveryCtx.region || null,
+        zone: zone || null,
         conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
       },
     });
     const guide = formatConsumerOrderGuide({
       assistantUrl: config.consumerAssistantUrl,
       handoffUrl: handoff?.url ?? null,
-      zone: zone || discoveryCtx.region || null,
+      zone: zone || null,
       queryHint: query,
     });
     return {
       replies: [guide],
       toolsUsed: [...toolsUsed, handoff ? 'handoff_consumer' : 'consumer_explore_guide'],
       memoryPatch: {
-        zone: zone ?? memory.summary.zone,
+        ...(zone ? { zone } : clearsZone ? { zone: null } : {}),
         pendingQuestion: null,
         activeService: 'consumer',
         lastHandoffUrl: handoff?.url ?? memory.summary.lastHandoffUrl ?? null,
@@ -218,11 +225,14 @@ export async function runConsumerSpecialist(params: {
     replies: [
       formatConsumerOrderGuide({
         assistantUrl: config.consumerAssistantUrl,
-        zone: zone ?? memory.summary.zone,
+        zone: zone || null,
       }),
     ],
     toolsUsed: [...toolsUsed, 'consumer_explore_guide'],
-    memoryPatch: { zone: zone ?? memory.summary.zone, activeService: 'consumer' },
+    memoryPatch: {
+      ...(zone ? { zone } : {}),
+      activeService: 'consumer',
+    },
     skipGeminiPolish: true,
   };
 }

@@ -448,7 +448,8 @@ export async function tryHandleSmartMenu(params: {
             nowMs,
             {
               intent: digit === 5 ? 'product_search' : 'restaurant_search',
-              zone: memory.summary.zone,
+              // Do not pass stale memory.zone — web assistant asks for location.
+              zone: null,
               query: digit === 5 ? text : null,
             },
             label,
