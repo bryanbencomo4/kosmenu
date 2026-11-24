@@ -32,6 +32,7 @@ import {
   readGlobalBotMute,
   shouldDiscardInFlightBotReply,
   shouldSuppressBotReply,
+  stampAttentionVersion,
   takeConversation,
 } from './operator-control';
 import { createSupportTicket, markSupportTicketNotified } from './support-tickets';
@@ -282,6 +283,12 @@ export async function processWaEntryEvent(
     });
   }
 
+  const attentionBefore = describeConversationControl(
+    event.fromDigits,
+    threadBefore,
+    nowMs,
+  ).attentionVersion;
+
   const { result, thread } = routeWaEntryEvent({
     event,
     thread: threadBefore,
@@ -290,7 +297,15 @@ export async function processWaEntryEvent(
     seenMessageIds: new Set<string>(),
   });
 
-  await store.saveThread(thread);
+  // Preserve durable attention version across router saves (multi-instance safe).
+  const threadToSave = {
+    ...thread,
+    lastOutboundDedupeKey: stampAttentionVersion(
+      attentionBefore,
+      result.action === 'reply' ? result.dedupeKey : thread.lastOutboundDedupeKey,
+    ),
+  };
+  await store.saveThread(threadToSave);
   storeOps += 1;
 
   if (result.action === 'drop') {
@@ -316,11 +331,7 @@ export async function processWaEntryEvent(
     nowMs,
     storeOps,
     forceSendFail: params.forceSendFail,
-    expectedAttentionVersion: describeConversationControl(
-      event.fromDigits,
-      threadBefore,
-      nowMs,
-    ).attentionVersion,
+    expectedAttentionVersion: attentionBefore,
   });
 }
 
@@ -474,7 +485,7 @@ async function processMasterAssistantBranch(params: {
       expiresAtMs: nowMs + config.threadTtlMs,
       humanPausedUntilMs: null,
       repliesLastHour: params.threadBefore?.repliesLastHour ?? [],
-      lastOutboundDedupeKey: orch.dedupeKey,
+      lastOutboundDedupeKey: stampAttentionVersion(expectedAttentionVersion, orch.dedupeKey),
     });
     storeOps += 1;
   }
