@@ -9,6 +9,7 @@ export {
   createEmptyMemory,
   appendTurn,
   patchSummary,
+  normalizeSummary,
   formatMemoryForPrompt,
 } from './memory';
 export {
@@ -16,7 +17,28 @@ export {
   loadOrCreateMemory,
   type WaMasterMemoryStore,
 } from './memory-store';
-export { runWaMasterOrchestrator } from './orchestrator';
+export { createFileWaMasterMemoryStore } from './memory-store-file';
+export {
+  createSupabaseWaMasterMemoryStore,
+  type WaMasterSupabaseLike,
+} from './memory-store-supabase';
+export {
+  runWaMasterOrchestrator,
+  type WaMasterOrchestratorDeps,
+} from './orchestrator';
 export { phonesMatchDigits, waMasterDigitsKey } from './phone';
 export { WA_MASTER_PERSONALITY, greetingForIdentity } from './personality';
+export {
+  createMemoryWaMasterQuotaStore,
+  WaMasterQuotaError,
+  waMasterQuotaMonth,
+  type WaMasterQuotaStore,
+} from './quota';
+export {
+  createMemoryWaMasterAuthGate,
+  unauthorizedAdminMessage,
+  type WaMasterAuthGate,
+  type WaMasterAuthSession,
+} from './auth';
+export { runWaMasterAgentNlu } from './agent';
 export type * from './types';

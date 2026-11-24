@@ -8,9 +8,13 @@ export type WaMasterConfig = {
   /** Shadow: run orchestrator but caller must not send replies. */
   shadowMode: boolean;
   allowGemini: boolean;
+  /** Simulate NLU/tools path without Google HTTP (default true when Gemini off). */
+  simulateAgent: boolean;
   maxTurnsInPrompt: number;
   maxRepliesPerTurn: number;
+  maxMonthlyGeminiRequests: number;
   profileTtlMs: number;
+  memoryDataDir: string;
   consumerAssistantUrl: string;
   businessLandingUrl: string;
   businessRegisterUrl: string;
@@ -38,9 +42,12 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     enabled: envBool(env, 'PLATFORM_WA_MASTER', false),
     shadowMode: envBool(env, 'PLATFORM_WA_MASTER_SHADOW', false),
     allowGemini: envBool(env, 'PLATFORM_WA_MASTER_ALLOW_GEMINI', false),
+    simulateAgent: envBool(env, 'PLATFORM_WA_MASTER_SIMULATE', true),
     maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', 12),
     maxRepliesPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_REPLIES', 2),
+    maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 500),
     profileTtlMs: envInt(env, 'PLATFORM_WA_MASTER_PROFILE_TTL_MS', 1000 * 60 * 60 * 24 * 180),
+    memoryDataDir: envStr(env, 'PLATFORM_WA_MASTER_MEMORY_DIR', '.wa-master-local'),
     consumerAssistantUrl: envStr(
       env,
       'PLATFORM_WA_CONSUMER_URL',

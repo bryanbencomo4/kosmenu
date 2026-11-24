@@ -17,9 +17,14 @@ import {
   loadWaMasterConfig,
   resolveWaMasterIdentity,
   runWaMasterOrchestrator,
+  type WaMasterAuthGate,
   type WaMasterIdentityCatalogRow,
   type WaMasterMemoryStore,
+  type WaMasterOrchestratorDeps,
+  type WaMasterQuotaStore,
 } from '../../wa-master/_lib';
+import type { WaMasterDiscoveryCtx, WaMasterDiscoveryExecute } from '../../wa-master/_lib/discovery-bridge';
+import type { AdminMenuLoader } from '../../wa-master/_lib/specialists/admin';
 
 export type WaEntryProcessResult = {
   accepted: boolean;
@@ -48,6 +53,12 @@ export type ProcessWaEntryParams = {
   /** Optional Master Assistant identity catalog (tests / future service-role snapshot). */
   masterIdentityCatalog?: WaMasterIdentityCatalogRow[];
   masterMemoryStore?: WaMasterMemoryStore;
+  masterAuthGate?: WaMasterAuthGate;
+  masterQuota?: WaMasterQuotaStore;
+  masterDiscoveryCtx?: WaMasterDiscoveryCtx;
+  masterDiscoveryExecute?: WaMasterDiscoveryExecute;
+  masterLoadMenu?: AdminMenuLoader;
+  masterOrchestratorDeps?: WaMasterOrchestratorDeps;
 };
 
 function safeParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -244,6 +255,12 @@ export async function processWaEntryEvent(
       forceSendFail: params.forceSendFail,
       masterIdentityCatalog: params.masterIdentityCatalog,
       masterMemoryStore: params.masterMemoryStore,
+      masterAuthGate: params.masterAuthGate,
+      masterQuota: params.masterQuota,
+      masterDiscoveryCtx: params.masterDiscoveryCtx,
+      masterDiscoveryExecute: params.masterDiscoveryExecute,
+      masterLoadMenu: params.masterLoadMenu,
+      masterOrchestratorDeps: params.masterOrchestratorDeps,
     });
   }
 
@@ -295,6 +312,12 @@ async function processMasterAssistantBranch(params: {
   forceSendFail?: boolean;
   masterIdentityCatalog?: WaMasterIdentityCatalogRow[];
   masterMemoryStore?: WaMasterMemoryStore;
+  masterAuthGate?: WaMasterAuthGate;
+  masterQuota?: WaMasterQuotaStore;
+  masterDiscoveryCtx?: WaMasterDiscoveryCtx;
+  masterDiscoveryExecute?: WaMasterDiscoveryExecute;
+  masterLoadMenu?: AdminMenuLoader;
+  masterOrchestratorDeps?: WaMasterOrchestratorDeps;
 }): Promise<WaEntryProcessResult> {
   const { config, store, sender, event, nowMs } = params;
   let storeOps = params.storeOps;
@@ -359,7 +382,7 @@ async function processMasterAssistantBranch(params: {
     PLATFORM_WA_BUSINESS_LANDING_URL: config.businessLandingUrl,
     PLATFORM_WA_BUSINESS_REGISTER_URL: config.businessRegisterUrl,
     PLATFORM_WA_BUSINESS_MANAGE_URL: config.businessManageUrl,
-  } as NodeJS.ProcessEnv);
+  } as unknown as NodeJS.ProcessEnv);
 
   const memStore = params.masterMemoryStore ?? createMemoryWaMasterStore();
   const memory = await loadOrCreateMemory(
@@ -373,7 +396,7 @@ async function processMasterAssistantBranch(params: {
     catalog: params.masterIdentityCatalog ?? [],
   });
 
-  const orch = runWaMasterOrchestrator(
+  const orch = await runWaMasterOrchestrator(
     {
       fromDigits: event.fromDigits,
       text: event.text,
@@ -381,9 +404,19 @@ async function processMasterAssistantBranch(params: {
       nowMs,
       identity,
       memory,
-      forceDeterministic: true,
+      forceDeterministic: false,
     },
     masterConfig,
+    {
+      ...(params.masterOrchestratorDeps || {}),
+      authGate: params.masterAuthGate ?? params.masterOrchestratorDeps?.authGate,
+      quota: params.masterQuota ?? params.masterOrchestratorDeps?.quota,
+      discoveryCtx: params.masterDiscoveryCtx ?? params.masterOrchestratorDeps?.discoveryCtx,
+      executeDiscovery:
+        params.masterDiscoveryExecute ?? params.masterOrchestratorDeps?.executeDiscovery,
+      loadMenu: params.masterLoadMenu ?? params.masterOrchestratorDeps?.loadMenu,
+      forceSimulateAgent: masterConfig.simulateAgent || !masterConfig.allowGemini,
+    },
   );
 
   await memStore.save(event.fromDigits, orch.memory);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createEmptyMemory,
   createMemoryWaMasterStore,
   loadOrCreateMemory,
   loadWaMasterConfig,
@@ -38,8 +39,17 @@ function masterCfg() {
   } as unknown as NodeJS.ProcessEnv);
 }
 
+function mem(from: string, patch: Record<string, unknown> = {}) {
+  const base = createEmptyMemory(from, Date.now(), 86_400_000);
+  return {
+    ...base,
+    summary: { ...base.summary, ...(patch.summary as object) },
+    profile: { ...base.profile, ...(patch.profile as object), fromDigits: from },
+  };
+}
+
 describe('wa-master Package 1', () => {
-  it('flags default OFF', () => {
+  it('flags default OFF', async () => {
     const m = loadWaMasterConfig({} as unknown as NodeJS.ProcessEnv);
     expect(m.enabled).toBe(false);
     expect(m.allowGemini).toBe(false);
@@ -47,7 +57,7 @@ describe('wa-master Package 1', () => {
     expect(e.masterAssistantEnabled).toBe(false);
   });
 
-  it('1) número nuevo — Hola → bienvenida abierta sin menú 1/2', () => {
+  it('1) número nuevo — Hola → bienvenida abierta sin menú 1/2', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: '584140000001', catalog: [] });
     const memory = {
       turns: [],
@@ -75,7 +85,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584140000001',
         text: 'Hola',
@@ -91,7 +101,7 @@ describe('wa-master Package 1', () => {
     expect(out.replies[0]).not.toMatch(/\*1️⃣/);
   });
 
-  it('2) número nuevo — quiero información → clarify breve', () => {
+  it('2) número nuevo — quiero información → clarify breve', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: '584140000002', catalog: [] });
     const store = createMemoryWaMasterStore();
     const mem = {
@@ -120,7 +130,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584140000002',
         text: 'Quiero información',
@@ -136,7 +146,7 @@ describe('wa-master Package 1', () => {
     void store;
   });
 
-  it('3) comerciante registrado — ayuda → contexto de menú', () => {
+  it('3) comerciante registrado — ayuda → contexto de menú', async () => {
     const identity = resolveWaMasterIdentity({
       fromDigits: '584120000099',
       catalog: [CATALOG[0]],
@@ -170,7 +180,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584120000099',
         text: 'Hola, necesito ayuda.',
@@ -190,7 +200,7 @@ describe('wa-master Package 1', () => {
     let memory = await loadOrCreateMemory(store, from, 1, 86_400_000);
     const identity = resolveWaMasterIdentity({ fromDigits: from, catalog: [] });
 
-    const r1 = runWaMasterOrchestrator(
+    const r1 = await runWaMasterOrchestrator(
       {
         fromDigits: from,
         text: 'Quiero pedir hamburguesas',
@@ -205,7 +215,7 @@ describe('wa-master Package 1', () => {
     memory = r1.memory;
     await store.save(from, memory);
 
-    const r2 = runWaMasterOrchestrator(
+    const r2 = await runWaMasterOrchestrator(
       {
         fromDigits: from,
         text: 'Por cierto, quiero poner mi restaurante en la plataforma',
@@ -221,7 +231,7 @@ describe('wa-master Package 1', () => {
     expect(r2.memory.turns.length).toBeGreaterThan(2);
   });
 
-  it('5) mixed role: merchant phone asking for burgers → consumer path', () => {
+  it('5) mixed role: merchant phone asking for burgers → consumer path', async () => {
     const identity = resolveWaMasterIdentity({
       fromDigits: '584120000099',
       catalog: CATALOG,
@@ -254,7 +264,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584120000099',
         text: 'Quiero pedir hamburguesas',
@@ -268,7 +278,7 @@ describe('wa-master Package 1', () => {
     expect(out.specialist).toBe('consumer');
   });
 
-  it('8) referencia conversacional: no re-pregunta role si ya se preguntó', () => {
+  it('8) referencia conversacional: no re-pregunta role si ya se preguntó', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: '584140000020', catalog: [] });
     const memory = {
       turns: [],
@@ -296,7 +306,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584140000020',
         text: 'Quiero información',
@@ -307,10 +317,10 @@ describe('wa-master Package 1', () => {
       },
       masterCfg(),
     );
-    expect(out.replies[0]).toMatch(/business\.elmenuxfa\.com|asistente/);
+    expect(out.replies[0]).toMatch(/restaurantes|menú de tu negocio|pedir/i);
   });
 
-  it('11+12) admin price change → propose only, no false success', () => {
+  it('11+12) admin price change → propose only, no false success', async () => {
     const identity = resolveWaMasterIdentity({
       fromDigits: '584120000099',
       catalog: [CATALOG[0]],
@@ -341,7 +351,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584120000099',
         text: 'Cambia el precio de la pizza Margarita a 6 dólares',
@@ -357,7 +367,7 @@ describe('wa-master Package 1', () => {
     expect(out.replies[0]).toMatch(/panel|seguridad|confirmación/i);
   });
 
-  it('13) varios comercios → pide selección sin datos privados', () => {
+  it('13) varios comercios → pide selección sin datos privados', async () => {
     const identity = resolveWaMasterIdentity({
       fromDigits: '584120000099',
       catalog: CATALOG,
@@ -389,7 +399,7 @@ describe('wa-master Package 1', () => {
         retentionUntilMs: null,
       },
     };
-    const out = runWaMasterOrchestrator(
+    const out = await runWaMasterOrchestrator(
       {
         fromDigits: '584120000099',
         text: 'Muéstrame mis productos agotados',

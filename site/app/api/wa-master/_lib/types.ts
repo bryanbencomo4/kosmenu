@@ -69,6 +69,31 @@ export type WaMasterTurn = {
   specialist?: WaMasterSpecialist;
 };
 
+export type WaMasterRestaurantRef = {
+  id: string;
+  slug: string;
+  nombre: string;
+  menuUrl: string;
+  chatUrl?: string | null;
+};
+
+export type WaMasterSignupDraft = {
+  businessName: string | null;
+  city: string | null;
+  category: string | null;
+  stage: 'intro' | 'need' | 'pricing' | 'ready_register' | 'waiting_panel';
+};
+
+export type WaMasterAdminProposal = {
+  comercioId: string;
+  action: 'edit_price' | 'add_product' | 'set_availability' | 'set_fx' | 'set_hours' | 'set_delivery';
+  label: string;
+  currentValue: string | null;
+  proposedValue: string;
+  /** Only executable when auth.authorized + confirm. */
+  requiresAuth: true;
+};
+
 /** L2 — compact rolling summary */
 export type WaMasterSummary = {
   activeService: WaMasterSpecialist | null;
@@ -81,6 +106,11 @@ export type WaMasterSummary = {
   humanIntervened: boolean;
   lastIntent: WaMasterIntent | null;
   updatedAtMs: number;
+  /** User-provided zone/city for consumer search — do not re-ask if set. */
+  zone: string | null;
+  lastRestaurants: WaMasterRestaurantRef[];
+  signupDraft: WaMasterSignupDraft | null;
+  pendingAdminProposal: WaMasterAdminProposal | null;
 };
 
 /** L3 — durable contact profile (no secrets) */
@@ -108,7 +138,10 @@ export type WaMasterOrchestratorInput = {
   messageId: string;
   nowMs: number;
   identity: WaMasterIdentity;
-  memory: WaMasterMemory;
+  /** Accepts partial L2 summaries; orchestrator normalizes missing fields. */
+  memory: Omit<WaMasterMemory, 'summary'> & {
+    summary: Partial<WaMasterSummary> & Pick<WaMasterSummary, 'updatedAtMs'>;
+  };
   /** When Gemini path is disabled or exhausted. */
   forceDeterministic?: boolean;
 };

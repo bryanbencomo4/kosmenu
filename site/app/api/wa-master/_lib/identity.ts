@@ -96,6 +96,13 @@ export function resolveWaMasterIdentity(params: {
   else if (comercios.length > 0) role = 'merchant_candidate';
   else if (consumerOrderSignal) role = 'possible_consumer';
 
+  if (comercios.length) {
+    notes.push('phone_match_is_not_ownership');
+  }
+  if (consumerOrderSignal) {
+    notes.push('order_phone_is_signal_not_private_history');
+  }
+
   return {
     fromDigits,
     role,

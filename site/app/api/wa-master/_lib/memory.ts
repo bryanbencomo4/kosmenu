@@ -20,6 +20,26 @@ export function emptySummary(nowMs: number): WaMasterSummary {
     humanIntervened: false,
     lastIntent: null,
     updatedAtMs: nowMs,
+    zone: null,
+    lastRestaurants: [],
+    signupDraft: null,
+    pendingAdminProposal: null,
+  };
+}
+
+/** Migrate older in-memory snapshots missing new L2 fields. */
+export function normalizeSummary(raw: Partial<WaMasterSummary> | null | undefined, nowMs: number): WaMasterSummary {
+  const base = emptySummary(nowMs);
+  if (!raw) return base;
+  return {
+    ...base,
+    ...raw,
+    askedFields: Array.isArray(raw.askedFields) ? raw.askedFields : [],
+    recentErrors: Array.isArray(raw.recentErrors) ? raw.recentErrors : [],
+    lastRestaurants: Array.isArray(raw.lastRestaurants) ? raw.lastRestaurants : [],
+    zone: raw.zone ?? null,
+    signupDraft: raw.signupDraft ?? null,
+    pendingAdminProposal: raw.pendingAdminProposal ?? null,
   };
 }
 

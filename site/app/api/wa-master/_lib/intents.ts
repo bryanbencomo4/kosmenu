@@ -73,7 +73,11 @@ export function classifyWaMasterIntents(params: {
     intents.push('commercial.info');
   }
 
-  if (/\b(tasa|dolar|bcv|cambio del dolar)\b/.test(t) && /\b(actualiza|cambia|pon|modifica|consulta|cual)\b/.test(t)) {
+  // "6 dólares" is a price unit — not an FX change request.
+  const fxRequest =
+    /\b(tasa|bcv|cambio del dolar|tasa del dolar)\b/.test(t) ||
+    (/\bdolar\b/.test(t) && /\b(tasa|cambio|bcv|actualiza|consulta|cual)\b/.test(t) && !/\b\d+[.,]?\d*\s*dolares?\b/.test(t));
+  if (fxRequest && /\b(actualiza|cambia|pon|modifica|consulta|cual|configurad)\b/.test(t)) {
     intents.push('admin.fx');
   }
 
@@ -91,8 +95,16 @@ export function classifyWaMasterIntents(params: {
     intents.push('admin.view_menu');
   }
 
+  // Admin price/product edits must not also count as food search ("pizza" in product name).
+  const adminMutation =
+    /\b(cambia(?:r)? el precio|pon el precio|actualiza(?:r)? (el )?precio|agrega(?:r)? (una |un )?|desactiva|activa(?:r)? (el )?delivery)\b/.test(
+      t,
+    ) || intents.some((i) => i.startsWith('admin'));
+
   if (
-    /\b(pedir|quiero comer|tengo hambre|hamburguesa|pizza|sushi|arepa|delivery de|buscar restaurante|donde como)\b/.test(
+    !adminMutation &&
+    !intents.includes('consumer.complaint') &&
+    /(pedir|quiero comer|tengo hambre|hamburgues|pizza|sushi|arepa|delivery de|buscar restaurante|donde como)/.test(
       t,
     )
   ) {
@@ -135,16 +147,22 @@ export function classifyWaMasterIntents(params: {
 function pickPrimary(intents: WaMasterIntent[], identity: WaMasterIdentity): WaMasterIntent {
   const nonGreeting = intents.filter((i) => i !== 'greeting' && i !== 'multi');
   if (nonGreeting.includes('support.human')) return 'support.human';
-  if (nonGreeting.some((i) => i.startsWith('consumer'))) {
-    return nonGreeting.find((i) => i.startsWith('consumer'))!;
+  if (nonGreeting.includes('consumer.complaint') || nonGreeting.includes('support.issue')) {
+    return nonGreeting.includes('consumer.complaint') ? 'consumer.complaint' : 'support.issue';
+  }
+  // Prefer admin mutations over consumer when both fire (e.g. "precio de la pizza").
+  if (nonGreeting.includes('admin.edit_price') || nonGreeting.includes('admin.edit_product')) {
+    return nonGreeting.includes('admin.edit_price') ? 'admin.edit_price' : 'admin.edit_product';
   }
   if (nonGreeting.some((i) => i.startsWith('admin'))) {
     return nonGreeting.find((i) => i.startsWith('admin'))!;
   }
+  if (nonGreeting.some((i) => i.startsWith('consumer'))) {
+    return nonGreeting.find((i) => i.startsWith('consumer'))!;
+  }
   if (nonGreeting.some((i) => i.startsWith('commercial'))) {
     return nonGreeting.find((i) => i.startsWith('commercial'))!;
   }
-  if (nonGreeting.includes('support.issue')) return 'support.issue';
   if (identity.role === 'merchant_candidate' && nonGreeting[0]) return nonGreeting[0];
   return nonGreeting[0] || intents[0] || 'unknown';
 }

@@ -46,10 +46,11 @@ export function buildDeterministicReplies(params: {
   }
 
   if (primary === 'clarify_role' || primary === 'commercial.info') {
+    // If they already clarified by stating a need, callers should route to specialists.
     if (memory.summary.askedFields.includes('role_clarify')) {
       return {
         replies: [
-          `Puedo ayudarte a encontrar comida en elmenuxfa.com o a crear el menú digital de tu negocio.\n\nMás info del servicio: ${config.businessLandingUrl}\nAsistente para pedir: ${config.consumerAssistantUrl}`,
+          `¿Buscas restaurantes para pedir o quieres crear el menú de tu negocio? Dímelo con tus palabras.`,
         ],
         escalateHuman,
         toolsUsed: ['handoff_links'],
