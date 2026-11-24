@@ -17,6 +17,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -221,9 +222,25 @@ export function WaControlClient() {
   const [showInfo, setShowInfo] = useState(false);
   const [reactionFor, setReactionFor] = useState<string | null>(null);
   const lastAfterMs = useRef(0);
+  const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const selectedRef = useRef<string | null>(null);
+  const nearBottomRef = useRef(true);
+  const pinBottomRef = useRef(false);
+  const prevMsgLenRef = useRef(0);
+  const prevLastMsgIdRef = useRef<string | null>(null);
   selectedRef.current = selected;
+
+  const scrollThreadToEnd = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = threadScrollRef.current;
+    if (!el) return;
+    if (behavior === 'auto') {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    }
+    nearBottomRef.current = true;
+  }, []);
 
   useEffect(() => {
     setTheme(loadInboxTheme());
@@ -284,11 +301,20 @@ export function WaControlClient() {
     setShowInfo(false);
     setReplyTo(null);
     setReactionFor(null);
+    // Reset thread immediately so we never animate through the previous chat.
+    setMessages([]);
+    setConversation(null);
+    prevMsgLenRef.current = 0;
+    prevLastMsgIdRef.current = null;
+    pinBottomRef.current = true;
+    nearBottomRef.current = true;
+    lastAfterMs.current = 0;
     setBusy(true);
     try {
       const json = await postAction({ action: 'get_messages', fromDigits: digits });
       setConversation((json.conversation as InboxConversation) || null);
       const msgs = (json.messages as InboxMessage[]) || [];
+      pinBottomRef.current = true;
       setMessages(msgs);
       lastAfterMs.current = msgs.reduce((a, m) => Math.max(a, m.atMs), 0);
       setError(null);
@@ -308,9 +334,29 @@ export function WaControlClient() {
     return () => window.clearInterval(id);
   }, [refresh]);
 
-  useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, selected]);
+  // Pin to latest message instantly on open; only smooth-follow new appends.
+  useLayoutEffect(() => {
+    const lastId = messages.length ? messages[messages.length - 1]!.id : null;
+    const prevLen = prevMsgLenRef.current;
+    const prevLastId = prevLastMsgIdRef.current;
+    prevMsgLenRef.current = messages.length;
+    prevLastMsgIdRef.current = lastId;
+
+    if (!selected || messages.length === 0) return;
+
+    if (pinBottomRef.current || prevLen === 0) {
+      pinBottomRef.current = false;
+      scrollThreadToEnd('auto');
+      // Late media layout can grow height — re-pin once more next frame.
+      requestAnimationFrame(() => scrollThreadToEnd('auto'));
+      return;
+    }
+
+    const appended = messages.length > prevLen && lastId !== prevLastId;
+    if (appended && nearBottomRef.current) {
+      scrollThreadToEnd('smooth');
+    }
+  }, [messages, selected, scrollThreadToEnd]);
 
   const muted = !!(global?.effective || global?.muted);
 
@@ -810,20 +856,32 @@ export function WaControlClient() {
                   filter: theme === 'light' ? 'invert(1)' : 'none',
                 }}
               />
-              <div className="relative z-[1] flex h-full flex-col gap-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-12 sm:py-4">
-                {messages.map((m) => (
-                  <MessageBubble
-                    key={m.id}
-                    message={m}
-                    reactionOpen={reactionFor === m.id}
-                    onToggleReaction={() =>
-                      setReactionFor((cur) => (cur === m.id ? null : m.id))
-                    }
-                    onReply={() => startReply(m)}
-                    onReact={(emoji) => void reactTo(m, emoji)}
-                  />
-                ))}
-                <div ref={threadEndRef} />
+              <div
+                ref={threadScrollRef}
+                className="relative z-[1] flex h-full flex-col overflow-y-auto overscroll-contain px-3 py-3 sm:px-12 sm:py-4"
+                data-testid="wa-inbox-scroll"
+                onScroll={() => {
+                  const el = threadScrollRef.current;
+                  if (!el) return;
+                  nearBottomRef.current =
+                    el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+                }}
+              >
+                <div className="mt-auto flex flex-col gap-1">
+                  {messages.map((m) => (
+                    <MessageBubble
+                      key={m.id}
+                      message={m}
+                      reactionOpen={reactionFor === m.id}
+                      onToggleReaction={() =>
+                        setReactionFor((cur) => (cur === m.id ? null : m.id))
+                      }
+                      onReply={() => startReply(m)}
+                      onReact={(emoji) => void reactTo(m, emoji)}
+                    />
+                  ))}
+                  <div ref={threadEndRef} />
+                </div>
               </div>
             </div>
 
