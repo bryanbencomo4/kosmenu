@@ -6,13 +6,53 @@ export type BusinessAllowedOp =
   | 'set_price'
   | 'set_availability'
   | 'set_hours'
-  | 'set_en_linea';
+  | 'set_en_linea'
+  | 'create_product'
+  | 'update_product'
+  | 'delete_product'
+  | 'create_category'
+  | 'update_category'
+  | 'delete_category'
+  | 'set_upsell_badge'
+  | 'set_product_image'
+  | 'clear_product_image'
+  | 'set_tasa'
+  | 'set_order_status'
+  | 'upsert_payment_method'
+  | 'delete_payment_method'
+  | 'set_delivery_config'
+  | 'upsert_promo_rule'
+  | 'toggle_promo_rule'
+  | 'delete_promo_rule'
+  | 'update_business_profile'
+  | 'invite_staff'
+  | 'revoke_staff';
 
 export const BUSINESS_ALLOWED_OPS: readonly BusinessAllowedOp[] = [
   'set_price',
   'set_availability',
   'set_hours',
   'set_en_linea',
+  'create_product',
+  'update_product',
+  'delete_product',
+  'create_category',
+  'update_category',
+  'delete_category',
+  'set_upsell_badge',
+  'set_product_image',
+  'clear_product_image',
+  'set_tasa',
+  'set_order_status',
+  'upsert_payment_method',
+  'delete_payment_method',
+  'set_delivery_config',
+  'upsert_promo_rule',
+  'toggle_promo_rule',
+  'delete_promo_rule',
+  'update_business_profile',
+  'invite_staff',
+  'revoke_staff',
 ] as const;
 
 export type BusinessAssistantRuntimeConfig = {

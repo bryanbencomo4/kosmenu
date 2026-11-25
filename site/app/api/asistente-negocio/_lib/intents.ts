@@ -10,16 +10,31 @@ export type BusinessIntent =
   | { kind: 'home_metrics'; focus?: 'all' | 'sales' | 'customers' | 'orders' }
   | { kind: 'customers' }
   | { kind: 'order_detail'; hint: string }
-  | { kind: 'currency' }
+  | { kind: 'currency'; setValue?: number }
   | { kind: 'membership' }
   | { kind: 'account'; mode?: 'password' | 'email' | 'menu' }
   | { kind: 'share_menu' }
   | { kind: 'refuse_sensitive' }
   | { kind: 'register' }
   | { kind: 'add_product' }
+  | { kind: 'delete_product'; productHint?: string }
+  | { kind: 'create_category'; raw?: string }
+  | { kind: 'delete_category'; raw?: string }
+  | { kind: 'list_payments' }
+  | { kind: 'upsert_payment'; raw?: string }
+  | { kind: 'delete_payment'; raw?: string }
+  | { kind: 'read_delivery' }
+  | { kind: 'set_delivery'; enabled?: boolean; fixedPrice?: number }
+  | { kind: 'create_promo'; raw?: string }
+  | { kind: 'set_order_status'; raw?: string }
+  | { kind: 'list_staff' }
+  | { kind: 'invite_staff'; raw?: string }
+  | { kind: 'set_featured'; raw?: string; clear?: boolean }
+  | { kind: 'set_product_image'; productHint?: string; imageUrl?: string }
+  | { kind: 'update_profile'; nombre?: string; descripcionVisual?: string; whatsapp?: string }
   | {
       kind: 'unsupported';
-      topic: 'payments' | 'delivery' | 'promo' | 'staff' | 'category' | 'order_status';
+      topic: 'payments' | 'delivery' | 'promo' | 'staff' | 'category' | 'order_status' | 'variations';
     }
   | { kind: 'select_comercio'; nameHint: string }
   | { kind: 'escalate_human'; reason?: string }
@@ -34,6 +49,20 @@ const WRITE_KINDS = new Set([
   'propose_availability',
   'propose_hours',
   'propose_en_linea',
+  'add_product',
+  'delete_product',
+  'create_category',
+  'delete_category',
+  'upsert_payment',
+  'delete_payment',
+  'set_delivery',
+  'create_promo',
+  'set_order_status',
+  'invite_staff',
+  'set_featured',
+  'set_product_image',
+  'update_profile',
+  'currency',
 ]);
 
 /** True when rules already matched a concrete admin action (skip Gemini). */
@@ -143,50 +172,121 @@ export function parseBusinessIntent(
     return { kind: 'share_menu' };
   }
 
-  // Modules not writable yet — classify BEFORE add_product so they never leak there.
-  if (
-    /\b(metodo(s)? de pago|métodos? de pago|pago(s)?|zelle|pago movil|pago móvil|transferencia|punto de venta|pos|stripe|cobro(s)?)\b/.test(
-      t,
-    ) &&
-    /\b(agrega|añade|crear|crea|configura|pon|activo|activar|nuevo|nueva)\b/.test(t)
-  ) {
-    return { kind: 'unsupported', topic: 'payments' };
+  // Payments
+  if (/\b(metodos? de pago|métodos? de pago)\b/.test(t) && !/\b(agrega|añade|crea|quitar|elimina)\b/.test(t)) {
+    return { kind: 'list_payments' };
   }
   if (
-    /\b(delivery|domicilio|envio|envío|zona(s)? de (delivery|envio|envío|cobertura)|costo de envio|costo de envío)\b/.test(
-      t,
-    ) &&
-    /\b(agrega|añade|crear|crea|configura|pon|nueva|nuevo)\b/.test(t)
+    /\b(quita|quitar|elimina|eliminar|borra|borrar)\b/.test(t) &&
+    /\b(zelle|pago movil|pago móvil|metodo de pago|método de pago|efectivo)\b/.test(t)
   ) {
-    return { kind: 'unsupported', topic: 'delivery' };
+    return { kind: 'delete_payment', raw };
   }
   if (
-    /\b(promocion|promoción|promo|2x1|descuento|cupon|cupón|oferta)\b/.test(t) &&
+    (/\b(metodo(s)? de pago|métodos? de pago|zelle|pago movil|pago móvil|transferencia)\b/.test(t) &&
+      /\b(agrega|añade|crear|crea|configura|pon|nuevo|nueva)\b/.test(t)) ||
+    /\bagrega(r|me)?\s+(un\s+)?(zelle|pago movil|pago móvil)\b/.test(t)
+  ) {
+    return { kind: 'upsert_payment', raw };
+  }
+
+  // Delivery
+  if (
+    /\b(delivery|domicilio)\b/.test(t) &&
+    /\b(cierra|cerrar|apaga|desactiva|quita|paus)\w*\b/.test(t)
+  ) {
+    return { kind: 'set_delivery', enabled: false };
+  }
+  if (
+    /\b(delivery|domicilio)\b/.test(t) &&
+    /\b(abre|abrir|activa|activar|enciende|pon)\w*\b/.test(t)
+  ) {
+    const price = parsePrice(raw);
+    return { kind: 'set_delivery', enabled: true, fixedPrice: price };
+  }
+  if (
+    /\b(delivery|domicilio|zonas? de (delivery|envio|envío)|tarifa de (delivery|envio|envío))\b/.test(
+      t,
+    ) &&
+    !/\b(pedido)\b/.test(t)
+  ) {
+    return { kind: 'read_delivery' };
+  }
+
+  // Promos
+  if (
+    /\b(promocion|promoción|promo|2x1|dos por uno|descuento|cupon|cupón|oferta)\b/.test(t) &&
     /\b(agrega|añade|crear|crea|activa|activar|nueva|nuevo|pon)\b/.test(t)
   ) {
-    return { kind: 'unsupported', topic: 'promo' };
+    return { kind: 'create_promo', raw };
+  }
+
+  // Staff
+  if (
+    /\b(equipo|trabajadores|empleados|staff|miembros)\b/.test(t) &&
+    !/\b(invita|agrega|añade)\b/.test(t)
+  ) {
+    return { kind: 'list_staff' };
   }
   if (
-    /\b(trabajador|trabajadores|empleado|empleados|staff|mesero|meseros|cajero|cajeros|permisos de (usuario|empleado))\b/.test(
+    /\b(invita|invitar|agrega(r)? (un )?empleado|agrega(r)? (un )?trabajador|nuevo (cajero|mesero|cocinero))\b/.test(
       t,
-    )
+    ) ||
+    (/\b(trabajador|empleado|cajero|mesero|cocinero)\b/.test(t) &&
+      /\b(invita|agrega|añade)\b/.test(t))
   ) {
-    return { kind: 'unsupported', topic: 'staff' };
+    return { kind: 'invite_staff', raw };
+  }
+
+  // Categories
+  if (
+    (/\b(categoria|categoría|categorias|categorías)\b/.test(t) &&
+      /\b(elimina|eliminar|borra|borrar|quita|quitar)\b/.test(t)) ||
+    /\b(elimina|borra)\s+(la\s+)?categor/.test(t)
+  ) {
+    return { kind: 'delete_category', raw };
   }
   if (
     (/\b(categoria|categoría|categorias|categorías)\b/.test(t) &&
       /\b(agrega|añade|crear|crea|nueva|nuevo)\b/.test(t)) ||
     /\b(crea|crear)\s+(una\s+)?categor/.test(t)
   ) {
-    return { kind: 'unsupported', topic: 'category' };
+    return { kind: 'create_category', raw };
   }
+
+  // Order status change
   if (
     /\b(pedido|orden)\b/.test(t) &&
-    /\b(entregado|en camino|en preparacion|en preparación|marcar como|cambiar (el )?estado|listo para entregar)\b/.test(
+    /\b(entregado|en camino|despachad|confirmad|cancel|anul|marcar como|cambiar (el )?estado|listo|prepar)\w*\b/.test(
       t,
     )
   ) {
-    return { kind: 'unsupported', topic: 'order_status' };
+    return { kind: 'set_order_status', raw };
+  }
+
+  // Featured / upsell badge
+  if (
+    /\b(destaca(r|do)?|mas pedido|más pedido|mejor valor|upsell)\b/.test(t) &&
+    !/\b(quita|quitar|sacar)\b/.test(t)
+  ) {
+    return { kind: 'set_featured', raw, clear: false };
+  }
+  if (/\b(quita|quitar)\b/.test(t) && /\b(destacado|badge)\b/.test(t)) {
+    return { kind: 'set_featured', raw, clear: true };
+  }
+
+  // Variations not fully supported via chat yet (complex JSON)
+  if (/\b(variacion|variación|tamanos?|tamaños?|extras?|complementos?|opciones del menu|opciones del menú)\b/.test(t) &&
+      /\b(agrega|añade|crear|crea|edita|configura)\b/.test(t)) {
+    return { kind: 'unsupported', topic: 'variations' };
+  }
+
+  // Delete product
+  if (
+    /\b(elimina|eliminar|borra|borrar|quita|quitar)\b/.test(t) &&
+    /\b(producto|plato|pizza|hamburguesa|arepa)\b/.test(t)
+  ) {
+    return { kind: 'delete_product', productHint: raw };
   }
 
   if (
@@ -196,15 +296,24 @@ export function parseBusinessIntent(
       (/\b(crea|crear)\b/.test(t) &&
         /\b(producto|plato|combo|arepa|pizza|hamburguesa|bebida|ensalada|menu infantil|menú infantil)\b/.test(
           t,
-        ))) &&
-    !/\b(foto|imagen|precio|tasa|anuncio|promocion|promoción|pago|zelle|delivery|domicilio|categoria|categoría|empleado|trabajador)\b/.test(
+        )) ||
+      /\bagrega(me)?\s+(una?\s+)?(pizza|hamburguesa|arepa)\b/.test(t)) &&
+    !/\b(foto|imagen|tasa|anuncio|promocion|promoción|pago|zelle|delivery|domicilio|categoria|categoría|empleado|trabajador)\b/.test(
       t,
     )
   ) {
     return { kind: 'add_product' };
   }
   if (/\b(tasa|moneda|dolar|dólar|bolivares|bolívares)\b/.test(t) || /\btasa de cambio\b/.test(t)) {
-    return { kind: 'currency' };
+    const setValue = parsePrice(raw);
+    return { kind: 'currency', setValue };
+  }
+  if (
+    /\b(descripcion del negocio|descripción del negocio|cambia(r)? (el )?nombre|mi whatsapp|logo del negocio)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'update_profile' };
   }
   if (
     /\b(membres[ií]a|membresia|suscripci[oó]n|subscription|mi plan|el plan|que plan|qué plan|facturaci[oó]n|billing|renovar|cu[aá]nto (tiempo|falta).*(pagar|membres|plan)|cu[aá]nto (me )?(toca|debo|tengo que) pagar|cuando (pago|vence)|fecha de corte|pr[oó]ximo pago|plan (anual|actual|contratado))\b/.test(
@@ -290,7 +399,7 @@ export function parseBusinessIntent(
 
   // Product availability BEFORE open/close — "activa Campesina" ≠ abrir el local.
   const availOff =
-    /\b(agotado|agotar|agotada|agota|no disponible|desactivar|desactiva|ocultar|oculta|ocultalo|inhabilitar|inhabilita|deshabilitar|deshabilita)\b/.test(
+    /\b(agotad[oa]|agotar|agota|agoto|se agoto|se agotó|no disponible|desactivar|desactiva|ocultar|oculta|ocultalo|inhabilitar|inhabilita|deshabilitar|deshabilita)\b/.test(
       t,
     );
   const availOn =

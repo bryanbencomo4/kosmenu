@@ -447,10 +447,17 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   }, [applySelectedShop, mapChips]);
 
   const sendText = useCallback(
-    async (text: string, opts?: { comercioId?: string | null }) => {
+    async (
+      text: string,
+      opts?: { comercioId?: string | null; imageUrl?: string | null },
+    ) => {
       const trimmed = text.trim();
-      if (!trimmed || busy) return;
+      if ((!trimmed && !opts?.imageUrl) || busy) return;
       if (opts?.comercioId) applySelectedShop(opts.comercioId);
+      const outbound =
+        trimmed ||
+        (opts?.imageUrl ? 'Cambiar foto de producto' : '');
+      if (!outbound) return;
 
       const lower = trimmed.toLowerCase();
       if (/entrar|login|iniciar/.test(lower)) {
@@ -490,7 +497,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       const userMsg: Msg = {
         id: newId('u'),
         role: 'user',
-        text: trimmed,
+        text: outbound,
         createdAt: Date.now(),
       };
       const nextMsgs = [...messages, userMsg];
@@ -504,6 +511,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           handoffCode: code || undefined,
           handoffAction: 'peek',
           comercioId: selectedComercioIdRef.current || undefined,
+          imageUrl: opts?.imageUrl || undefined,
         });
         pushAssistant(json);
       } catch {
@@ -815,7 +823,61 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
             disabled={busy}
             onChange={setDraft}
             onSend={onSend}
-            hideAttach
+            onSendFile={(payload) => {
+              if (payload.kind !== 'image') return;
+              void (async () => {
+                const shopId = selectedComercioIdRef.current;
+                if (!shopId) {
+                  setMessages((m) => [
+                    ...m,
+                    {
+                      id: newId('a'),
+                      role: 'assistant',
+                      text: 'Primero elige el negocio 🏪 y luego mándame la foto.',
+                      createdAt: Date.now(),
+                    },
+                  ]);
+                  return;
+                }
+                setBusy(true);
+                try {
+                  const fd = new FormData();
+                  fd.append('comercioId', shopId);
+                  fd.append('file', payload.file);
+                  const headers: Record<string, string> = {};
+                  const token = readBearer();
+                  if (token) headers.Authorization = `Bearer ${token}`;
+                  const res = await fetch('/api/asistente-negocio/upload', {
+                    method: 'POST',
+                    headers,
+                    body: fd,
+                  });
+                  const json = (await res.json()) as {
+                    ok?: boolean;
+                    imageUrl?: string;
+                    error?: string;
+                  };
+                  if (!res.ok || !json.imageUrl) {
+                    throw new Error(json.error || 'upload_failed');
+                  }
+                  const caption = draft.trim() || 'Esta foto es para el producto';
+                  setDraft('');
+                  await sendText(caption, { imageUrl: json.imageUrl });
+                } catch {
+                  setMessages((m) => [
+                    ...m,
+                    {
+                      id: newId('a'),
+                      role: 'assistant',
+                      text: 'No pude subir la foto 😅 Intenta de nuevo.',
+                      createdAt: Date.now(),
+                    },
+                  ]);
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            }}
             placeholder="Escríbeme como en WhatsApp…"
             inputTestId="business-composer-input"
             sendTestId="business-composer-send"

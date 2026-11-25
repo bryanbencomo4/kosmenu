@@ -77,31 +77,23 @@ describe('P3 natural language', () => {
     expect(parseBusinessIntent('activar el local').kind).toBe('propose_en_linea');
   });
 
-  it('payments/delivery/promo/staff/category do not become add_product', () => {
-    expect(parseBusinessIntent('agrega un método de pago Zelle de prueba')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'payments',
+  it('payments/delivery/promo/staff/category/orders route to real intents', () => {
+    expect(parseBusinessIntent('agrega un método de pago Zelle de prueba').kind).toBe(
+      'upsert_payment',
+    );
+    expect(parseBusinessIntent('cierra el delivery por ahora')).toMatchObject({
+      kind: 'set_delivery',
+      enabled: false,
     });
-    expect(parseBusinessIntent('crea una zona de delivery de prueba')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'delivery',
-    });
-    expect(parseBusinessIntent('crea una promoción 2x1')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'promo',
-    });
-    expect(parseBusinessIntent('agregar empleado mesero')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'staff',
-    });
-    expect(parseBusinessIntent('crea una categoría postres')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'category',
-    });
-    expect(parseBusinessIntent('marca el pedido pendiente como entregado')).toMatchObject({
-      kind: 'unsupported',
-      topic: 'order_status',
-    });
+    expect(parseBusinessIntent('crea una promoción 2x1').kind).toBe('create_promo');
+    expect(parseBusinessIntent('agregar empleado mesero').kind).toBe('invite_staff');
+    expect(parseBusinessIntent('crea una categoría postres').kind).toBe('create_category');
+    expect(parseBusinessIntent('marca el pedido pendiente como entregado').kind).toBe(
+      'set_order_status',
+    );
+    expect(parseBusinessIntent('Agrégame una pizza margarita a 8 dólares').kind).toBe(
+      'add_product',
+    );
   });
 });
 

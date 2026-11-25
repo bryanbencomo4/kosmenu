@@ -27,6 +27,7 @@ import {
   type BusinessMetricsView,
   type BusinessOrdersView,
 } from './orders-view';
+import { applyExtendedOp } from './apply-extended';
 import { resolveProductMatch, type ProductRow } from './product-match';
 
 export type { BusinessMenuView, BusinessMenuCategory, BusinessMenuProduct } from './menu-view';
@@ -788,6 +789,24 @@ export async function applyConfirm(params: {
         text: `¡Guardado! 🕒 Horario de *${data.nombre}* actualizado (${summary}).\n\n(ref ${auditId})`,
         auditId,
       };
+    }
+
+    const extended = await applyExtendedOp({
+      sb,
+      shop: matchedShop,
+      op: payload.op,
+      data: payload.data,
+    });
+    if (extended) {
+      consumeConfirmNonce(nonce, expiresAt);
+      const auditId = appendBusinessAudit(cfg.auditDir, {
+        userId: params.userId,
+        comercioId: matchedShop.comercioId,
+        op: payload.op,
+        data: { ...payload.data, ...(extended.data || {}) },
+        ok: true,
+      });
+      return { text: `${extended.text}\n\n(ref ${auditId})`, auditId };
     }
 
     throw new Error('unsupported_op');

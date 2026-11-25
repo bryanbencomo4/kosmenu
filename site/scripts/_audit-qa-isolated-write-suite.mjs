@@ -609,17 +609,150 @@ async function testWrites() {
     evidence.ops.push(op2);
   }
 
-  // Missing tools probes (expect NO write)
-  for (const prompt of [
-    'crea una categoría postres',
-    'agrega un método de pago Zelle de prueba',
-    'crea una zona de delivery de prueba',
-    'crea una promoción 2x1',
-    'marca el pedido pendiente como entregado',
-  ]) {
+  // Expansion writes (must persist)
+  async function applyNamed(name, prompt, verify) {
     const t = await turn(token, history, prompt, state.comercioId);
+    history.push({ role: 'user', text: t.user }, { role: 'assistant', text: t.assistant });
+    const op = {
+      name,
+      propose: { hadProposal: Boolean(t.proposal?.confirmToken), assistant: t.assistant.slice(0, 240) },
+    };
+    if (t.proposal?.confirmToken) {
+      const applied = await confirm(token, t.proposal, 'apply', state.comercioId);
+      op.apply = applied;
+      op.db = await verify();
+    } else {
+      op.blocked = 'no_proposal';
+    }
+    evidence.ops.push(op);
+  }
+
+  await applyNamed('create_category', 'crea una categoría Postres QA', async () => {
+    const { data } = await admin
+      .from('categorias')
+      .select('id,nombre')
+      .eq('comercio_id', state.comercioId)
+      .ilike('nombre', '%Postres QA%')
+      .maybeSingle();
+    return { id: data?.id, persisted: Boolean(data?.id) };
+  });
+
+  await applyNamed(
+    'create_product',
+    'Agrégame una pizza margarita QA a 8 dólares',
+    async () => {
+      const { data } = await admin
+        .from('productos')
+        .select('id,nombre,precio')
+        .eq('comercio_id', state.comercioId)
+        .ilike('nombre', '%margarita QA%')
+        .maybeSingle();
+      return {
+        id: data?.id,
+        precio: data?.precio,
+        persisted: Number(data?.precio) === 8,
+      };
+    },
+  );
+
+  await applyNamed('set_tasa', 'Cambia la tasa a 42.5', async () => {
+    const { data } = await admin
+      .from('comercios')
+      .select('exchange_rate_value,tasa_cambio_pesos,exchange_rate_mode')
+      .eq('id', state.comercioId)
+      .maybeSingle();
+    const v = Number(data?.exchange_rate_value ?? data?.tasa_cambio_pesos);
+    return {
+      value: v,
+      mode: data?.exchange_rate_mode,
+      persisted: v === 42.5 && data?.exchange_rate_mode === 'manual',
+    };
+  });
+
+  await applyNamed('upsert_payment_method', 'agrega un método de pago Zelle de prueba', async () => {
+    const { data } = await admin
+      .from('metodos_pago')
+      .select('id,nombre,tipo')
+      .eq('comercio_id', state.comercioId)
+      .ilike('nombre', '%Zelle%')
+      .maybeSingle();
+    return { id: data?.id, persisted: Boolean(data?.id) };
+  });
+
+  await applyNamed('set_delivery_config', 'cierra el delivery por ahora', async () => {
+    const { data } = await admin
+      .from('comercios')
+      .select('permite_delivery,branding_ia')
+      .eq('id', state.comercioId)
+      .maybeSingle();
+    const enabled =
+      data?.branding_ia &&
+      typeof data.branding_ia === 'object' &&
+      data.branding_ia.config_negocio &&
+      typeof data.branding_ia.config_negocio === 'object'
+        ? data.branding_ia.config_negocio.delivery_config?.enabled
+        : undefined;
+    return {
+      permite_delivery: data?.permite_delivery,
+      enabled,
+      persisted: data?.permite_delivery === false || enabled === false,
+    };
+  });
+
+  await applyNamed('create_promo', 'crea una promoción 2x1', async () => {
+    const { data } = await admin
+      .from('upsell_rules')
+      .select('id,name,enabled')
+      .eq('comercio_id', state.comercioId)
+      .ilike('name', '%2x1%')
+      .maybeSingle();
+    return { id: data?.id, persisted: Boolean(data?.id) };
+  });
+
+  // Seed order for status transition (Preview schema: no codigo_orden)
+  {
+    const orderId = randomUUID();
+    const { error: ordErr } = await admin.from('pedidos').insert({
+      id: orderId,
+      comercio_id: state.comercioId,
+      estado: 'pendiente',
+      total: 10,
+      nombre_cliente: `${QA_PREFIX} Cliente 125`,
+      cliente_nombre: `${QA_PREFIX} Cliente 125`,
+      detalles: { order_id: 'QA125', source: 'qa_isolated_audit' },
+    });
+    if (!ordErr) {
+      await applyNamed(
+        'set_order_status',
+        'Pon el pedido QA125 como confirmado',
+        async () => {
+          const { data } = await admin
+            .from('pedidos')
+            .select('id,estado')
+            .eq('id', orderId)
+            .maybeSingle();
+          return { estado: data?.estado, persisted: data?.estado === 'confirmado' };
+        },
+      );
+    } else {
+      evidence.ops.push({
+        name: 'set_order_status',
+        blocked: `seed_failed:${ordErr.message}`,
+      });
+    }
+  }
+
+  // Variations still unsupported (honest)
+  {
+    const t = await turn(
+      token,
+      history,
+      'crea una variación de tamaño para la margarita',
+      state.comercioId,
+    );
+    evidence.missingTools = evidence.missingTools || [];
     evidence.missingTools.push({
-      prompt,
+      prompt: 'crea una variación de tamaño para la margarita',
       hadProposal: Boolean(t.proposal?.confirmToken),
       assistant: t.assistant.slice(0, 240),
     });

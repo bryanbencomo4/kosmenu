@@ -1,0 +1,252 @@
+{
+  "at": "2026-11-25T19:08:14.477Z",
+  "ref": "gsfxqzvmyzjjgpigrste",
+  "base": "http://127.0.0.1:3024",
+  "comercioId": "0543e339-75b9-431c-a572-a4ee8737792e",
+  "decoyId": "5b644261-8800-4fb4-8d6f-be0015da6cd2",
+  "ops": [
+    {
+      "name": "set_price",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Lo dejamos así? 🤞\n\n*Campesina*: 4.8 → *5.8* USD\n\nToca *Confirmar* y listo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Hecho! ✅ *Campesina* quedó en *5.8* USD\n\n(ref ba_mwwhxvqv_nsscy8)",
+        "ok": true
+      },
+      "db": {
+        "before": 4.8,
+        "after": 5.8,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_off",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwhxwoz_hwqxhm)",
+        "ok": true
+      },
+      "db": {
+        "disponible": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_on",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Listo! ✅ *Campesina* otra vez disponible.\n\n(ref ba_mwwhxxkn_nmxl4q)",
+        "ok": true
+      },
+      "db": {
+        "disponible": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_hours",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–21:00\n• Jueves: 11:00–21:00\n• Viernes: 11:00–21:00\n• Sábado: cerrado\n• Domingo: cerrado\n\nConfirma y lo guardo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Guardado! 🕒 Horario de *QA_CHATBOT_2026 pizzas el trueno* actualizado (Lun–Vie 11:00–21:00).\n\n(ref ba_mwwhxycb_olm50u)",
+        "ok": true
+      },
+      "db": {
+        "summary": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–2",
+        "mondayOpen": true,
+        "mondayRange": {
+          "end": "21:00",
+          "start": "11:00"
+        },
+        "persisted": true,
+        "flutterCompatible": true
+      }
+    },
+    {
+      "name": "set_en_linea_true",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Abierto! 🟢 *QA_CHATBOT_2026 pizzas el trueno* ya está en línea.\n\n(ref ba_mwwhxz6j_eeha5h)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_en_linea_false",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Cerrado por ahora 🔴 *QA_CHATBOT_2026 pizzas el trueno* fuera de línea.\n\n(ref ba_mwwhxzxb_t418jp)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "create_category",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Creamos la categoría *Postres QA*? 📂\n\nConfirma y la agrego."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Categoría creada ✅ *Postres QA*\n\n(ref ba_mwwhy0xn_9iwct3)",
+        "ok": true
+      },
+      "db": {
+        "id": "fde0f717-ddc4-4456-949d-7381fdc39838",
+        "persisted": true
+      }
+    },
+    {
+      "name": "create_product",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Creamos este producto? 🍽️\n\n• *Agrégame margarita QA*\n• Precio: *8* USD\n• Categoría: *PIZZAS*\n\nConfirma y lo guardo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Producto creado! ✅ *Agrégame margarita QA* a *8* USD\n\n(ref ba_mwwhy1v8_qzknf0)",
+        "ok": true
+      },
+      "db": {
+        "id": "ae9e8df3-3d5d-42e9-a051-55233b434a6d",
+        "precio": 8,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_tasa",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Actualizamos la tasa de *—* → *42.5* (modo manual)? 💱\n\nConfirma y la guardo."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Tasa actualizada 💱 *42.5* (manual)\n\n(ref ba_mwwhy2m5_ko9azn)",
+        "ok": true
+      },
+      "db": {
+        "value": 42.5,
+        "mode": "manual",
+        "persisted": true
+      }
+    },
+    {
+      "name": "upsert_payment_method",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Agregamos el método *Zelle*? 💳\n\nNo guardo contraseñas ni tokens. Confirma para crear."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Método agregado 💳 *Zelle*\n\n(ref ba_mwwhy3e1_hvryox)",
+        "ok": true
+      },
+      "db": {
+        "id": "4cb7c7e6-771b-4e27-af68-26ba82b0c0ea",
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_delivery_config",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Cerramos el delivery por ahora? 🔴"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Delivery desactivado 🔴\n\n(ref ba_mwwhy47w_1e5dhf)",
+        "ok": true
+      },
+      "db": {
+        "permite_delivery": false,
+        "enabled": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "create_promo",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Creamos la promoción *promoción 2x1*? 🏷️\n\nQueda como regla de venta activa en carrito. Confirma para guardarla."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Uy, no pude aplicar eso 😅 (promo_schema_missing: faltan tablas upsell_rules/upsell_settings en este entorno (sí existen en el contrato Flutter de producción))\n\nIntenta de nuevo aquí mismo.",
+        "ok": true
+      },
+      "db": {
+        "persisted": false
+      }
+    },
+    {
+      "name": "set_order_status",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Pasamos el pedido de *QA_CHATBOT_2026 Cliente 125* de *pendiente* → *confirmado / en preparación*? 🧾\n\nConfirma y lo actualizo."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Uy, no pude aplicar eso 😅 (column pedidos.codigo_orden does not exist)\n\nIntenta de nuevo aquí mismo.",
+        "ok": true
+      },
+      "db": {
+        "estado": "pendiente",
+        "persisted": false
+      }
+    }
+  ],
+  "isolation": {
+    "decoyPriceBefore": 99,
+    "decoyPriceAfter": 99,
+    "unchanged": true,
+    "proposalAppeared": false,
+    "hamburguesaUntouched": true,
+    "assistant": "No encontré ese producto en *QA_CHATBOT_2026 pizzas el trueno* 😅\n\nDime el nombre tal cual o escribe “ver menú”.",
+    "safe": true
+  },
+  "missingTools": [
+    {
+      "prompt": "crea una variación de tamaño para la margarita",
+      "hadProposal": false,
+      "assistant": "Variaciones, tamaños y extras usan un editor complejo del panel 🧩. Aquí no los armo todavía para no romper el menú público."
+    }
+  ],
+  "scoreHints": {}
+}

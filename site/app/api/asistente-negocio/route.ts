@@ -37,6 +37,25 @@ import { escalateBusinessAssistantToHuman } from './_lib/escalate';
 import { readMembership } from './_lib/membership';
 import { resolveShopByName } from './_lib/product-match';
 import {
+  listPaymentMethods,
+  listStaff,
+  proposeCreateCategory,
+  proposeCreateProduct,
+  proposeDeleteCategory,
+  proposeDeletePayment,
+  proposeDeleteProduct,
+  proposeDeliveryToggle,
+  proposeInviteStaff,
+  proposeOrderStatus,
+  proposeProductImage,
+  proposePromo,
+  proposeSetTasa,
+  proposeUpdateProfile,
+  proposeUpsellBadge,
+  proposeUpsertPayment,
+  readDeliveryConfig,
+} from './_lib/propose-extended';
+import {
   applyConfirm,
   guideChangeImage,
   listMenu,
@@ -94,6 +113,9 @@ async function executeBusinessIntent(params: {
     case 'order_detail':
       return readOrderDetail(shop, intent.hint || userText);
     case 'currency':
+      if (intent.setValue != null) {
+        return proposeSetTasa(userId, shop, userText);
+      }
       return {
         text: shop.tasa
           ? `💱 En *${shop.nombre}* la tasa está en *${shop.tasa}* (${shop.moneda ?? 'moneda local'}).\n\n¿La actualizamos? Dime el nuevo valor (ej. “tasa 42.5”).`
@@ -156,23 +178,67 @@ async function executeBusinessIntent(params: {
         ].join('\n'),
       };
     case 'add_product':
-      return {
-        text: `¡Nuevo plato! 🍽️\n\nDime *nombre* y *precio* (ej. “Arepa 3.5”) y te preparo la ficha para confirmar aquí.`,
-      };
+      return proposeCreateProduct(userId, shop, userText);
+    case 'delete_product':
+      return proposeDeleteProduct(userId, shop, intent.productHint || userText);
+    case 'create_category':
+      return proposeCreateCategory(userId, shop, intent.raw || userText);
+    case 'delete_category':
+      return proposeDeleteCategory(userId, shop, intent.raw || userText);
+    case 'list_payments':
+      return listPaymentMethods(shop);
+    case 'upsert_payment':
+      return proposeUpsertPayment(userId, shop, intent.raw || userText);
+    case 'delete_payment':
+      return proposeDeletePayment(userId, shop, intent.raw || userText);
+    case 'read_delivery':
+      return readDeliveryConfig(shop);
+    case 'set_delivery':
+      return proposeDeliveryToggle(
+        userId,
+        shop,
+        intent.enabled !== false,
+        intent.fixedPrice,
+      );
+    case 'create_promo':
+      return proposePromo(userId, shop, intent.raw || userText);
+    case 'set_order_status':
+      return proposeOrderStatus(userId, shop, intent.raw || userText);
+    case 'list_staff':
+      return listStaff(shop);
+    case 'invite_staff':
+      return proposeInviteStaff(userId, shop, intent.raw || userText);
+    case 'set_featured':
+      return proposeUpsellBadge(userId, shop, intent.raw || userText, intent.clear === true);
+    case 'set_product_image':
+      return proposeProductImage(
+        userId,
+        shop,
+        intent.productHint || userText,
+        intent.imageUrl || '',
+      );
+    case 'update_profile':
+      return proposeUpdateProfile(userId, shop, {
+        nombre: intent.nombre,
+        descripcionVisual: intent.descripcionVisual,
+        whatsapp: intent.whatsapp,
+      });
     case 'unsupported': {
       const copy: Record<typeof intent.topic, string> = {
         payments:
-          'Métodos de pago todavía no los configuro desde el chat 💳\n\nÚsalos en el panel admin. Aquí sí puedo ayudarte con *precios*, *stock*, *horario* y *abrir/cerrar*.',
+          'Para ese detalle de pago necesito más datos 💳. Prueba “métodos de pago” o “agrega zelle”.',
         delivery:
-          'Zonas de delivery aún no las armo desde aquí 🛵\n\nConfigúralas en el panel. En el chat sí manejo *menú*, *precios*, *stock* y *horario*.',
+          'Las zonas con polígono se editan mejor en el panel 🛵. Aquí sí activo/desactivo delivery y tarifa fija.',
         promo:
-          'Promociones / 2x1 todavía no las creo por chat 🏷️\n\nEso vive en el panel por ahora. ¿Cambiamos un *precio* o el *horario* mientras tanto?',
+          'Esa promo avanzada (targets/combos) vive en el panel 🏷️. Aquí creo reglas simples de venta.',
         staff:
-          'Trabajadores y permisos aún no los gestiono en el chat 👥\n\nEso está en el panel. Aquí te ayudo con el *menú* y el *estado* del local.',
+          'Para roles complejos usa el panel 👥. Aquí listo el equipo e invito por correo.',
         category:
-          'Crear categorías todavía no está en el chat 📂\n\nPuedes hacerlo en el panel. Aquí sí consulto el menú y edito *precio* / *disponibilidad*.',
+          'Dime el nombre exacto de la categoría 📂.',
         order_status:
-          'Cambiar el estado de un pedido aún no lo hago por chat 🧾\n\nPuedo *listar* pedidos; el cambio de estado sigue en el panel.',
+          'Indica el pedido y el estado (confirmado / en camino / entregado / cancelado).',
+        variations:
+          'Variaciones, tamaños y extras usan un editor complejo del panel 🧩. Aquí no los armo todavía para no romper el menú público.',
       };
       return { text: copy[intent.topic] };
     }
@@ -214,6 +280,8 @@ const bodySchema = z.object({
   handoffCode: z.string().trim().max(64).optional(),
   handoffAction: z.enum(['peek', 'consume']).optional(),
   comercioId: z.string().trim().max(64).optional(),
+  /** Public URL from /api/asistente-negocio/upload (product-images bucket). */
+  imageUrl: z.string().url().max(2000).optional(),
   /** Structured confirm from UI cards (preferred over typing "confirmar"). */
   confirmToken: z.string().trim().min(10).max(4000).optional(),
   confirmAction: z.enum(['apply', 'cancel']).optional(),
@@ -517,6 +585,15 @@ export async function POST(req: Request) {
   const multiIntents = parseBusinessIntents(lastUser!.text, { pendingOp });
   let intent = multiIntents[0]!;
   let geminiReply: string | undefined;
+
+  // Attached image from chat → propose product photo (never auto-apply).
+  if (body.imageUrl) {
+    intent = {
+      kind: 'set_product_image',
+      productHint: lastUser?.text || '',
+      imageUrl: body.imageUrl,
+    };
+  }
 
   // Gemini only for ambiguous turns — never replaces confirm/cancel or clear chip intents.
   if (multiIntents.length < 2 && !isConcreteBusinessIntent(intent)) {
