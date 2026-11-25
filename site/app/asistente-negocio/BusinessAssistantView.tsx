@@ -11,6 +11,10 @@ import {
 
 import { getBrowserSupabase } from '../_lib/supabase-browser';
 import { BUSINESS_ASSISTANT_APP_HOME } from '../_lib/business-assistant';
+import {
+  loadBusinessHandoffContext,
+  saveBusinessHandoffContext,
+} from '../_lib/conversation-handoff-client';
 import { formatChatText } from '../v/[id]/_components/chat/chat-format';
 import {
   isChatSoundsEnabled,
@@ -348,23 +352,50 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
         const id = newId('a');
         playedReceiveIdsRef.current.add(id);
         const wantAuth = Boolean(json.needsAuth || json.showAuthCard || json.authenticated === false);
+        // Persist handoff continuity for reload / post-login (never put secrets in URL).
+        const stored = loadBusinessHandoffContext();
+        const hint =
+          (json as { handoffHint?: string }).handoffHint ||
+          stored?.pendingOperation ||
+          stored?.summary ||
+          stored?.conversationHint ||
+          null;
+        if (code || stored || hint) {
+          saveBusinessHandoffContext({
+            ...(stored || {}),
+            profile: 'business',
+            source: stored?.source || 'wa_platform',
+            pendingOperation: stored?.pendingOperation || null,
+            summary: stored?.summary || hint,
+            conversationHint: stored?.conversationHint || hint,
+            candidateComercioId:
+              json.selectedComercioId || stored?.candidateComercioId || null,
+          });
+        }
         // Preserve an in-progress thread unless this is first boot or an intentional reboot.
         const preserve =
           bootedOnceRef.current &&
           messagesRef.current.length > 1 &&
           !wantAuth;
         if (!preserve) {
+          const continuity =
+            !wantAuth && hint
+              ? `\n\nSigo con tu solicitud: *${hint}*. ¿La aplicamos?`
+              : '';
           setMessages([
             {
               id,
               role: 'assistant',
-              text: json.text || '¡Hola! 👋',
+              text: `${json.text || '¡Hola! 👋'}${continuity}`,
               createdAt: Date.now(),
               proposal: json.proposal ?? null,
               showAuthCard: wantAuth,
               menuView: json.menuView ?? null,
             },
           ]);
+          if (!wantAuth && hint && !json.proposal) {
+            setDraft((d) => d || String(hint));
+          }
         }
         bootedOnceRef.current = true;
         setNeedsAuth(wantAuth);
@@ -566,6 +597,14 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
     writeBearer(accessToken);
     setNeedsAuth(false);
     setShowAuthCard(false);
+    const ctx = loadBusinessHandoffContext();
+    if (ctx?.pendingOperation || ctx?.summary || ctx?.conversationHint) {
+      setDraft(
+        (d) =>
+          d ||
+          String(ctx.pendingOperation || ctx.summary || ctx.conversationHint || ''),
+      );
+    }
     // One intentional reboot → home greeting with metrics (don't also append a duplicate bubble).
     bootedOnceRef.current = false;
     setBootKey((k) => k + 1);

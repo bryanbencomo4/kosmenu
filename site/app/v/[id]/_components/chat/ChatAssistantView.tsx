@@ -77,6 +77,15 @@ import {
   writeChatLastActive,
 } from './chat-onboarding';
 import {
+  buildCommerceHandoffGreeting,
+  loadCommerceHandoffContext,
+  peekOrConsumeHandoff,
+  readHandoffCodeFromLocation,
+  saveCommerceHandoffContext,
+  scrubHandoffCodeFromUrl,
+  type ConversationContext,
+} from '../../../../_lib/conversation-handoff-client';
+import {
   ChatMediaLightbox,
   type ChatMediaLightboxState,
 } from './ChatMediaLightbox';
@@ -1255,6 +1264,7 @@ export function ChatAssistantView({
   /**
    * First open: typing + 2–3 brief natural bubbles (hello → identity → voice note).
    * Return visit after idle/order: typing + contextual greeting.
+   * WA/inbox handoff: continue with transferred order context (no cold start).
    */
   useEffect(() => {
     if (onboardingRanRef.current) return;
@@ -1265,7 +1275,48 @@ export function ChatAssistantView({
     const knownLabel = buildConsumerLabel(existing || {});
     if (knownLabel) syncConsumerLabelToServer(knownLabel);
 
+    const resolveHandoffContext = async (): Promise<ConversationContext | null> => {
+      const stored = loadCommerceHandoffContext(comercioId);
+      const code =
+        typeof window !== 'undefined'
+          ? readHandoffCodeFromLocation(window.location.search, window.location.hash)
+          : null;
+      if (!code) {
+        // Direct public entry without code — never inherit another user's handoff.
+        return null;
+      }
+      const peeked = await peekOrConsumeHandoff({
+        code,
+        destination: 'commerce_chatbot',
+        action: 'peek',
+      });
+      scrubHandoffCodeFromUrl();
+      if (!peeked.ok) return stored;
+      const payload = peeked.payload;
+      // Fail closed across shops.
+      const boundId = payload.comercioId || payload.candidateComercioId;
+      if (boundId && boundId !== comercioId) return null;
+      const merged: ConversationContext = {
+        ...payload,
+        profile: 'commerce',
+        comercioId,
+        businessNameDraft: payload.businessNameDraft || businessName,
+        source: payload.source || 'wa_restaurant_inbox',
+      };
+      saveCommerceHandoffContext(comercioId, merged);
+      // Consume once we successfully bind context to this shop session.
+      void peekOrConsumeHandoff({
+        code,
+        destination: 'commerce_chatbot',
+        action: 'consume',
+      });
+      return merged;
+    };
+
     const run = async () => {
+      const handoffCtx = await resolveHandoffContext();
+      if (cancelled) return;
+
       const hasHistory = messagesRef.current.length > 0;
       const afterOrder = consumeChatAfterOrder(comercioId);
       const lastActive = readChatLastActive(comercioId);
@@ -1274,7 +1325,7 @@ export function ChatAssistantView({
         hasHistory &&
         (afterOrder || idleMs >= RETURN_GREETING_IDLE_MS);
 
-      if (needsReturn) {
+      if (needsReturn && !handoffCtx) {
         setIsTyping(true);
         await sleep(humanLocalReplyMs());
         if (cancelled) return;
@@ -1293,7 +1344,7 @@ export function ChatAssistantView({
         return;
       }
 
-      if (hasHistory) {
+      if (hasHistory && !handoffCtx) {
         // Existing short session — don't re-run first-open sequence.
         if (messagesRef.current.some((m) => m.isMenuPrompt)) {
           menuPromptSentRef.current = true;
@@ -1301,6 +1352,32 @@ export function ChatAssistantView({
         if (messagesRef.current.some((m) => m.isIdentityAsk)) {
           identityAwaitingRef.current = needsIdentityCapture(existing);
         }
+        return;
+      }
+
+      // —— Handoff continuation (skip cold “qué deseas pedir”) ——
+      if (handoffCtx && (handoffCtx.items?.length || handoffCtx.summary || handoffCtx.transcriptExcerpt || handoffCtx.conversationHint)) {
+        setIsTyping(true);
+        await sleep(humanTypingMinMs(40));
+        if (cancelled) return;
+        const greetText = buildCommerceHandoffGreeting({
+          ...handoffCtx,
+          businessNameDraft: handoffCtx.businessNameDraft || businessName,
+        });
+        const hello = createMessage('assistant', greetText, {
+          demo: !live,
+          isWelcome: true,
+        });
+        appendAssistantLocal(hello);
+        setIsTyping(false);
+        // Prefill composer with a natural follow-up if open question missing.
+        if (handoffCtx.items?.length) {
+          const summaryLine = handoffCtx.items
+            .map((it) => `${it.qty && it.qty > 1 ? `${it.qty} ` : ''}${it.name}`)
+            .join(', ');
+          setDraft((prev) => prev || `Quiero ${summaryLine}`);
+        }
+        writeChatLastActive(comercioId);
         return;
       }
 

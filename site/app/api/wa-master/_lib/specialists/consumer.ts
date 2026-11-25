@@ -222,6 +222,10 @@ export async function runConsumerSpecialist(params: {
         query,
         zone: zone || null,
         conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
+        summary: `Cliente busca ${query}${zone ? ` en ${zone}` : ''} desde WhatsApp`,
+        transcriptExcerpt: text.slice(0, 400),
+        source: 'wa_platform',
+        profile: 'consumer_discovery',
       },
     });
     const guide = formatConsumerOrderGuide({

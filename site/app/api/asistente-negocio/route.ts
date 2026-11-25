@@ -487,6 +487,11 @@ export async function POST(req: Request) {
       needsAuth: !authenticated,
       showAuthCard: !authenticated,
       needsComercioSelect: Boolean(authenticated && !selectedShop && membership.list.length > 1),
+      handoffHint:
+        payload?.pendingOperation ||
+        payload?.summary ||
+        payload?.conversationHint ||
+        null,
       chips: suggestBusinessChips({
         phase: chipPhase,
         shop: selectedShop,

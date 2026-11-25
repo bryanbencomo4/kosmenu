@@ -4,6 +4,7 @@
 
 import {
   buildWaHandoffUrl,
+  WA_HANDOFF_COMMERCE_TTL_MS,
   type WaHandoffDestination,
   type WaHandoffPayload,
   type WaHandoffStore,
@@ -28,15 +29,31 @@ export async function issueMasterHandoff(params: {
   try {
     const record = await store.issue({
       destination: params.destination,
-      payload: params.payload,
+      payload: {
+        ...params.payload,
+        profile:
+          params.payload.profile ||
+          (params.destination === 'business_assistant'
+            ? 'business'
+            : params.destination === 'commerce_chatbot'
+              ? 'commerce'
+              : 'consumer_discovery'),
+        source: params.payload.source || 'wa_platform',
+      },
       fromDigits: params.fromDigits,
       nowMs: params.nowMs,
+      ttlMs:
+        params.destination === 'commerce_chatbot'
+          ? WA_HANDOFF_COMMERCE_TTL_MS
+          : undefined,
     });
     const url = buildWaHandoffUrl({
       destination: params.destination,
       code: record.code,
       consumerBaseUrl: params.config.consumerAssistantUrl,
       businessAssistantBaseUrl: params.config.businessAssistantUrl,
+      publicSiteBaseUrl: params.config.publicSiteUrl,
+      slug: params.payload.slug,
     });
     return { url, code: record.code, expiresAtMs: record.expiresAtMs };
   } catch {

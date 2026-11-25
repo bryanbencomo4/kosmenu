@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/business_assistant_hash_stub.dart'
     if (dart.library.html) 'package:kosmenu_app/screens/business_assistant_hash_web.dart';
 import 'package:kosmenu_app/services/elmenuxfa_api_config.dart';
@@ -102,10 +101,16 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   String? _authError;
   StreamSubscription<AuthState>? _authSub;
 
+  /// Shared conversational tokens (aligned with Next chat-theme light).
   static const _bg = Color(0xFFEFEAE2);
-  static const _headerBg = Color(0xFF1F2C34);
+  static const _headerBg = Color(0xFFF0F2F5);
+  static const _headerFg = Color(0xFF111B21);
+  static const _headerMuted = Color(0xFF667781);
   static const _bubbleIn = Color(0xFFFFFFFF);
   static const _bubbleOut = Color(0xFFD9FDD3);
+  static const _composerBg = Color(0xFFF0F2F5);
+  static const _send = Color(0xFF00A884);
+  String? _pendingHandoffHint;
 
   @override
   void initState() {
@@ -221,15 +226,39 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       if (handoffError != null && handoffError.isNotEmpty) {
         _handoffValid = false;
       }
+      final hint = (json?['handoffHint'] as String?)?.trim();
+      if (hint != null && hint.isNotEmpty) {
+        _pendingHandoffHint = hint;
+      }
       _applyChips(json);
+      // Avoid duplicate Entrar/Registrarme chips under the inline auth card.
+      if (_needsAuth) {
+        _chips.removeWhere(
+          (c) =>
+              c.id == 'auth_login' ||
+              c.id == 'auth_register' ||
+              c.label.contains('Entrar') ||
+              c.label.contains('Registrarme'),
+        );
+      }
       if (text != null && text.isNotEmpty) {
+        final continuity = (!_needsAuth &&
+                _pendingHandoffHint != null &&
+                _pendingHandoffHint!.isNotEmpty)
+            ? '\n\nSigo con tu solicitud: *$_pendingHandoffHint*. ¿La aplicamos?'
+            : '';
         _messages.add(
           _ChatMsg(
             role: 'assistant',
-            text: text,
+            text: '$text$continuity',
             proposal: _Proposal.fromJson(json?['proposal']),
           ),
         );
+        if (!_needsAuth &&
+            _pendingHandoffHint != null &&
+            _input.text.trim().isEmpty) {
+          _input.text = _pendingHandoffHint!;
+        }
       }
       _booted = true;
     } catch (_) {
@@ -363,62 +392,79 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   }
 
   Widget _buildAuthCard(BuildContext context) {
+    // Compact inline auth — no duplicate chips, no oversized card.
     return Container(
       width: MediaQuery.sizeOf(context).width * 0.86,
-      margin: const EdgeInsets.only(bottom: 12, top: 4),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 10, top: 2),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: _bubbleIn,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x1A000000)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _authModeRegister ? '✨ Crear cuenta' : '🔐 Entrar',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          ),
-          const SizedBox(height: 2),
-          const Text(
-            'Aquí mismo, sin salir del chat',
-            style: TextStyle(fontSize: 12, color: Colors.black54),
-          ),
-          const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: ChoiceChip(
-                  label: const Text('Entrar'),
-                  selected: !_authModeRegister,
-                  onSelected: (_) => setState(() => _authModeRegister = false),
+              TextButton(
+                onPressed: () => setState(() => _authModeRegister = false),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      !_authModeRegister ? _send : _headerMuted,
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Entrar',
+                  style: TextStyle(
+                    fontWeight:
+                        !_authModeRegister ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13,
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ChoiceChip(
-                  label: const Text('Registrarme'),
-                  selected: _authModeRegister,
-                  onSelected: (_) => setState(() => _authModeRegister = true),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: () => setState(() => _authModeRegister = true),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      _authModeRegister ? _send : _headerMuted,
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Registrarme',
+                  style: TextStyle(
+                    fontWeight:
+                        _authModeRegister ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           TextField(
             controller: _email,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Email',
+            decoration: InputDecoration(
+              hintText: 'Email',
               isDense: true,
-              border: OutlineInputBorder(),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0x22000000)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0x22000000)),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             ),
           ),
           const SizedBox(height: 8),
@@ -426,26 +472,48 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
             controller: _password,
             obscureText: true,
             onSubmitted: (_) => _submitAuth(),
-            decoration: const InputDecoration(
-              labelText: 'Contraseña',
+            decoration: InputDecoration(
+              hintText: 'Contraseña',
               isDense: true,
-              border: OutlineInputBorder(),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0x22000000)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0x22000000)),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             ),
           ),
           if (_authError != null) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               _authError!,
-              style: const TextStyle(color: Colors.red, fontSize: 12.5),
+              style: const TextStyle(color: Colors.red, fontSize: 12),
             ),
           ],
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _authBusy ? null : _submitAuth,
-            child: Text(
-              _authBusy
-                  ? 'Un segundo…'
-                  : (_authModeRegister ? 'Crear cuenta ✨' : 'Entrar 🚀'),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 40,
+            child: FilledButton(
+              onPressed: _authBusy ? null : _submitAuth,
+              style: FilledButton.styleFrom(
+                backgroundColor: _send,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              child: Text(
+                _authBusy
+                    ? 'Un segundo…'
+                    : (_authModeRegister ? 'Crear cuenta' : 'Entrar'),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -492,10 +560,17 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       }
       setState(() {
         _needsAuth = false;
+        if (_pendingHandoffHint != null &&
+            _pendingHandoffHint!.isNotEmpty &&
+            _input.text.trim().isEmpty) {
+          _input.text = _pendingHandoffHint!;
+        }
         _messages.add(
-          const _ChatMsg(
+          _ChatMsg(
             role: 'assistant',
-            text: '¡Ya estás dentro! 🙌\n\n¿Qué hacemos: menú, precio, horario…?',
+            text: _pendingHandoffHint != null && _pendingHandoffHint!.isNotEmpty
+                ? '¡Ya estás dentro! 🙌\n\nRetomo: *$_pendingHandoffHint*. ¿Seguimos?'
+                : '¡Ya estás dentro! 🙌\n\n¿Qué hacemos: menú, precio, horario…?',
           ),
         );
       });
@@ -523,14 +598,15 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       backgroundColor: _bg,
       appBar: AppBar(
         backgroundColor: _headerBg,
-        foregroundColor: Colors.white,
+        foregroundColor: _headerFg,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
         titleSpacing: 8,
         title: const Row(
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: Color(0xFF3B4A54),
+              backgroundColor: Color(0xFF00A884),
               child: Text(
                 'e',
                 style: TextStyle(
@@ -549,12 +625,12 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
-                      color: Colors.white,
+                      color: _headerFg,
                     ),
                   ),
                   Text(
                     'Asistente del negocio',
-                    style: TextStyle(fontSize: 12, color: Color(0xFFB0B8BF)),
+                    style: TextStyle(fontSize: 12, color: _headerMuted),
                   ),
                 ],
               ),
@@ -564,11 +640,19 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
         actions: [
           TextButton(
             onPressed: _goHome,
-            child: const Text('Inicio', style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'Inicio',
+              style: TextStyle(color: _headerFg, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
-      body: Column(
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: _bg,
+          // Soft doodle-like grain (network asset from public site when online).
+        ),
+        child: Column(
         children: [
           if (_recoveryHint)
             const Material(
@@ -708,7 +792,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
               },
             ),
           ),
-          if (showChips)
+          if (showChips && !_needsAuth)
             SizedBox(
               height: 44,
               child: ListView.separated(
@@ -719,7 +803,9 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                 itemBuilder: (context, i) {
                   final chip = _chips[i];
                   return ActionChip(
-                    label: Text(chip.label),
+                    label: Text(chip.label, style: const TextStyle(fontSize: 13)),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x22000000)),
                     onPressed: _busy ? null : () => _sendText(chip.text),
                   );
                 },
@@ -732,8 +818,9 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
             ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+            child: Container(
+              color: _composerBg,
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Row(
                 children: [
                   Expanded(
@@ -744,7 +831,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _send(),
                       decoration: InputDecoration(
-                        hintText: 'Menú, precio, horario…',
+                        hintText: 'Escríbeme como en WhatsApp…',
                         filled: true,
                         fillColor: Colors.white,
                         border: OutlineInputBorder(
@@ -762,17 +849,19 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                   FilledButton(
                     onPressed: _busy ? null : _send,
                     style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.accent,
+                      backgroundColor: _send,
+                      foregroundColor: Colors.white,
                       shape: const CircleBorder(),
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(12),
                     ),
-                    child: const Icon(Icons.send_rounded),
+                    child: const Icon(Icons.send_rounded, size: 20),
                   ),
                 ],
               ),
             ),
           ),
         ],
+      ),
       ),
     );
   }

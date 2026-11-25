@@ -1,0 +1,126 @@
+{
+  "at": "2026-11-25T20:55:17.582Z",
+  "passed": 12,
+  "total": 12,
+  "scenarios": [
+    {
+      "id": 1,
+      "ok": true,
+      "detail": {
+        "url": "https://elmenuxfa.com/v/qa-chatbot-2026-pizzas-el-trueno?chatbot=1&h=FPyTzcAsw-4IjCi34cgXZiki",
+        "greet": "¡Hola! 👋 Ya tengo tu solicitud de *Pizzas El Trueno*. Vamos con 2 Margarita grandes, Coca-Cola. ¿Me confirmas tu dirección para el delivery?"
+      }
+    },
+    {
+      "id": 2,
+      "ok": true,
+      "detail": {
+        "excerpt": "quiero dos margaritas grandes"
+      }
+    },
+    {
+      "id": 3,
+      "ok": true,
+      "detail": {
+        "discUrl": "https://elmenuxfa.com/asistente?ref=wa#h=PXd1OYvQHk4h2QW-91ey6hz8"
+      }
+    },
+    {
+      "id": 4,
+      "ok": true,
+      "detail": {
+        "greet": "¡Hola! 👋 Ya tengo tu solicitud de *Pizzas El Trueno*. Vamos con 2 Margarita grandes, Coca-Cola. ¿Me confirmas tu dirección para el delivery?"
+      }
+    },
+    {
+      "id": 5,
+      "ok": true,
+      "detail": {
+        "bizUrl": "https://app.elmenuxfa.com/asistente?h=NGFcwqdbOtohKRM_A3dulIln"
+      }
+    },
+    {
+      "id": 6,
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "record": {
+          "code": "NGFcwqdbOtohKRM_A3dulIln",
+          "destination": "business_assistant",
+          "payload": {
+            "profile": "business",
+            "comercioId": null,
+            "slug": null,
+            "summary": "cambiar precio Margarita",
+            "pendingOperation": "cambiar precio Margarita",
+            "conversationHint": null,
+            "transcriptExcerpt": null,
+            "businessNameDraft": null,
+            "query": null,
+            "items": null,
+            "openQuestions": null,
+            "source": null
+          },
+          "expiresAtMs": 1795640416487,
+          "consumedAtMs": null
+        }
+      }
+    },
+    {
+      "id": 7,
+      "ok": true,
+      "detail": {
+        "note": "UI skips handoff when ?h absent"
+      }
+    },
+    {
+      "id": 8,
+      "ok": true,
+      "detail": {
+        "expired": {
+          "ok": false,
+          "error": "expired"
+        },
+        "mismatch": {
+          "ok": false,
+          "error": "destination_mismatch"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "ok": true,
+      "detail": {
+        "other": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": 10,
+      "ok": true,
+      "detail": {
+        "note": "human_handling skips Gemini"
+      }
+    },
+    {
+      "id": 11,
+      "ok": true,
+      "detail": {
+        "note": "return restores AI"
+      }
+    },
+    {
+      "id": 12,
+      "ok": true,
+      "detail": {
+        "again": {
+          "ok": false,
+          "error": "consumed"
+        }
+      }
+    }
+  ],
+  "previewSmoke": {
+    "ok": true
+  },
+  "go": true
+}

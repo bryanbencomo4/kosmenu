@@ -1,5 +1,5 @@
 /**
- * Opaque one-time handoff codes: WhatsApp Master → web assistants.
+ * Opaque one-time handoff codes: WhatsApp / inbox → web assistants.
  * Never put phones/credentials in the URL. Payload is non-sensitive context only.
  * Default store: memory (tests). Supabase store for Preview/prod when table exists.
  */
@@ -8,23 +8,24 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import {
+  sanitizeConversationContext,
+  type ConversationContext,
+} from './conversation-context';
+
 export const WA_HANDOFF_TTL_MS = 5 * 60 * 1000;
+/** Commerce chatbot handoffs keep context a bit longer (operator → customer). */
+export const WA_HANDOFF_COMMERCE_TTL_MS = 15 * 60 * 1000;
 export const WA_HANDOFF_ALLOWED_DESTINATIONS = [
   'consumer_discovery',
   'business_assistant',
+  'commerce_chatbot',
 ] as const;
 
 export type WaHandoffDestination = (typeof WA_HANDOFF_ALLOWED_DESTINATIONS)[number];
 
-export type WaHandoffPayload = {
-  intent?: string | null;
-  query?: string | null;
-  zone?: string | null;
-  pendingOperation?: string | null;
-  candidateComercioId?: string | null;
-  businessNameDraft?: string | null;
-  conversationHint?: string | null;
-};
+/** Handoff payload = shared conversation context (sanitized). */
+export type WaHandoffPayload = ConversationContext;
 
 export type WaHandoffRecord = {
   code: string;
@@ -90,20 +91,7 @@ export function generateWaHandoffCode(): string {
 }
 
 function sanitizePayload(payload: WaHandoffPayload): WaHandoffPayload {
-  const clip = (v: string | null | undefined, n: number) => {
-    const s = (v ?? '').trim();
-    if (!s) return null;
-    return s.slice(0, n);
-  };
-  return {
-    intent: clip(payload.intent, 64),
-    query: clip(payload.query, 120),
-    zone: clip(payload.zone, 80),
-    pendingOperation: clip(payload.pendingOperation, 80),
-    candidateComercioId: clip(payload.candidateComercioId, 64),
-    businessNameDraft: clip(payload.businessNameDraft, 80),
-    conversationHint: clip(payload.conversationHint, 200),
-  };
+  return sanitizeConversationContext(payload);
 }
 
 export function buildWaHandoffUrl(params: {
@@ -111,6 +99,9 @@ export function buildWaHandoffUrl(params: {
   code: string;
   consumerBaseUrl: string;
   businessAssistantBaseUrl: string;
+  /** Public site origin for /v/{slug}?chatbot=1 (commerce handoff). */
+  publicSiteBaseUrl?: string;
+  slug?: string | null;
 }): string {
   const code = encodeURIComponent(params.code);
   if (params.destination === 'consumer_discovery') {
@@ -119,6 +110,18 @@ export function buildWaHandoffUrl(params: {
       : params.consumerBaseUrl.replace(/\/$/, '');
     // Prefer hash fragment for the opaque code so referrers/logs/previews leak less.
     return `${base}?ref=wa#h=${code}`;
+  }
+  if (params.destination === 'commerce_chatbot') {
+    const site = (params.publicSiteBaseUrl || 'https://elmenuxfa.com').replace(
+      /\/$/,
+      '',
+    );
+    const slug = (params.slug || '').trim().replace(/^\/+|\/+$/g, '');
+    if (!slug) {
+      // Fail soft: still return a code-bearing URL on public root (redeem will fail closed without comercio).
+      return `${site}/?chatbot=1&h=${code}`;
+    }
+    return `${site}/v/${encodeURIComponent(slug)}?chatbot=1&h=${code}`;
   }
   // Flutter PathUrlStrategy strips URL fragments on boot — use query for merchant app.
   const base = params.businessAssistantBaseUrl.replace(/\/$/, '');

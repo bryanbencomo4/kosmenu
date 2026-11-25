@@ -103,6 +103,13 @@ export async function runCommercialSpecialist(params: {
         pendingOperation: payload.pendingOperation ?? null,
         businessNameDraft: payload.businessNameDraft ?? draft.businessName,
         conversationHint: payload.conversationHint ?? null,
+        summary:
+          payload.conversationHint ||
+          payload.pendingOperation ||
+          `Solicitud comercial: ${payload.intent}`,
+        transcriptExcerpt: params.text.slice(0, 400),
+        source: 'wa_platform',
+        profile: 'business',
       },
     });
     return handoff;

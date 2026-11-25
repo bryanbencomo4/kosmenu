@@ -334,6 +334,75 @@ export async function POST(
     return NextResponse.json({ ok: true, reactions: result.reactions });
   }
 
+  if (action === 'issue_commerce_handoff') {
+    const { issueCommerceChatbotHandoff } = await import(
+      '../_lib/issue-commerce-handoff'
+    );
+    let messages: Array<{ role?: string; body?: string | null }> = [];
+    if (isSupervisionMemoryEnabled()) {
+      messages = memoryListMessages(conversationId, 0).map((m) => ({
+        role: String((m as { role?: string }).role || ''),
+        body: String((m as { body?: string }).body || ''),
+      }));
+    } else {
+      const { data: rows } = await sb!
+        .from('chat_messages')
+        .select('role,body')
+        .eq('conversation_id', conversationId)
+        .order('seq', { ascending: true })
+        .limit(40);
+      messages = (rows || []).map((r) => ({
+        role: String(r.role || ''),
+        body: String(r.body || ''),
+      }));
+    }
+    let slug: string | null = null;
+    let businessName: string | null = null;
+    if (!isSupervisionMemoryEnabled()) {
+      const { data: shop } = await sb!
+        .from('comercios')
+        .select('slug,nombre')
+        .eq('id', access.comercioId)
+        .maybeSingle();
+      slug = shop?.slug ? String(shop.slug) : null;
+      businessName = shop?.nombre ? String(shop.nombre) : null;
+    }
+    const issued = await issueCommerceChatbotHandoff({
+      comercioId: access.comercioId,
+      conversationId,
+      slug,
+      businessName,
+      messages,
+    });
+    if (!issued.ok) {
+      return NextResponse.json({ error: issued.error }, { status: 503 });
+    }
+    // Staff-visible system note (does not auto-send WhatsApp — operator copies/sends).
+    await persistAssistantOrStaffMessage({
+      conversationId,
+      comercioId: access.comercioId,
+      role: 'system',
+      text: `Enlace contextual al asistente generado (válido unos minutos).`,
+      senderUserId: access.user.id,
+      clientMessageId: `sys_handoff_${conversationId}_${issued.code.slice(0, 8)}`,
+      payload: {
+        commerceHandoff: {
+          url: issued.url,
+          expiresAtMs: issued.expiresAtMs,
+          summary: issued.payload.summary,
+        },
+      },
+    });
+    return NextResponse.json({
+      ok: true,
+      url: issued.url,
+      expiresAtMs: issued.expiresAtMs,
+      summary: issued.payload.summary,
+      // Explicit: QA must not auto-blast WhatsApp; operator sends via existing channel.
+      whatsappSent: false,
+    });
+  }
+
   if (action === 'message') {
     const text = String(body.text || '').trim();
     const payload =

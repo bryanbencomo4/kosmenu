@@ -388,6 +388,7 @@ function ConversationDetailInner({
     if (!token || !conversationId) return;
     const isMessage = action === 'message';
     const isReact = action === 'react';
+    const isHandoff = action === 'issue_commerce_handoff';
     // Keep take/return/close gated; message/react stay responsive (WhatsApp-like).
     if ((!isMessage && !isReact) || !options?.optimistic) setBusy(true);
     setError(null);
@@ -412,6 +413,16 @@ function ConversationDetailInner({
         )}`;
       }
       return;
+    }
+    if (isHandoff && typeof data.url === 'string' && data.url) {
+      try {
+        await navigator.clipboard.writeText(data.url);
+      } catch {
+        /* clipboard may be blocked */
+      }
+      setError(
+        `Enlace del asistente listo (copiado). Envíalo al cliente por WhatsApp: ${data.url}`,
+      );
     }
     if (isMessage) {
       setDraft('');
@@ -777,6 +788,13 @@ function ConversationDetailInner({
                   },
                 ]
               : []),
+            {
+              id: 'commerce-handoff',
+              label: 'Enviar enlace al asistente',
+              disabled: busy,
+              testId: 'issue-commerce-handoff-menu',
+              onSelect: () => void act('issue_commerce_handoff'),
+            },
             {
               id: 'refresh',
               label: 'Actualizar',

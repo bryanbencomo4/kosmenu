@@ -561,12 +561,34 @@ export function DiscoveryAssistantView({
           });
           const json = (await res.json()) as {
             ok?: boolean;
-            payload?: { query?: string | null; zone?: string | null };
+            payload?: {
+              query?: string | null;
+              zone?: string | null;
+              summary?: string | null;
+              conversationHint?: string | null;
+              transcriptExcerpt?: string | null;
+            };
           };
           if (res.ok && json.ok && json.payload) {
             q = json.payload.query || q;
             zone = json.payload.zone || zone;
             (window as unknown as { __waHandoffCode?: string }).__waHandoffCode = code;
+            try {
+              const { saveDiscoveryHandoffContext } = await import(
+                '../_lib/conversation-handoff-client'
+              );
+              saveDiscoveryHandoffContext({
+                profile: 'consumer_discovery',
+                query: q || null,
+                zone: zone || null,
+                summary: json.payload.summary || null,
+                conversationHint: json.payload.conversationHint || null,
+                transcriptExcerpt: json.payload.transcriptExcerpt || null,
+                source: 'wa_platform',
+              });
+            } catch {
+              /* continuity best-effort */
+            }
           }
         } catch {
           /* keep seed params only */

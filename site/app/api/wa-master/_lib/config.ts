@@ -28,6 +28,8 @@ export type WaMasterConfig = {
   businessManageUrl: string;
   /** Next-hosted business assistant (Preview path). Flutter app host redirects later. */
   businessAssistantUrl: string;
+  /** Public site origin for commerce chatbot handoff URLs (/v/{slug}?chatbot=1). */
+  publicSiteUrl: string;
 };
 
 function envBool(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
@@ -84,5 +86,6 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
       'PLATFORM_WA_BUSINESS_ASSISTANT_URL',
       'https://app.elmenuxfa.com/asistente',
     ),
+    publicSiteUrl: envStr(env, 'NEXT_PUBLIC_SITE_URL', 'https://elmenuxfa.com'),
   };
 }
