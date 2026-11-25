@@ -841,12 +841,20 @@ class _AuthScreenState extends State<AuthScreen> {
         normalized.contains('504');
   }
 
-  String _translateAuthError(String message) {
+  String _translateAuthError(String message, {String? statusCode}) {
     final normalized = message.trim().toLowerCase();
-    if (normalized.isEmpty) {
+    final code = (statusCode ?? '').trim().toLowerCase();
+    if (normalized.isEmpty && code.isEmpty) {
       return 'No se pudo completar la solicitud. Intentalo nuevamente.';
     }
-    if (normalized.contains('invalid login credentials')) {
+    // GoTrue often returns error_code "invalid_credentials" (or empty msg + 400)
+    // instead of the older "Invalid login credentials" sentence.
+    final looksInvalidCredentials =
+        normalized.contains('invalid login credentials') ||
+        normalized.contains('invalid_credentials') ||
+        code == 'invalid_credentials' ||
+        ((normalized.isEmpty || normalized == 'null') && code == '400');
+    if (looksInvalidCredentials) {
       return 'Correo o contraseña incorrectos.';
     }
     if (normalized.contains('invalid email')) {
@@ -927,7 +935,13 @@ class _AuthScreenState extends State<AuthScreen> {
             await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
             continue;
           }
-          _showSnack(_translateAuthError(error.message), isError: true);
+          _showSnack(
+            _translateAuthError(
+              error.message,
+              statusCode: error.statusCode,
+            ),
+            isError: true,
+          );
           return;
         } catch (error) {
           final canRetry =

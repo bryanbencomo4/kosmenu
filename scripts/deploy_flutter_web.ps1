@@ -168,11 +168,16 @@ try {
     throw "flutter build web failed with exit code $LASTEXITCODE"
   }
 
-  # Guardrail: production Supabase ref must be present in the compiled bundle.
+  # Guardrail: production Supabase ref + full anon key must be present in the
+  # compiled bundle. A stale/wrong dart-define previously shipped "Invalid API
+  # key" logins while the account itself was fine.
   $mainJs = Join-Path $buildOutput 'main.dart.js'
   $mainJsText = Get-Content -Raw -Path $mainJs
   if ($mainJsText -notmatch [regex]::Escape('qqhberaayhohxlbbhdyi')) {
     throw 'Build guard failed: production Supabase project ref missing from main.dart.js (dart-defines not applied?)'
+  }
+  if ($mainJsText -notmatch [regex]::Escape($supabaseAnonKey)) {
+    throw 'Build guard failed: SUPABASE_ANON_KEY missing from main.dart.js (dart-defines not applied?)'
   }
   if ($mainJsText -match 'service_role') {
     throw 'Build guard failed: service_role leaked into main.dart.js'
