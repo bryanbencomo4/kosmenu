@@ -1,0 +1,266 @@
+{
+  "at": "2026-11-25T19:57:26.202Z",
+  "previewHost": "gsfxqzvmyzjjgpigrste.supabase.co",
+  "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "surfaces": {
+    "nextAssistantPage": 200,
+    "flutterWeb": 200,
+    "flutterUrl": "http://127.0.0.1:5000/asistente",
+    "nextUrl": "http://127.0.0.1:3024/asistente-negocio"
+  },
+  "ops": [
+    {
+      "name": "set_price",
+      "userText": "Cambia el precio de Campesina a 7.8",
+      "proposed": true,
+      "assistant": "¿Lo dejamos así? 🤞\n\n*Campesina*: 6.8 → *7.8* USD\n\nToca *Confirmar* y listo ✅",
+      "applyText": "¡Hecho! ✅ *Campesina* quedó en *7.8* USD\n\n(ref ba_mwwjp70t_3m6i2n)",
+      "db": {
+        "persisted": true,
+        "precio": 7.8
+      },
+      "approved": true
+    },
+    {
+      "name": "set_availability_off",
+      "userText": "Marca como agotada Campesina",
+      "proposed": true,
+      "assistant": "¿Marcamos *Campesina* como agotado? ⏸️\n\nConfirma y lo ocultamos del menú.",
+      "applyText": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwjp8ej_4eonxk)",
+      "db": {
+        "persisted": true
+      },
+      "approved": true
+    },
+    {
+      "name": "set_availability_on",
+      "userText": "Activa Campesina",
+      "proposed": true,
+      "assistant": "¿Activamos *Campesina* otra vez? ✅\n\nConfirma y queda disponible.",
+      "applyText": "¡Listo! ✅ *Campesina* otra vez disponible.\n\n(ref ba_mwwjp9oh_2dwzsx)",
+      "db": {
+        "persisted": true
+      },
+      "approved": true
+    },
+    {
+      "name": "set_product_options",
+      "userText": "Configura tamaños: Personal 8, Familiar 15 en Campesina",
+      "proposed": true,
+      "assistant": "¿Guardamos estas variaciones en *Campesina*? 🧩\n\nSe valida con el mismo parser del menú público.",
+      "applyText": "Opciones de *Campesina* actualizadas 🧩 (2 tamaños)\n\n(ref ba_mwwjpb1w_k7c5p0)",
+      "db": {
+        "persisted": true,
+        "flutterShape": true
+      },
+      "approved": true
+    },
+    {
+      "name": "create_category",
+      "userText": "Crea categoría QA Cat a6d6",
+      "proposed": true,
+      "assistant": "¿Creamos la categoría *QA Cat a6d6*? 📂\n\nConfirma y la agrego.",
+      "applyText": "Categoría creada ✅ *QA Cat a6d6*\n\n(ref ba_mwwjpcce_v918u8)",
+      "db": {
+        "persisted": true,
+        "id": "a54641c4-e5bf-422e-8f26-da32b338cae3"
+      },
+      "approved": true
+    },
+    {
+      "name": "create_product",
+      "userText": "Crea producto QA Plato be59 a 4.5",
+      "proposed": true,
+      "assistant": "¿Creamos este producto? 🍽️\n\n• *QA be59*\n• Precio: *4.5* USD\n• Categoría: *PIZZAS*\n\nConfirma y lo guardo ✅",
+      "applyText": "¡Producto creado! ✅ *QA be59* a *4.5* USD\n\n(ref ba_mwwjpdn6_845kj5)",
+      "db": {
+        "persisted": false,
+        "product": null
+      },
+      "approved": false,
+      "falseConfirm": true
+    },
+    {
+      "name": "set_hours",
+      "userText": "Cambia el horario a Lun-Vie 10:00-20:00",
+      "proposed": true,
+      "assistant": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 10:00–20:00\n\n• Lunes: 10:00–20:00\n• Martes: 10:00–20:00\n• Miércoles: 10:00–20:00\n• Jueves: 10:00–20:00\n• Viernes: 10:00–20:00\n• Sábado: ",
+      "applyText": "¡Guardado! 🕒 Horario de *QA_CHATBOT_2026 pizzas el trueno* actualizado (Lun–Vie 10:00–20:00).\n\n(ref ba_mwwjpetn_o112ar)",
+      "db": {
+        "persisted": true,
+        "flutterDays": true
+      },
+      "approved": true
+    },
+    {
+      "name": "set_en_linea_on",
+      "userText": "Abre el negocio",
+      "proposed": true,
+      "assistant": "¿Abrimos *QA_CHATBOT_2026 pizzas el trueno*? 🟢\n\nConfirma y queda en línea.",
+      "applyText": "¡Abierto! 🟢 *QA_CHATBOT_2026 pizzas el trueno* ya está en línea.\n\n(ref ba_mwwjpfwv_5m2sx9)",
+      "db": {
+        "persisted": true
+      },
+      "approved": true
+    },
+    {
+      "name": "set_en_linea_off",
+      "userText": "Cierra el negocio",
+      "proposed": true,
+      "assistant": "¿Cerramos *QA_CHATBOT_2026 pizzas el trueno* por ahora? 🔴\n\nConfirma y queda fuera de línea.",
+      "applyText": "Cerrado por ahora 🔴 *QA_CHATBOT_2026 pizzas el trueno* fuera de línea.\n\n(ref ba_mwwjpgzi_dxxx37)",
+      "db": {
+        "persisted": true
+      },
+      "approved": true
+    },
+    {
+      "name": "set_delivery_zones",
+      "userText": "Activa delivery con zonas tarifa 2.5",
+      "proposed": true,
+      "assistant": "¿Activamos el delivery (zones) con base *2.5*? 🛵\n\nSe valida con DeliveryConfig.validate antes de guardar.",
+      "applyText": "Delivery activo 🛵 (zones) · 3 intervalos\n\n(ref ba_mwwjpi45_smsf1n)",
+      "db": {
+        "persisted": true,
+        "pricing_type": "zones",
+        "zones": 3
+      },
+      "approved": true
+    },
+    {
+      "name": "set_delivery_polygons",
+      "userText": "Configura polígonos de delivery tarifa 3",
+      "proposed": true,
+      "assistant": "¿Activamos el delivery (area_zones) con base *3*? 🛵\n\nSe valida con DeliveryConfig.validate antes de guardar.",
+      "applyText": "Delivery activo 🛵 (area_zones) · 2 polígonos\n\n(ref ba_mwwjpjab_d4pnda)",
+      "db": {
+        "persisted": true,
+        "areas": 2
+      },
+      "approved": true
+    },
+    {
+      "name": "sync_payment",
+      "userText": "Agrega zelle pagos-qa@elmenuxfa.test",
+      "proposed": true,
+      "assistant": "¿Agregamos el método *Pago digital: Zelle*? 💳\n\nSe sincroniza como en el panel (sin secretos). Confirma para guardar.",
+      "applyText": "Métodos de pago sincronizados 💳 (3 activos)\n\n(ref ba_mwwjpkof_oh088i)",
+      "db": {
+        "persisted": true,
+        "flutterTipo": true,
+        "tipo": "transferencia__usd__1"
+      },
+      "approved": true
+    },
+    {
+      "name": "set_tasa",
+      "userText": "Pon la tasa de cambio en 42.5",
+      "proposed": true,
+      "assistant": "¿Actualizamos la tasa de *—* → *42.5* (modo manual)? 💱\n\nConfirma y la guardo.",
+      "applyText": "Tasa actualizada 💱 *42.5* (manual)\n\n(ref ba_mwwjplo6_pd93s7)",
+      "db": {
+        "persisted": true,
+        "value": 42.5,
+        "mode": "manual"
+      },
+      "approved": true
+    },
+    {
+      "name": "create_promo",
+      "userText": "Crea promoción QA Acc 9867",
+      "proposed": false,
+      "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo.",
+      "result": "no_proposal"
+    },
+    {
+      "name": "invite_staff",
+      "userText": "Invita qa-acc-41bf@elmenuxfa.test como caja",
+      "proposed": false,
+      "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo.",
+      "result": "no_proposal"
+    },
+    {
+      "name": "revoke_staff",
+      "userText": "Revoca acceso de qa-acc-41bf@elmenuxfa.test",
+      "proposed": false,
+      "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo.",
+      "result": "no_proposal"
+    }
+  ],
+  "safety": {
+    "cancelNoWrite": {
+      "proposed": true,
+      "cancelled": true,
+      "precioUnchanged": true,
+      "persistedFalsely": false
+    },
+    "ambiguousClarifies": {
+      "proposed": false,
+      "asksClarification": true,
+      "assistant": "No encontré ese producto en *QA_CHATBOT_2026 pizzas el trueno* 😅\n\nDime el nombre tal cual o escribe “ver menú”."
+    },
+    "isolation": {
+      "decoyUnchanged": true,
+      "proposalOnDecoy": false,
+      "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo.",
+      "safe": true
+    }
+  },
+  "flutterReadable": {
+    "horariosDays": true,
+    "deliveryConfig": true,
+    "opcionesMenu": true,
+    "en_linea": false
+  },
+  "summary": {
+    "approvedCount": 12,
+    "failedCount": 4,
+    "approved": [
+      "set_price",
+      "set_availability_off",
+      "set_availability_on",
+      "set_product_options",
+      "create_category",
+      "set_hours",
+      "set_en_linea_on",
+      "set_en_linea_off",
+      "set_delivery_zones",
+      "set_delivery_polygons",
+      "sync_payment",
+      "set_tasa"
+    ],
+    "failed": [
+      {
+        "name": "create_product",
+        "reason": {
+          "persisted": false,
+          "product": null
+        },
+        "falseConfirm": true
+      },
+      {
+        "name": "create_promo",
+        "reason": "no_proposal",
+        "falseConfirm": false
+      },
+      {
+        "name": "invite_staff",
+        "reason": "no_proposal",
+        "falseConfirm": false
+      },
+      {
+        "name": "revoke_staff",
+        "reason": "no_proposal",
+        "falseConfirm": false
+      }
+    ],
+    "cancelSafe": true,
+    "ambiguousOk": true,
+    "isolationOk": true,
+    "falseConfirms": 1
+  },
+  "verdict": {
+    "go": false,
+    "note": "Core ops incomplete — see failed list"
+  }
+}

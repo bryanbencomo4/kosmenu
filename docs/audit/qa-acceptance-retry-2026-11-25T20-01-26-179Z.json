@@ -1,0 +1,64 @@
+{
+  "at": "2026-11-25T20:01:26.172Z",
+  "create_product_recheck": {
+    "note": "Name strip drops Plato → QA <hex>; product DID persist",
+    "matches": [
+      {
+        "id": "3952c3fa-c910-41ac-949d-18801e9a4672",
+        "nombre": "QA_CHATBOT_2026 Hamburguesa",
+        "precio": 8
+      },
+      {
+        "id": "6aac7ce0-2b44-426e-83c0-2eb9513508b6",
+        "nombre": "QA be59",
+        "precio": 4.5
+      }
+    ],
+    "persisted": true
+  },
+  "ops": [
+    {
+      "name": "create_promo",
+      "text": "Crea promoción QA Acc 38e4",
+      "assistant": "¿Creamos la promoción *promoción QA Acc 38e4*? 🏷️\n\nQueda como regla de venta activa en carrito. Confirma para guardarla.",
+      "proposed": true,
+      "apply": "Promoción creada 🏷️ *promoción QA Acc 38e4*\n\n(ref ba_mwwjtzdo_ow18ai)",
+      "db": {
+        "persisted": true,
+        "rule": {
+          "id": "19d8f85d-2f24-487c-a430-32369f93d462",
+          "name": "promoción QA Acc 38e4"
+        }
+      },
+      "approved": true
+    },
+    {
+      "name": "invite_staff",
+      "text": "Invita qa-acc-1acb@elmenuxfa.test como caja",
+      "assistant": "¿Invitamos a *qa-acc-1acb@elmenuxfa.test* como *caja*? 👥\n\nRecibirá acceso propio — no se comparte contraseña.",
+      "proposed": true,
+      "apply": "Invitación enviada 👥 *qa-acc-1acb@elmenuxfa.test* como *caja*\n\n(ref ba_mwwju3vq_jp0hah)",
+      "db": {
+        "persisted": true,
+        "invite": {
+          "id": "3e9eaf8e-fe06-4adf-b5d9-c3e48da0cdab",
+          "email": "qa-acc-1acb@elmenuxfa.test",
+          "status": "pending"
+        }
+      },
+      "approved": true
+    },
+    {
+      "name": "revoke_staff",
+      "text": "Revoca acceso de qa-acc-1acb@elmenuxfa.test",
+      "assistant": "¿Revocamos el acceso de *qa-acc-1acb@elmenuxfa.test* (*caja*)? 👥",
+      "proposed": true,
+      "apply": "Acceso revocado 👥\n\n(ref ba_mwwju8il_y6o1gp)",
+      "db": {
+        "persisted": true,
+        "status": "revoked"
+      },
+      "approved": true
+    }
+  ]
+}

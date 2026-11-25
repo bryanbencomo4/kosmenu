@@ -64,7 +64,7 @@ class _Proposal {
 }
 
 class _ChatMsg {
-  _ChatMsg({
+  const _ChatMsg({
     required this.role,
     required this.text,
     this.proposal,
