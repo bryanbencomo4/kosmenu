@@ -1,0 +1,196 @@
+{
+  "at": "2026-11-25T19:24:51.060Z",
+  "ref": "gsfxqzvmyzjjgpigrste",
+  "base": "http://127.0.0.1:3024",
+  "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "decoyId": "28721f02-f9b8-4ce8-83b8-76a437e72201",
+  "ops": [
+    {
+      "name": "set_price",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Lo dejamos así? 🤞\n\n*Campesina*: 5.8 → *6.8* USD\n\nToca *Confirmar* y listo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Hecho! ✅ *Campesina* quedó en *6.8* USD\n\n(ref ba_mwwij8pm_v37sc0)",
+        "ok": true
+      },
+      "db": {
+        "before": 5.8,
+        "after": 6.8,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_off",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwij9mn_ih0dos)",
+        "ok": true
+      },
+      "db": {
+        "disponible": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_on",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Listo! ✅ *Campesina* otra vez disponible.\n\n(ref ba_mwwijamt_fp4bw3)",
+        "ok": true
+      },
+      "db": {
+        "disponible": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_hours",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–21:00\n• Jueves: 11:00–21:00\n• Viernes: 11:00–21:00\n• Sábado: cerrado\n• Domingo: cerrado\n\nConfirma y lo guardo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Guardado! 🕒 Horario de *QA_CHATBOT_2026 pizzas el trueno* actualizado (Lun–Vie 11:00–21:00).\n\n(ref ba_mwwijbdh_o8sxup)",
+        "ok": true
+      },
+      "db": {
+        "summary": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–2",
+        "mondayOpen": true,
+        "mondayRange": {
+          "end": "21:00",
+          "start": "11:00"
+        },
+        "persisted": true,
+        "flutterCompatible": true
+      }
+    },
+    {
+      "name": "set_en_linea_true",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Abierto! 🟢 *QA_CHATBOT_2026 pizzas el trueno* ya está en línea.\n\n(ref ba_mwwijc5b_kjcdl0)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_en_linea_false",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Cerrado por ahora 🔴 *QA_CHATBOT_2026 pizzas el trueno* fuera de línea.\n\n(ref ba_mwwijcv6_8pmmn4)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "create_category",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Creamos la categoría *Postres QA*? 📂\n\nConfirma y la agrego."
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Categoría creada ✅ *Postres QA*\n\n(ref ba_mwwijdup_1rasgd)",
+        "ok": true
+      },
+      "db": {
+        "id": "b23da8d3-c98b-4376-8a7a-5e3c5f28842f",
+        "persisted": true
+      }
+    },
+    {
+      "name": "create_product",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    },
+    {
+      "name": "set_tasa",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    },
+    {
+      "name": "upsert_payment_method",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    },
+    {
+      "name": "set_delivery_config",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    },
+    {
+      "name": "create_promo",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    },
+    {
+      "name": "set_order_status",
+      "propose": {
+        "hadProposal": false,
+        "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+      },
+      "blocked": "no_proposal"
+    }
+  ],
+  "isolation": {
+    "decoyPriceBefore": 99,
+    "decoyPriceAfter": 99,
+    "unchanged": true,
+    "proposalAppeared": false,
+    "hamburguesaUntouched": true,
+    "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo.",
+    "safe": true
+  },
+  "missingTools": [
+    {
+      "prompt": "crea una variación de tamaño para la margarita",
+      "hadProposal": false,
+      "assistant": "Uy, vas muy rápido 😅 Espera un momentito y me escribes de nuevo."
+    }
+  ],
+  "scoreHints": {}
+}

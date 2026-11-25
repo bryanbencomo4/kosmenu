@@ -1,0 +1,120 @@
+{
+  "at": "2026-11-25T19:24:31.003Z",
+  "ref": "gsfxqzvmyzjjgpigrste",
+  "base": "http://127.0.0.1:3024",
+  "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "ops": [
+    {
+      "name": "upsert_promo_rule",
+      "propose": true,
+      "apply": "Promoción creada 🏷️ *promoción QA Promo f476*\n\n(ref ba_mwwiit0q_bzvygn)",
+      "db": {
+        "persisted": true,
+        "rule": {
+          "id": "15318a47-fde4-4b53-9063-41a2f970b9f0",
+          "name": "promoción QA Promo f476",
+          "enabled": true,
+          "trigger_type": "cart",
+          "surface": "cart"
+        }
+      },
+      "toggleDelete": {
+        "togErr": null,
+        "delErr": null
+      }
+    },
+    {
+      "name": "set_product_options",
+      "propose": true,
+      "apply": "Opciones de *Campesina* actualizadas 🧩 (2 tamaños)\n\n(ref ba_mwwiiugr_uy1czr)",
+      "db": {
+        "persisted": true,
+        "tamanos": [
+          {
+            "id": "sz_1",
+            "label": "Personal",
+            "precio": 8
+          },
+          {
+            "id": "sz_2",
+            "label": "Familiar",
+            "precio": 15
+          }
+        ],
+        "flutterShape": true
+      }
+    },
+    {
+      "name": "set_delivery_zones",
+      "propose": true,
+      "apply": "Delivery activo 🛵 (zones) · 3 intervalos\n\n(ref ba_mwwiivhi_8nwwh3)",
+      "db": {
+        "enabled": true,
+        "pricing_type": "zones",
+        "zones": 3,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_delivery_polygons",
+      "propose": true,
+      "apply": "Delivery activo 🛵 (area_zones) · 2 polígonos\n\n(ref ba_mwwiiwfc_x67i7s)",
+      "db": {
+        "pricing_type": "area_zones",
+        "areas": 2,
+        "persisted": true
+      }
+    },
+    {
+      "name": "sync_payment_methods",
+      "propose": true,
+      "apply": "Métodos de pago sincronizados 💳 (2 activos)\n\n(ref ba_mwwiixnv_kpesuc)",
+      "db": {
+        "persisted": true,
+        "tipo": "transferencia__usd__1",
+        "flutterTipo": true,
+        "count": 2
+      }
+    },
+    {
+      "name": "invite_staff",
+      "propose": true,
+      "email": "qa-staff-d09d@elmenuxfa.test",
+      "apply": "Invitación enviada 👥 *qa-staff-d09d@elmenuxfa.test* como *caja*\n\n(ref ba_mwwiiyr4_mtodn0)",
+      "db": {
+        "persisted": true,
+        "invite": {
+          "id": "c2216d92-816f-47c7-a465-c7e00db78b06",
+          "role": "caja",
+          "status": "pending"
+        }
+      },
+      "revokePropose": true,
+      "revokeApply": "Acceso revocado 👥\n\n(ref ba_mwwiizqf_60inig)",
+      "revokeDb": {
+        "status": "revoked",
+        "persisted": true
+      }
+    },
+    {
+      "name": "regression_set_price",
+      "propose": true,
+      "db": {
+        "persisted": true,
+        "precio": 5.8
+      }
+    }
+  ],
+  "flutterContract": {
+    "horariosDays": false,
+    "deliveryConfig": true,
+    "opcionesMenu": true,
+    "metodosPagoTipo": true,
+    "upsellSettings": true
+  },
+  "score": {
+    "passed": 7,
+    "total": 7,
+    "pct": 100
+  }
+}

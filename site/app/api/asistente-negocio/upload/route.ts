@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
 
 import { appCorsPreflight, withAppCors } from '../../_lib/app-cors';
+import { ensureImageVariants } from '../../_lib/image-variants';
 import { getUserFromBearerRequest } from '../../_lib/supabase-user-auth';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import { isBusinessAssistantApiEnabled } from '../../../_lib/business-assistant';
@@ -86,10 +87,30 @@ export async function POST(req: Request) {
   const publicUrl = pub?.publicUrl;
   if (!publicUrl) return json(req, { ok: false, error: 'public_url_missing' }, 500);
 
+  // Same as Flutter ProductImageVariantsClient.ensureInBackground — non-blocking.
+  let variants: { ok: boolean; generated?: string[]; error?: string } | null = null;
+  try {
+    const result = await ensureImageVariants({ imageUrl: publicUrl });
+    variants = {
+      ok: result.ok,
+      generated: result.ok ? result.generated : undefined,
+      error: result.ok ? undefined : result.error,
+    };
+  } catch (err) {
+    variants = {
+      ok: false,
+      error: err instanceof Error ? err.message : 'variants_failed',
+    };
+  }
+
+  // AI generation (generate-product-images-ai) stays on product attach when
+  // the merchant asks for it — requires edge function + credits; not auto-fired on upload.
+
   return json(req, {
     ok: true,
     imageUrl: publicUrl,
     path,
     bucket: BUCKET,
+    variants,
   });
 }

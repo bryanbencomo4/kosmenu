@@ -375,13 +375,22 @@ export async function proposeUpsertPayment(
 ): Promise<BusinessToolResult> {
   if (!canManageSettings(shop)) return { text: denied('gestionar pagos', shop) };
   const t = userText.toLowerCase();
-  const currency = shop.moneda || 'USD';
+  const currency = (shop.moneda || 'USD').toLowerCase();
+  const sb = getServiceSupabaseClient();
+  const { data: existing } = await sb
+    .from('metodos_pago')
+    .select('id,tipo,nombre,descripcion,detalles')
+    .eq('comercio_id', shop.comercioId)
+    .limit(40);
+
+  // Flutter BusinessSetupScreen._syncPaymentMethods tipo encoding.
   let nombre = 'Pago digital';
   let tipo = `transferencia__${currency}__1`;
   let detalles: string | null = null;
+  let descripcion: string | null = 'Cuenta de pago digital';
+
   if (/\bzelle\b/.test(t)) {
-    nombre = 'Zelle';
-    tipo = `transferencia__${currency}__zelle`;
+    nombre = 'Pago digital: Zelle';
     const email = userText.match(/[\w.+-]+@[\w.-]+\.\w+/);
     detalles = JSON.stringify({
       name: 'Zelle',
@@ -389,30 +398,65 @@ export async function proposeUpsertPayment(
         ? [{ type: 'correo', label: 'Correo', value: email[0] }]
         : [{ type: 'nota', label: 'Nota', value: 'Completar datos en panel si falta correo' }],
     });
+    const transferCount = (existing || []).filter((m) =>
+      String(m.tipo || '')
+        .toLowerCase()
+        .startsWith(`transferencia__${currency}__`),
+    ).length;
+    tipo = `transferencia__${currency}__${Math.max(1, transferCount + 1)}`;
   } else if (/\bpago\s*movil|pago\s*móvil|pm\b/.test(t)) {
-    nombre = 'Pago móvil';
-    tipo = `transferencia__${currency}__pm`;
+    nombre = 'Pago digital: Pago móvil';
     detalles = JSON.stringify({
       name: 'Pago móvil',
       fields: [{ type: 'nota', label: 'Nota', value: 'Completar teléfono/banco en panel si falta' }],
     });
+    const transferCount = (existing || []).filter((m) =>
+      String(m.tipo || '')
+        .toLowerCase()
+        .startsWith(`transferencia__${currency}__`),
+    ).length;
+    tipo = `transferencia__${currency}__${Math.max(1, transferCount + 1)}`;
   } else if (/\befectivo\b/.test(t)) {
     nombre = 'Efectivo';
     tipo = `efectivo__${currency}`;
-    detalles = `Efectivo ${currency}`;
+    descripcion = null;
+    detalles = null;
   } else {
     const nameGuess = extractQuotedOrName(userText);
-    if (nameGuess.length >= 2) nombre = nameGuess;
+    if (nameGuess.length >= 2) nombre = `Pago digital: ${nameGuess}`;
+    const transferCount = (existing || []).filter((m) =>
+      String(m.tipo || '')
+        .toLowerCase()
+        .startsWith(`transferencia__${currency}__`),
+    ).length;
+    tipo = `transferencia__${currency}__${Math.max(1, transferCount + 1)}`;
+    detalles = JSON.stringify({ name: nameGuess || 'Pago digital', fields: [] });
   }
+
+  // Sync path: keep existing managed methods + add/replace this one (Flutter rebuild).
+  const managedRows: Array<Record<string, unknown>> = (existing || [])
+    .filter((m) => {
+      const tip = String(m.tipo || '').toLowerCase();
+      return tip.startsWith('efectivo__') || tip.startsWith('transferencia__');
+    })
+    .filter((m) => String(m.tipo || '').toLowerCase() !== tipo.toLowerCase())
+    .map((m) => ({
+      nombre: m.nombre,
+      tipo: m.tipo,
+      descripcion: m.descripcion,
+      detalles: m.detalles,
+    }));
+  managedRows.push({ nombre, tipo, descripcion, detalles });
+
   const proposal = makeProposal(
     userId,
     shop,
-    'upsert_payment_method',
-    { nombre, tipo, detalles },
-    `Agregar método ${nombre}`,
+    'sync_payment_methods',
+    { rows: managedRows },
+    `Sincronizar método ${nombre}`,
   );
   return {
-    text: `¿Agregamos el método *${nombre}*? 💳\n\nNo guardo contraseñas ni tokens. Confirma para crear.`,
+    text: `¿Agregamos el método *${nombre}*? 💳\n\nSe sincroniza como en el panel (sin secretos). Confirma para guardar.`,
     proposal,
   };
 }
@@ -467,12 +511,16 @@ export async function readDeliveryConfig(shop: BusinessShop): Promise<BusinessTo
       : undefined;
   const enabled = cfg?.enabled === true || data?.permite_delivery === true;
   const price = cfg?.fixed_price;
+  const zones = Array.isArray(cfg?.zones) ? cfg!.zones.length : 0;
+  const areas = Array.isArray(cfg?.area_zones) ? cfg!.area_zones.length : 0;
   return {
     text: [
       `Delivery en *${shop.nombre}* 🛵`,
       `• Estado: ${enabled ? '🟢 activo' : '🔴 inactivo'}`,
       price != null ? `• Tarifa fija: *${price}*` : null,
       cfg?.pricing_type ? `• Modo: *${cfg.pricing_type}*` : null,
+      zones ? `• Intervalos: *${zones}*` : null,
+      areas ? `• Polígonos: *${areas}*` : null,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -484,10 +532,64 @@ export async function proposeDeliveryToggle(
   shop: BusinessShop,
   enabled: boolean,
   fixedPrice?: number,
+  extra?: {
+    pricingType?: string;
+    zones?: Array<Record<string, unknown>>;
+    areaZones?: Array<Record<string, unknown>>;
+  },
 ): Promise<BusinessToolResult> {
   if (!canManageSettings(shop)) return { text: denied('configurar delivery', shop) };
   const data: Record<string, unknown> = { enabled };
   if (fixedPrice != null) data.fixedPrice = fixedPrice;
+  if (extra?.pricingType) data.pricingType = extra.pricingType;
+  if (extra?.zones?.length) data.zones = extra.zones;
+  if (extra?.areaZones?.length) data.areaZones = extra.areaZones;
+
+  // Sensible defaults when user asks for zones/polygons without JSON coords.
+  if (enabled && extra?.pricingType === 'zones' && !extra.zones?.length) {
+    const p = fixedPrice != null ? fixedPrice : 2;
+    data.zones = [
+      { name: 'Cerca', min_distance: 0, max_distance: 3, price: p },
+      { name: 'Media', min_distance: 3, max_distance: 6, price: roundish(p * 1.5) },
+      { name: 'Lejos', min_distance: 6, max_distance: 12, price: roundish(p * 2) },
+    ];
+  }
+  if (enabled && extra?.pricingType === 'area_zones' && !extra.areaZones?.length) {
+    // Tiny non-overlapping demo polygons near 0,0 — merchant should replace via panel map.
+    // Validated by DeliveryConfig.validate (polygonsOverlap).
+    data.areaZones = [
+      {
+        id: 'z_centro',
+        name: 'Centro',
+        price: fixedPrice != null ? fixedPrice : 2,
+        polygon: [
+          [10.48, -66.9],
+          [10.48, -66.88],
+          [10.5, -66.88],
+          [10.5, -66.9],
+        ],
+      },
+      {
+        id: 'z_norte',
+        name: 'Norte',
+        price: fixedPrice != null ? fixedPrice + 1 : 3,
+        polygon: [
+          [10.51, -66.9],
+          [10.51, -66.88],
+          [10.53, -66.88],
+          [10.53, -66.9],
+        ],
+      },
+    ];
+  }
+  if (enabled && extra?.pricingType === 'distance') {
+    data.distance = {
+      base_price: fixedPrice != null ? fixedPrice : 1,
+      included_km: 2,
+      extra_price_per_km: 0.5,
+    };
+  }
+
   const proposal = makeProposal(
     userId,
     shop,
@@ -495,12 +597,19 @@ export async function proposeDeliveryToggle(
     data,
     enabled ? `Activar delivery` : `Desactivar delivery`,
   );
+  const mode = extra?.pricingType || (fixedPrice != null ? 'fixed' : 'toggle');
   return {
     text: enabled
-      ? `¿Activamos el delivery${fixedPrice != null ? ` con tarifa *${fixedPrice}*` : ''}? 🛵`
+      ? `¿Activamos el delivery (${mode})${
+          fixedPrice != null ? ` con base *${fixedPrice}*` : ''
+        }? 🛵\n\nSe valida con DeliveryConfig.validate antes de guardar.`
       : `¿Cerramos el delivery por ahora? 🔴`,
     proposal,
   };
+}
+
+function roundish(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 export async function proposePromo(
@@ -532,37 +641,111 @@ export async function proposePromo(
   };
 }
 
+async function findPromoRule(shop: BusinessShop, userText: string) {
+  const sb = getServiceSupabaseClient();
+  const { data } = await sb
+    .from('upsell_rules')
+    .select('id,name,enabled')
+    .eq('comercio_id', shop.comercioId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  const hint = extractQuotedOrName(userText).toLowerCase() || userText.toLowerCase();
+  return (data || []).find((r) => {
+    const n = String(r.name || '').toLowerCase();
+    return hint.length >= 2 && (n.includes(hint) || hint.includes(n));
+  });
+}
+
+export async function proposeTogglePromo(
+  userId: string,
+  shop: BusinessShop,
+  userText: string,
+  enabled: boolean,
+): Promise<BusinessToolResult> {
+  if (!canManageMarketing(shop)) return { text: denied('gestionar promociones', shop) };
+  const hit = await findPromoRule(shop, userText);
+  if (!hit) {
+    return { text: `No encontré esa promoción 🏷️. Dime el nombre exacto o créala primero.` };
+  }
+  const proposal = makeProposal(
+    userId,
+    shop,
+    'toggle_promo_rule',
+    { ruleId: String(hit.id), enabled },
+    enabled ? `Activar ${hit.name}` : `Pausar ${hit.name}`,
+  );
+  return {
+    text: enabled
+      ? `¿Reactivamos *${hit.name}*? 🟢`
+      : `¿Pausamos *${hit.name}*? ⏸️`,
+    proposal,
+  };
+}
+
+export async function proposeDeletePromo(
+  userId: string,
+  shop: BusinessShop,
+  userText: string,
+): Promise<BusinessToolResult> {
+  if (!canManageMarketing(shop)) return { text: denied('gestionar promociones', shop) };
+  const hit = await findPromoRule(shop, userText);
+  if (!hit) {
+    return { text: `No encontré esa promoción para eliminar 🏷️.` };
+  }
+  const proposal = makeProposal(
+    userId,
+    shop,
+    'delete_promo_rule',
+    { ruleId: String(hit.id), name: String(hit.name) },
+    `Eliminar ${hit.name}`,
+  );
+  return {
+    text: `¿Eliminamos la promoción *${hit.name}*? 🗑️`,
+    proposal,
+  };
+}
+
 export async function listStaff(shop: BusinessShop): Promise<BusinessToolResult> {
   if (!canManageStaff(shop)) return { text: denied('ver el equipo', shop) };
   const sb = getServiceSupabaseClient();
   const { data, error } = await sb.rpc('list_comercio_team', {
     p_comercio_id: shop.comercioId,
   });
-  if (error) {
-    // Fallback: members table
-    const { data: members } = await sb
+  if (!error && Array.isArray(data) && data.length) {
+    const lines = data.slice(0, 20).map((r: Record<string, unknown>) => {
+      const email = String(r.email || r.member_email || r.invite_email || '').slice(0, 40);
+      const role = String(r.role || r.member_role || '—');
+      const status = String(r.status || r.invite_status || 'active');
+      return `• ${email || 'miembro'} — *${role}* (${status})`;
+    });
+    return { text: `Equipo de *${shop.nombre}* 👥\n\n${lines.join('\n')}` };
+  }
+
+  // Fallback: members + pending invites (Preview may lack list_comercio_team RPC).
+  const [{ data: members }, { data: invites }] = await Promise.all([
+    sb
       .from('comercio_members')
       .select('id,role,status,user_id')
       .eq('comercio_id', shop.comercioId)
       .eq('status', 'active')
-      .limit(30);
-    if (!members?.length) {
-      return { text: `Equipo de *${shop.nombre}*: solo tú como propietario por ahora 👥` };
-    }
-    return {
-      text: `Equipo 👥\n${members.map((m) => `• ${m.role} (${String(m.id).slice(0, 8)}…)`).join('\n')}`,
-    };
+      .limit(30),
+    sb
+      .from('comercio_member_invites')
+      .select('id,email,role,status')
+      .eq('comercio_id', shop.comercioId)
+      .eq('status', 'pending')
+      .limit(30),
+  ]);
+  const lines: string[] = [];
+  for (const m of members || []) {
+    lines.push(`• miembro — *${m.role}* (${String(m.id).slice(0, 8)}…)`);
   }
-  const rows = Array.isArray(data) ? data : [];
-  if (!rows.length) {
-    return { text: `Equipo de *${shop.nombre}*: sin miembros adicionales 👥` };
+  for (const i of invites || []) {
+    lines.push(`• ${i.email} — *${i.role}* (pending)`);
   }
-  const lines = rows.slice(0, 20).map((r: Record<string, unknown>) => {
-    const email = String(r.email || r.member_email || r.invite_email || '').slice(0, 40);
-    const role = String(r.role || r.member_role || '—');
-    const status = String(r.status || r.invite_status || 'active');
-    return `• ${email || 'miembro'} — *${role}* (${status})`;
-  });
+  if (!lines.length) {
+    return { text: `Equipo de *${shop.nombre}*: solo tú como propietario por ahora 👥` };
+  }
   return { text: `Equipo de *${shop.nombre}* 👥\n\n${lines.join('\n')}` };
 }
 
@@ -594,6 +777,151 @@ export async function proposeInviteStaff(
   );
   return {
     text: `¿Invitamos a *${email}* como *${role}*? 👥\n\nRecibirá acceso propio — no se comparte contraseña.`,
+    proposal,
+  };
+}
+
+export async function proposeRevokeStaff(
+  userId: string,
+  shop: BusinessShop,
+  userText: string,
+): Promise<BusinessToolResult> {
+  if (!canManageStaff(shop)) return { text: denied('revocar accesos', shop) };
+  const sb = getServiceSupabaseClient();
+  const email = userText.match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0]?.toLowerCase();
+  const { data: invites } = await sb
+    .from('comercio_member_invites')
+    .select('id,email,role,status')
+    .eq('comercio_id', shop.comercioId)
+    .eq('status', 'pending')
+    .limit(30);
+  const hit = (invites || []).find((i) => {
+    const e = String(i.email || '').toLowerCase();
+    if (email && e === email) return true;
+    if (email && e.includes(email.split('@')[0])) return true;
+    const hint = extractQuotedOrName(userText).toLowerCase();
+    return hint.length >= 3 && e.includes(hint);
+  });
+  if (!hit) {
+    return {
+      text: `No encontré una invitación pendiente para revocar 👥\n\nEscribe *equipo* para ver miembros e invitaciones.`,
+    };
+  }
+  const proposal = makeProposal(
+    userId,
+    shop,
+    'revoke_staff',
+    { inviteId: String(hit.id), email: String(hit.email) },
+    `Revocar ${hit.email}`,
+  );
+  return {
+    text: `¿Revocamos el acceso de *${hit.email}* (*${hit.role}*)? 👥`,
+    proposal,
+  };
+}
+
+export async function proposeProductOptions(
+  userId: string,
+  shop: BusinessShop,
+  userText: string,
+): Promise<BusinessToolResult> {
+  if (!canManageCatalog(shop)) return { text: denied('editar variaciones', shop) };
+  const cfg = getBusinessAssistantRuntimeConfig();
+  const sb = getServiceSupabaseClient();
+  const { data: products } = await sb
+    .from('productos')
+    .select('id,nombre,precio,disponible,opciones_menu')
+    .eq('comercio_id', shop.comercioId)
+    .limit(cfg.maxProductsSample);
+  const match = resolveProductMatch(products || [], userText);
+  if (match.status !== 'exact') {
+    return {
+      text: `¿De qué producto configuramos tamaños/extras? Dime el nombre exacto 🧩`,
+    };
+  }
+
+  const t = userText.toLowerCase();
+  const opcionesMenu: Record<string, unknown> = {};
+
+  // Parse "tamaños: Personal 8, Familiar 15" or quoted sizes.
+  const sizeChunk =
+    userText.match(/tama[nñ]os?\s*[:=]\s*([^.]+)/i)?.[1] ||
+    userText.match(/sizes?\s*[:=]\s*([^.]+)/i)?.[1];
+  if (sizeChunk || /\btama[nñ]os?\b/.test(t)) {
+    const raw = sizeChunk || 'Personal 0, Familiar 0';
+    const parts = raw
+      .replace(/\s+en\s+.+$/i, '')
+      .split(/[,;|/]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const tamanos = parts.map((part, i) => {
+      const priceMatch = part.match(/(\d+(?:[.,]\d{1,2})?)\s*$/);
+      const precio = priceMatch ? Number(priceMatch[1].replace(',', '.')) : 0;
+      const label = (priceMatch ? part.slice(0, priceMatch.index).trim() : part)
+        .replace(/^[•\-]\s*/, '')
+        .trim() || `Opción ${i + 1}`;
+      return { id: `sz_${i + 1}`, label, precio: Number.isFinite(precio) ? precio : 0 };
+    });
+    if (tamanos.length) opcionesMenu.tamanos = tamanos;
+  }
+
+  const extraChunk =
+    userText.match(/extras?\s*[:=]\s*([^.]+)/i)?.[1] ||
+    userText.match(/complementos?\s*[:=]\s*([^.]+)/i)?.[1];
+  if (extraChunk || /\bextras?\b/.test(t) || /\bcomplementos?\b/.test(t)) {
+    const raw = extraChunk || 'Extra queso 1';
+    const parts = raw.split(/[,;|/]+/).map((s) => s.trim()).filter(Boolean);
+    const ajustes = parts.map((part, i) => {
+      const priceMatch = part.match(/(\d+(?:[.,]\d{1,2})?)\s*$/);
+      const precio = priceMatch ? Number(priceMatch[1].replace(',', '.')) : 0;
+      const label = (priceMatch ? part.slice(0, priceMatch.index).trim() : part)
+        .replace(/^[•\-]\s*/, '')
+        .trim() || `Extra ${i + 1}`;
+      return { id: `ex_${i + 1}`, label, precio: Number.isFinite(precio) ? precio : 0, tipo: 'checkbox' };
+    });
+    if (ajustes.length) opcionesMenu.ajustes = ajustes;
+  }
+
+  // Option groups (Flutter activadas + grupos)
+  const groupName =
+    userText.match(/grupo\s*[:=]\s*["“]?([^"”,.]+)["”]?/i)?.[1]?.trim() ||
+    (/\bgrupo\b/.test(t) ? 'Opciones' : null);
+  if (groupName) {
+    const optsChunk = userText.match(/opciones?\s*[:=]\s*([^.]+)/i)?.[1] || 'Opción A, Opción B';
+    const opts = optsChunk.split(/[,;|/]+/).map((s) => s.trim()).filter(Boolean);
+    opcionesMenu.activadas = true;
+    opcionesMenu.grupos = [
+      {
+        id: 'g_1',
+        nombre: groupName,
+        tipo: 'unica',
+        obligatorio: true,
+        min: 1,
+        max: 1,
+        opciones: opts.map((nombre, i) => ({
+          id: `o_${i + 1}`,
+          nombre,
+          precio: 0,
+        })),
+      },
+    ];
+  }
+
+  if (!Object.keys(opcionesMenu).length) {
+    return {
+      text: `Para *${match.product.nombre}* dime las opciones así:\n• “tamaños: Personal 8, Familiar 15”\n• “extras: Queso 1, Tocino 2”\n• “grupo: Bebida opciones: Coca, Pepsi”`,
+    };
+  }
+
+  const proposal = makeProposal(
+    userId,
+    shop,
+    'set_product_options',
+    { productId: String(match.product.id), opcionesMenu },
+    `Opciones de ${match.product.nombre}`,
+  );
+  return {
+    text: `¿Guardamos estas variaciones en *${match.product.nombre}*? 🧩\n\nSe valida con el mismo parser del menú público.`,
     proposal,
   };
 }

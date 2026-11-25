@@ -1,0 +1,26 @@
+{
+  "at": "2026-11-25T19:25:07.572Z",
+  "previewUrl": "gsfxqzvmyzjjgpigrste",
+  "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "checks": {
+    "horariosFlutterDays": true,
+    "delivery": {
+      "ok": true
+    },
+    "opciones": {
+      "ok": true
+    },
+    "paymentTipo": true,
+    "invitesTable": true,
+    "upsellRulesTable": true
+  },
+  "flutterCli": {
+    "available": false,
+    "version": "'flutter' is not recognized as an internal or external command,\r"
+  },
+  "dartCli": {
+    "available": true,
+    "version": "Dart SDK version: 3.9.0 (stable) (Mon Aug 11 07:58:10 2025 -0700) on \"windows_x64\"\r"
+  },
+  "note": "Compilación Flutter aislada: flutter run --dart-define=SUPABASE_URL=<preview> --dart-define=SUPABASE_ANON_KEY=<preview_anon> (no ejecutada contra prod). Contrato de columnas/JSON verificado aquí."
+}

@@ -20,7 +20,9 @@ export type BusinessAllowedOp =
   | 'set_order_status'
   | 'upsert_payment_method'
   | 'delete_payment_method'
+  | 'sync_payment_methods'
   | 'set_delivery_config'
+  | 'set_product_options'
   | 'upsert_promo_rule'
   | 'toggle_promo_rule'
   | 'delete_promo_rule'
@@ -46,7 +48,9 @@ export const BUSINESS_ALLOWED_OPS: readonly BusinessAllowedOp[] = [
   'set_order_status',
   'upsert_payment_method',
   'delete_payment_method',
+  'sync_payment_methods',
   'set_delivery_config',
+  'set_product_options',
   'upsert_promo_rule',
   'toggle_promo_rule',
   'delete_promo_rule',

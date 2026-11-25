@@ -1,4 +1,14 @@
+import { randomBytes } from 'node:crypto';
+
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+import {
+  deliveryConfigToJson,
+  parseDeliveryConfig,
+  validateDeliveryConfig,
+  type DeliveryConfig,
+} from '../../../_lib/delivery-config';
+import { parseProductMenuOptions } from '../../../_lib/menu-product-options';
 import type { BusinessShop } from './auth';
 import type { BusinessAllowedOp } from './config';
 import {
@@ -14,14 +24,106 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+function slugId(prefix: string) {
+  return `${prefix}_${randomBytes(3).toString('hex')}`;
+}
+
+/** Flutter BusinessSetupScreen._syncPaymentMethods — update-by-tipo then prune managed. */
+async function syncPaymentMethodsFlutter(
+  sb: SupabaseClient,
+  comercioId: string,
+  rows: Array<Record<string, unknown>>,
+): Promise<{ retained: number; deleted: number }> {
+  if (!rows.length) throw new Error('payment_list_empty');
+
+  const { data: existingRows, error: readErr } = await sb
+    .from('metodos_pago')
+    .select('id,tipo')
+    .eq('comercio_id', comercioId);
+  if (readErr) throw new Error(readErr.message);
+
+  const existingByType = new Map<string, Array<{ id: string; tipo: string }>>();
+  for (const raw of existingRows || []) {
+    const type = String(raw.tipo || '')
+      .trim()
+      .toLowerCase();
+    const id = String(raw.id || '').trim();
+    if (!type || !id) continue;
+    const list = existingByType.get(type) || [];
+    list.push({ id, tipo: type });
+    existingByType.set(type, list);
+  }
+
+  const retainedIds = new Set<string>();
+  for (const row of rows) {
+    const type = String(row.tipo || '')
+      .trim()
+      .toLowerCase();
+    if (!type) throw new Error('payment_incomplete');
+    const candidates = existingByType.get(type) || [];
+    let existing: { id: string; tipo: string } | undefined;
+    for (const candidate of candidates) {
+      if (!retainedIds.has(candidate.id)) {
+        existing = candidate;
+        break;
+      }
+    }
+    const payload = {
+      comercio_id: comercioId,
+      nombre: String(row.nombre || '').trim(),
+      tipo: String(row.tipo || '').trim(),
+      descripcion: row.descripcion != null ? String(row.descripcion) : null,
+      detalles: row.detalles != null ? String(row.detalles) : null,
+    };
+    if (!payload.nombre) throw new Error('payment_incomplete');
+
+    if (existing) {
+      const { error } = await sb
+        .from('metodos_pago')
+        .update(payload)
+        .eq('comercio_id', comercioId)
+        .eq('id', existing.id);
+      if (error) throw new Error(error.message);
+      retainedIds.add(existing.id);
+    } else {
+      const { data: inserted, error } = await sb
+        .from('metodos_pago')
+        .insert(payload)
+        .select('id')
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!inserted?.id) throw new Error('insert_failed');
+      retainedIds.add(String(inserted.id));
+    }
+  }
+
+  const obsoleteManagedIds: string[] = [];
+  for (const [type, list] of existingByType.entries()) {
+    if (!type.startsWith('efectivo__') && !type.startsWith('transferencia__')) continue;
+    for (const row of list) {
+      if (!retainedIds.has(row.id)) obsoleteManagedIds.push(row.id);
+    }
+  }
+  if (obsoleteManagedIds.length) {
+    const { error } = await sb
+      .from('metodos_pago')
+      .delete()
+      .eq('comercio_id', comercioId)
+      .in('id', obsoleteManagedIds);
+    if (error) throw new Error(error.message);
+  }
+  return { retained: retainedIds.size, deleted: obsoleteManagedIds.length };
+}
+
 /** Apply extended ops. Throws on validation/DB errors. Returns null if op not handled here. */
 export async function applyExtendedOp(params: {
   sb: SupabaseClient;
   shop: BusinessShop;
   op: BusinessAllowedOp;
   data: Record<string, unknown>;
+  userId?: string;
 }): Promise<ApplyOk | null> {
-  const { sb, shop, op, data } = params;
+  const { sb, shop, op, data, userId } = params;
   const cid = shop.comercioId;
 
   if (op === 'create_product') {
@@ -350,14 +452,23 @@ export async function applyExtendedOp(params: {
       if (!updated) throw new Error('payment_not_found');
       return { text: `Método actualizado 💳 *${updated.nombre}*` };
     }
-    const { data: inserted, error } = await sb
-      .from('metodos_pago')
-      .insert({ comercio_id: cid, nombre, tipo, descripcion, detalles })
-      .select('id,nombre')
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!inserted) throw new Error('insert_failed');
-    return { text: `Método agregado 💳 *${inserted.nombre}*` };
+    // Flutter parity: upsert by tipo (efectivo__usd / transferencia__usd__N).
+    const result = await syncPaymentMethodsFlutter(sb, cid, [
+      { nombre, tipo, descripcion, detalles },
+    ]);
+    return {
+      text: `Método sincronizado 💳 *${nombre}*`,
+      data: { retained: result.retained, deleted: result.deleted },
+    };
+  }
+
+  if (op === 'sync_payment_methods') {
+    const rows = Array.isArray(data.rows) ? (data.rows as Array<Record<string, unknown>>) : [];
+    const result = await syncPaymentMethodsFlutter(sb, cid, rows);
+    return {
+      text: `Métodos de pago sincronizados 💳 (${result.retained} activos)`,
+      data: result,
+    };
   }
 
   if (op === 'delete_payment_method') {
@@ -390,40 +501,179 @@ export async function applyExtendedOp(params: {
       branding.config_negocio && typeof branding.config_negocio === 'object'
         ? ({ ...(branding.config_negocio as Record<string, unknown>) } as Record<string, unknown>)
         : {};
-    const prev =
+    const prevRaw =
       configNegocio.delivery_config && typeof configNegocio.delivery_config === 'object'
-        ? ({ ...(configNegocio.delivery_config as Record<string, unknown>) } as Record<
-            string,
-            unknown
-          >)
+        ? configNegocio.delivery_config
         : { enabled: false, pricing_type: 'fixed', fixed_price: 0, version: 1 };
-    if (data.enabled != null) prev.enabled = data.enabled === true;
-    if (data.pricingType) prev.pricing_type = String(data.pricingType);
-    if (data.fixedPrice != null) {
-      const fp = Number(data.fixedPrice);
-      if (!Number.isFinite(fp) || fp < 0) throw new Error('tarifa_invalida');
-      prev.fixed_price = round2(fp);
-      prev.pricing_type = prev.pricing_type || 'fixed';
+
+    // Merge patch into Flutter DeliveryConfig shape, then validate.
+    const base = parseDeliveryConfig(prevRaw);
+    const next: DeliveryConfig = {
+      ...base,
+      enabled: data.enabled != null ? data.enabled === true : base.enabled,
+      pricingType: data.pricingType
+        ? (String(data.pricingType) as DeliveryConfig['pricingType'])
+        : base.pricingType,
+      fixedPrice:
+        data.fixedPrice != null && Number.isFinite(Number(data.fixedPrice))
+          ? round2(Number(data.fixedPrice))
+          : base.fixedPrice,
+      minOrder:
+        data.minOrder != null && Number.isFinite(Number(data.minOrder))
+          ? round2(Number(data.minOrder))
+          : base.minOrder,
+      currency: data.currency != null ? String(data.currency).toUpperCase() : base.currency,
+      customMessage:
+        data.customMessage != null ? String(data.customMessage).slice(0, 280) : base.customMessage,
+    };
+
+    if (data.distance && typeof data.distance === 'object') {
+      const d = data.distance as Record<string, unknown>;
+      next.distance = {
+        basePrice: round2(Number(d.basePrice ?? d.base_price ?? next.distance.basePrice) || 0),
+        includedKm: Number(d.includedKm ?? d.included_km ?? next.distance.includedKm) || 0,
+        extraPricePerKm: round2(
+          Number(d.extraPricePerKm ?? d.extra_price_per_km ?? next.distance.extraPricePerKm) || 0,
+        ),
+      };
     }
-    if (data.minOrder != null) {
-      const mo = Number(data.minOrder);
-      if (!Number.isFinite(mo) || mo < 0) throw new Error('min_order_invalido');
-      prev.min_order = round2(mo);
+    if (Array.isArray(data.zones)) {
+      next.zones = (data.zones as Array<Record<string, unknown>>).map((z, i) => ({
+        name: String(z.name || `Zona ${i + 1}`),
+        minDistance: Number(z.minDistance ?? z.min_distance) || 0,
+        maxDistance: Number(z.maxDistance ?? z.max_distance) || 0,
+        price: round2(Number(z.price) || 0),
+      }));
     }
-    prev.version = 1;
-    configNegocio.delivery_config = prev;
+    if (Array.isArray(data.areaZones)) {
+      next.areaZones = (data.areaZones as Array<Record<string, unknown>>).map((z, i) => {
+        const polyRaw = Array.isArray(z.polygon) ? z.polygon : [];
+        const polygon: Array<[number, number]> = [];
+        for (const pt of polyRaw) {
+          if (!Array.isArray(pt) || pt.length < 2) continue;
+          const lat = Number(pt[0]);
+          const lng = Number(pt[1]);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+          polygon.push([lat, lng]);
+        }
+        return {
+          id: String(z.id || slugId('z')),
+          name: String(z.name || `Zona ${i + 1}`),
+          price: round2(Number(z.price) || 0),
+          polygon,
+        };
+      });
+    }
+    if (data.areaZonesFallback && typeof data.areaZonesFallback === 'object') {
+      const f = data.areaZonesFallback as Record<string, unknown>;
+      next.areaZonesFallback = {
+        enabled: f.enabled === true,
+        price: 0,
+      };
+    }
+    if (data.freeDelivery && typeof data.freeDelivery === 'object') {
+      const f = data.freeDelivery as Record<string, unknown>;
+      next.freeDelivery = {
+        enabled: f.enabled === true,
+        minimumOrder: round2(Number(f.minimumOrder ?? f.minimum_order) || 0),
+      };
+    }
+
+    const errors = validateDeliveryConfig(next);
+    if (errors.length) throw new Error(`delivery_invalid:${errors[0]}`);
+
+    const json = deliveryConfigToJson(next);
+    configNegocio.delivery_config = json;
+    delete configNegocio.delivery_tarifas;
     branding.config_negocio = configNegocio;
     const patch: Record<string, unknown> = { branding_ia: branding };
-    if (data.enabled != null) patch.permite_delivery = data.enabled === true;
+    patch.permite_delivery = next.enabled === true;
     const { error } = await sb.from('comercios').update(patch).eq('id', cid);
     if (error) throw new Error(error.message);
-    const on = prev.enabled === true;
+    const mode = next.pricingType;
+    const detail =
+      mode === 'zones'
+        ? ` · ${next.zones.length} intervalos`
+        : mode === 'area_zones'
+          ? ` · ${next.areaZones.length} polígonos`
+          : mode === 'distance'
+            ? ` · por km`
+            : next.fixedPrice != null
+              ? ` · tarifa *${next.fixedPrice}*`
+              : '';
     return {
-      text: on
-        ? `Delivery activo 🛵${
-            prev.fixed_price != null ? ` · tarifa *${prev.fixed_price}*` : ''
-          }`
+      text: next.enabled
+        ? `Delivery activo 🛵 (${mode})${detail}`
         : `Delivery desactivado 🔴`,
+      data: { pricingType: mode },
+    };
+  }
+
+  if (op === 'set_product_options') {
+    const productId = String(data.productId || '');
+    if (!productId) throw new Error('product_id_missing');
+    const incoming =
+      data.opcionesMenu && typeof data.opcionesMenu === 'object'
+        ? (data.opcionesMenu as Record<string, unknown>)
+        : null;
+    if (!incoming) throw new Error('opciones_missing');
+
+    const { data: current, error: readErr } = await sb
+      .from('productos')
+      .select('id,nombre,opciones_menu')
+      .eq('id', productId)
+      .eq('comercio_id', cid)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!current) throw new Error('product_not_found');
+
+    const prev =
+      current.opciones_menu && typeof current.opciones_menu === 'object'
+        ? ({ ...(current.opciones_menu as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+
+    // Merge Flutter-shaped keys only; validate with shared parser.
+    if (Array.isArray(incoming.tamanos)) prev.tamanos = incoming.tamanos;
+    if (Array.isArray(incoming.ajustes)) prev.ajustes = incoming.ajustes;
+    if (Array.isArray(incoming.grupos)) {
+      prev.grupos = incoming.grupos;
+      prev.activadas = incoming.activadas === false ? false : true;
+    } else if (incoming.activadas != null) {
+      prev.activadas = incoming.activadas === true;
+    }
+    if (incoming.personalizacion && typeof incoming.personalizacion === 'object') {
+      prev.personalizacion = incoming.personalizacion;
+    }
+    if (incoming.venta_por_peso && typeof incoming.venta_por_peso === 'object') {
+      prev.venta_por_peso = incoming.venta_por_peso;
+    }
+    if (incoming.delivery && typeof incoming.delivery === 'object') {
+      prev.delivery = incoming.delivery;
+    }
+
+    const parsed = parseProductMenuOptions(prev);
+    if (!parsed) throw new Error('opciones_invalidas');
+
+    // Persist original Flutter JSON shape (activadas + grupos + legacy tamanos/ajustes).
+    const { data: updated, error } = await sb
+      .from('productos')
+      .update({ opciones_menu: prev })
+      .eq('id', productId)
+      .eq('comercio_id', cid)
+      .select('id,nombre')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!updated) throw new Error('product_not_found');
+    const bits: string[] = [];
+    if (parsed.tamanos?.length) bits.push(`${parsed.tamanos.length} tamaños`);
+    if (parsed.ajustes?.length) bits.push(`${parsed.ajustes.length} extras`);
+    if (parsed.grupos?.length) bits.push(`${parsed.grupos.length} grupos`);
+    return {
+      text: `Opciones de *${updated.nombre}* actualizadas 🧩${
+        bits.length ? ` (${bits.join(', ')})` : ''
+      }`,
+      data: { productId: updated.id },
     };
   }
 
@@ -562,7 +812,7 @@ export async function applyExtendedOp(params: {
       .trim()
       .toLowerCase();
     const role = String(data.role || 'caja').trim();
-    if (!email.includes('@')) throw new Error('email_invalido');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('email_invalido');
     const allowedRoles = new Set([
       'administrador',
       'caja',
@@ -571,16 +821,66 @@ export async function applyExtendedOp(params: {
       'mesero',
     ]);
     if (!allowedRoles.has(role)) throw new Error('rol_invalido');
-    const { data: rpcData, error } = await sb.rpc('invite_comercio_member', {
+
+    // Prefer Flutter RPC when available (authenticated path). Service-role
+    // assistant falls back to the same table writes the RPC performs.
+    const { data: rpcData, error: rpcErr } = await sb.rpc('invite_comercio_member', {
       p_comercio_id: cid,
       p_email: email,
       p_role: role,
     });
+    if (!rpcErr) {
+      return {
+        text: `Invitación enviada 👥 *${email}* como *${role}*`,
+        data: rpcData && typeof rpcData === 'object' ? (rpcData as Record<string, unknown>) : undefined,
+      };
+    }
+
+    const token = randomBytes(24).toString('hex');
+    const { data: existingInvite } = await sb
+      .from('comercio_member_invites')
+      .select('id')
+      .eq('comercio_id', cid)
+      .eq('status', 'pending')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (existingInvite?.id) {
+      const { error } = await sb
+        .from('comercio_member_invites')
+        .update({
+          role,
+          token,
+          status: 'pending',
+          invited_by: userId || null,
+          accepted_at: null,
+        })
+        .eq('id', existingInvite.id)
+        .eq('comercio_id', cid);
+      if (error) throw new Error(error.message);
+      return {
+        text: `Invitación actualizada 👥 *${email}* como *${role}*`,
+        data: { inviteId: existingInvite.id, status: 'pending' },
+      };
+    }
+
+    const { data: inserted, error } = await sb
+      .from('comercio_member_invites')
+      .insert({
+        comercio_id: cid,
+        email,
+        role,
+        token,
+        invited_by: userId || null,
+        status: 'pending',
+      })
+      .select('id')
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!inserted) throw new Error('invite_failed');
     return {
-      text: `Invitación enviada 👥 *${email}* como *${role}*${
-        rpcData ? '' : ''
-      }`,
+      text: `Invitación enviada 👥 *${email}* como *${role}*`,
+      data: { inviteId: inserted.id, status: 'pending' },
     };
   }
 
@@ -588,12 +888,31 @@ export async function applyExtendedOp(params: {
     const memberId = data.memberId ? String(data.memberId) : null;
     const inviteId = data.inviteId ? String(data.inviteId) : null;
     if (!memberId && !inviteId) throw new Error('staff_id_missing');
-    const { error } = await sb.rpc('revoke_comercio_member', {
+
+    const { error: rpcErr } = await sb.rpc('revoke_comercio_member', {
       p_comercio_id: cid,
       p_member_id: memberId,
       p_invite_id: inviteId,
     });
-    if (error) throw new Error(error.message);
+    if (!rpcErr) return { text: `Acceso revocado 👥` };
+
+    if (memberId) {
+      const { error } = await sb
+        .from('comercio_members')
+        .update({ status: 'disabled', updated_at: new Date().toISOString() })
+        .eq('id', memberId)
+        .eq('comercio_id', cid);
+      if (error) throw new Error(error.message);
+    }
+    if (inviteId) {
+      const { error } = await sb
+        .from('comercio_member_invites')
+        .update({ status: 'revoked' })
+        .eq('id', inviteId)
+        .eq('comercio_id', cid)
+        .eq('status', 'pending');
+      if (error) throw new Error(error.message);
+    }
     return { text: `Acceso revocado 👥` };
   }
 

@@ -47,8 +47,12 @@ import {
   proposeDeliveryToggle,
   proposeInviteStaff,
   proposeOrderStatus,
+  proposeDeletePromo,
   proposeProductImage,
+  proposeProductOptions,
   proposePromo,
+  proposeRevokeStaff,
+  proposeTogglePromo,
   proposeSetTasa,
   proposeUpdateProfile,
   proposeUpsellBadge,
@@ -199,15 +203,33 @@ async function executeBusinessIntent(params: {
         shop,
         intent.enabled !== false,
         intent.fixedPrice,
+        {
+          pricingType: intent.pricingType,
+          zones: intent.zones,
+          areaZones: intent.areaZones,
+        },
       );
     case 'create_promo':
       return proposePromo(userId, shop, intent.raw || userText);
+    case 'toggle_promo':
+      return proposeTogglePromo(
+        userId,
+        shop,
+        intent.raw || userText,
+        intent.enabled !== false,
+      );
+    case 'delete_promo':
+      return proposeDeletePromo(userId, shop, intent.raw || userText);
     case 'set_order_status':
       return proposeOrderStatus(userId, shop, intent.raw || userText);
     case 'list_staff':
       return listStaff(shop);
     case 'invite_staff':
       return proposeInviteStaff(userId, shop, intent.raw || userText);
+    case 'revoke_staff':
+      return proposeRevokeStaff(userId, shop, intent.raw || userText);
+    case 'set_product_options':
+      return proposeProductOptions(userId, shop, intent.raw || userText);
     case 'set_featured':
       return proposeUpsellBadge(userId, shop, intent.raw || userText, intent.clear === true);
     case 'set_product_image':
@@ -228,17 +250,17 @@ async function executeBusinessIntent(params: {
         payments:
           'Para ese detalle de pago necesito más datos 💳. Prueba “métodos de pago” o “agrega zelle”.',
         delivery:
-          'Las zonas con polígono se editan mejor en el panel 🛵. Aquí sí activo/desactivo delivery y tarifa fija.',
+          'Puedo activar delivery, tarifa fija, intervalos por km o polígonos 🛵. Ej: “activa delivery con zonas” o “configura polígonos de delivery”.',
         promo:
           'Esa promo avanzada (targets/combos) vive en el panel 🏷️. Aquí creo reglas simples de venta.',
         staff:
-          'Para roles complejos usa el panel 👥. Aquí listo el equipo e invito por correo.',
+          'Listo el equipo, invito y revoco por correo 👥. Roles: caja, cocina, marketing, mesero, administrador.',
         category:
           'Dime el nombre exacto de la categoría 📂.',
         order_status:
           'Indica el pedido y el estado (confirmado / en camino / entregado / cancelado).',
         variations:
-          'Variaciones, tamaños y extras usan un editor complejo del panel 🧩. Aquí no los armo todavía para no romper el menú público.',
+          'Dime el producto y las opciones 🧩. Ej: “tamaños: Personal 8, Familiar 15 en Hamburguesa”.',
       };
       return { text: copy[intent.topic] };
     }

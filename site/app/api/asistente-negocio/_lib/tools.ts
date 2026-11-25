@@ -796,6 +796,7 @@ export async function applyConfirm(params: {
       shop: matchedShop,
       op: payload.op,
       data: payload.data,
+      userId: params.userId,
     });
     if (extended) {
       consumeConfirmNonce(nonce, expiresAt);

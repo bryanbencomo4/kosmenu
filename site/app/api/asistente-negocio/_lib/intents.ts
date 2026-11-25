@@ -24,11 +24,22 @@ export type BusinessIntent =
   | { kind: 'upsert_payment'; raw?: string }
   | { kind: 'delete_payment'; raw?: string }
   | { kind: 'read_delivery' }
-  | { kind: 'set_delivery'; enabled?: boolean; fixedPrice?: number }
+  | {
+      kind: 'set_delivery';
+      enabled?: boolean;
+      fixedPrice?: number;
+      pricingType?: 'fixed' | 'distance' | 'zones' | 'area_zones' | 'free';
+      zones?: Array<Record<string, unknown>>;
+      areaZones?: Array<Record<string, unknown>>;
+    }
   | { kind: 'create_promo'; raw?: string }
+  | { kind: 'toggle_promo'; raw?: string; enabled?: boolean }
+  | { kind: 'delete_promo'; raw?: string }
   | { kind: 'set_order_status'; raw?: string }
   | { kind: 'list_staff' }
   | { kind: 'invite_staff'; raw?: string }
+  | { kind: 'revoke_staff'; raw?: string }
+  | { kind: 'set_product_options'; raw?: string }
   | { kind: 'set_featured'; raw?: string; clear?: boolean }
   | { kind: 'set_product_image'; productHint?: string; imageUrl?: string }
   | { kind: 'update_profile'; nombre?: string; descripcionVisual?: string; whatsapp?: string }
@@ -57,8 +68,12 @@ const WRITE_KINDS = new Set([
   'delete_payment',
   'set_delivery',
   'create_promo',
+  'toggle_promo',
+  'delete_promo',
   'set_order_status',
   'invite_staff',
+  'revoke_staff',
+  'set_product_options',
   'set_featured',
   'set_product_image',
   'update_profile',
@@ -199,10 +214,23 @@ export function parseBusinessIntent(
   }
   if (
     /\b(delivery|domicilio)\b/.test(t) &&
+    /\b(zonas?|intervalos?|pol[ií]gonos?|mapa|km|distancia)\b/.test(t) &&
+    /\b(agrega|añade|crear|crea|configura|pon|guarda|activa|activar)\b/.test(t)
+  ) {
+    const price = parsePrice(raw);
+    const pricingType = /\bpol[ií]gonos?|mapa\b/.test(t)
+      ? 'area_zones'
+      : /\bkm|distancia\b/.test(t)
+        ? 'distance'
+        : 'zones';
+    return { kind: 'set_delivery', enabled: true, fixedPrice: price, pricingType };
+  }
+  if (
+    /\b(delivery|domicilio)\b/.test(t) &&
     /\b(abre|abrir|activa|activar|enciende|pon)\w*\b/.test(t)
   ) {
     const price = parsePrice(raw);
-    return { kind: 'set_delivery', enabled: true, fixedPrice: price };
+    return { kind: 'set_delivery', enabled: true, fixedPrice: price, pricingType: 'fixed' };
   }
   if (
     /\b(delivery|domicilio|zonas? de (delivery|envio|envío)|tarifa de (delivery|envio|envío))\b/.test(
@@ -215,16 +243,44 @@ export function parseBusinessIntent(
 
   // Promos
   if (
+    /\b(promocion|promoción|promo|oferta)\b/.test(t) &&
+    /\b(elimina|eliminar|borra|borrar|quita|quitar)\b/.test(t)
+  ) {
+    return { kind: 'delete_promo', raw };
+  }
+  if (
+    /\b(promocion|promoción|promo|oferta)\b/.test(t) &&
+    /\b(pausa|pausar|desactiva|desactivar|apaga)\b/.test(t)
+  ) {
+    return { kind: 'toggle_promo', raw, enabled: false };
+  }
+  if (
+    /\b(promocion|promoción|promo|oferta)\b/.test(t) &&
+    /\b(reactiva|reactivar|reanuda|reanudar)\b/.test(t)
+  ) {
+    return { kind: 'toggle_promo', raw, enabled: true };
+  }
+  if (
     /\b(promocion|promoción|promo|2x1|dos por uno|descuento|cupon|cupón|oferta)\b/.test(t) &&
     /\b(agrega|añade|crear|crea|activa|activar|nueva|nuevo|pon)\b/.test(t)
   ) {
     return { kind: 'create_promo', raw };
   }
 
-  // Staff
+  // Staff — revoke before list so “revoca acceso” no cae en listado
   if (
-    /\b(equipo|trabajadores|empleados|staff|miembros)\b/.test(t) &&
-    !/\b(invita|agrega|añade)\b/.test(t)
+    /\b(revoca|revocar|quita(r)? acceso|elimina(r)? (al )?empleado|desactiva(r)? (al )?miembro)\b/.test(
+      t,
+    ) ||
+    (/\b(trabajador|empleado|invitaci[oó]n|miembro|acceso)\b/.test(t) &&
+      /\b(revoca|quita|eliminar|desactiva)\b/.test(t))
+  ) {
+    return { kind: 'revoke_staff', raw };
+  }
+  if (
+    /\b(equipo|trabajadores|empleados|miembros)\b/.test(t) &&
+    !/\b(invita|agrega|añade|revoca)\b/.test(t) &&
+    !/@/.test(t)
   ) {
     return { kind: 'list_staff' };
   }
@@ -275,10 +331,14 @@ export function parseBusinessIntent(
     return { kind: 'set_featured', raw, clear: true };
   }
 
-  // Variations not fully supported via chat yet (complex JSON)
-  if (/\b(variacion|variación|tamanos?|tamaños?|extras?|complementos?|opciones del menu|opciones del menú)\b/.test(t) &&
-      /\b(agrega|añade|crear|crea|edita|configura)\b/.test(t)) {
-    return { kind: 'unsupported', topic: 'variations' };
+  // Variations / sizes / extras → opciones_menu (Flutter product editor contract)
+  if (
+    /\b(variacion|variación|tamanos?|tamaños?|extras?|complementos?|opciones del menu|opciones del menú|grupos? de opciones)\b/.test(
+      t,
+    ) &&
+    /\b(agrega|añade|crear|crea|edita|configura|pon)\b/.test(t)
+  ) {
+    return { kind: 'set_product_options', raw };
   }
 
   // Delete product

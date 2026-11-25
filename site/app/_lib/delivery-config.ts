@@ -216,6 +216,69 @@ export function pointInPolygon(
   return inside;
 }
 
+function segmentsIntersect(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number,
+): boolean {
+  const orient = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) =>
+    (qy - py) * (rx - qx) - (qx - px) * (ry - qy);
+  const onSegment = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) =>
+    Math.min(px, rx) <= qx &&
+    qx <= Math.max(px, rx) &&
+    Math.min(py, ry) <= qy &&
+    qy <= Math.max(py, ry);
+
+  const o1 = orient(ax, ay, bx, by, cx, cy);
+  const o2 = orient(ax, ay, bx, by, dx, dy);
+  const o3 = orient(cx, cy, dx, dy, ax, ay);
+  const o4 = orient(cx, cy, dx, dy, bx, by);
+
+  if (o1 * o2 < 0 && o3 * o4 < 0) return true;
+  if (Math.abs(o1) < 1e-12 && onSegment(ax, ay, cx, cy, bx, by)) return true;
+  if (Math.abs(o2) < 1e-12 && onSegment(ax, ay, dx, dy, bx, by)) return true;
+  if (Math.abs(o3) < 1e-12 && onSegment(cx, cy, ax, ay, dx, dy)) return true;
+  if (Math.abs(o4) < 1e-12 && onSegment(cx, cy, bx, by, dx, dy)) return true;
+  return false;
+}
+
+/**
+ * True if polygons share interior (vertex inside other, or edges cross).
+ * Port of Flutter `polygon_geometry.polygonsOverlap` — used by DeliveryConfig.validate.
+ */
+export function polygonsOverlap(
+  a: Array<[number, number]>,
+  b: Array<[number, number]>,
+): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  for (const [lat, lng] of a) {
+    if (pointInPolygon({ lat, lng }, b)) return true;
+  }
+  for (const [lat, lng] of b) {
+    if (pointInPolygon({ lat, lng }, a)) return true;
+  }
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      // lng as x, lat as y — same as Flutter.
+      if (
+        segmentsIntersect(a1[1], a1[0], a2[1], a2[0], b1[1], b1[0], b2[1], b2[0])
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function extractDeliveryConfigSource(row: unknown): unknown {
   const record = asRecord(row);
   if (!record) return null;
@@ -358,6 +421,13 @@ export function validateDeliveryConfig(config: DeliveryConfig): string[] {
       }
       if (zone.price < 0) {
         errors.push(`La zona ${index + 1} no puede tener precio negativo.`);
+      }
+      for (let j = index + 1; j < config.areaZones.length; j++) {
+        const other = config.areaZones[j];
+        if (other.polygon.length < 3) continue;
+        if (polygonsOverlap(zone.polygon, other.polygon)) {
+          errors.push(`La zona “${zone.name}” se solapa con “${other.name}”.`);
+        }
       }
     });
   }
