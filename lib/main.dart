@@ -119,8 +119,11 @@ Future<void> main() async {
   passwordRecoveryPending.value =
       kIsWeb && Uri.base.queryParameters['flow'] == 'password-recovery';
   ErrorWidget.builder = _buildRecoverableErrorScreen;
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(AppTheme.lightSystemUi);
+  // SystemChrome is a no-op / can hang on some web hosts; keep it mobile-only.
+  if (!kIsWeb) {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(AppTheme.lightSystemUi);
+  }
 
   await _initializeSupabase();
 

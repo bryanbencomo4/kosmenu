@@ -1,0 +1,708 @@
+{
+  "urlHost": "gsfxqzvmyzjjgpigrste.supabase.co",
+  "live": {
+    "at": "2026-11-25T20:23:29.030Z",
+    "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+    "comercios": {
+      "id": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+      "nombre": "QA_CHATBOT_2026 pizzas el trueno",
+      "slug": "qa-chatbot-2026-trueno",
+      "en_linea": false,
+      "horarios": {
+        "days": {
+          "friday": {
+            "open": true,
+            "ranges": [
+              {
+                "end": "21:00",
+                "start": "11:00"
+              }
+            ]
+          },
+          "monday": {
+            "open": true,
+            "ranges": [
+              {
+                "end": "21:00",
+                "start": "11:00"
+              }
+            ]
+          },
+          "sunday": {
+            "open": false,
+            "ranges": []
+          },
+          "tuesday": {
+            "open": true,
+            "ranges": [
+              {
+                "end": "21:00",
+                "start": "11:00"
+              }
+            ]
+          },
+          "saturday": {
+            "open": false,
+            "ranges": []
+          },
+          "thursday": {
+            "open": true,
+            "ranges": [
+              {
+                "end": "21:00",
+                "start": "11:00"
+              }
+            ]
+          },
+          "wednesday": {
+            "open": true,
+            "ranges": [
+              {
+                "end": "21:00",
+                "start": "11:00"
+              }
+            ]
+          }
+        },
+        "timezone": "America/Caracas",
+        "updatedAt": "2026-11-25T19:24:56.685Z",
+        "sourceText": "Cambia el horario a Lun-Vie 11:00-21:00",
+        "updatedVia": "business_assistant"
+      },
+      "branding_ia": {
+        "config_negocio": {
+          "delivery_config": {
+            "zones": [
+              {
+                "name": "Cerca",
+                "price": 2,
+                "max_distance": 3,
+                "min_distance": 0
+              },
+              {
+                "name": "Media",
+                "price": 3,
+                "max_distance": 6,
+                "min_distance": 3
+              },
+              {
+                "name": "Lejos",
+                "price": 4,
+                "max_distance": 12,
+                "min_distance": 6
+              }
+            ],
+            "enabled": true,
+            "version": 1,
+            "min_order": 0,
+            "area_zones": [
+              {
+                "id": "z_centro",
+                "name": "Centro",
+                "price": 3,
+                "polygon": [
+                  [
+                    10.48,
+                    -66.9
+                  ],
+                  [
+                    10.48,
+                    -66.88
+                  ],
+                  [
+                    10.5,
+                    -66.88
+                  ],
+                  [
+                    10.5,
+                    -66.9
+                  ]
+                ]
+              },
+              {
+                "id": "z_norte",
+                "name": "Norte",
+                "price": 4,
+                "polygon": [
+                  [
+                    10.51,
+                    -66.9
+                  ],
+                  [
+                    10.51,
+                    -66.88
+                  ],
+                  [
+                    10.53,
+                    -66.88
+                  ],
+                  [
+                    10.53,
+                    -66.9
+                  ]
+                ]
+              }
+            ],
+            "fixed_price": 3,
+            "pricing_type": "area_zones",
+            "free_delivery": {
+              "enabled": false,
+              "minimum_order": 0
+            },
+            "custom_message": "",
+            "distance_config": {
+              "base_price": 0,
+              "included_km": 0,
+              "extra_price_per_km": 0
+            },
+            "estimated_times": {
+              "delivery_minutes": 30,
+              "preparation_minutes": 20
+            },
+            "area_zones_fallback": {
+              "price": 0,
+              "enabled": false
+            }
+          }
+        }
+      },
+      "permite_delivery": true,
+      "exchange_rate_value": null,
+      "exchange_rate_mode": "auto",
+      "tasa_cambio_pesos": null,
+      "owner_id": "e0922871-39c2-4740-a886-6cf2df1fbc4d",
+      "moneda": "USD"
+    },
+    "productos": [
+      {
+        "id": "bd6b9e91-d3d3-403c-a9c6-bcd5bb7a615f",
+        "nombre": "Agua 1 Lt.",
+        "precio": 0.66,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_6489d8c5-1dc9-4020-9e20-2b307602ab49_58d6b4c7-db43-409a-af3d-ad8033f45dd0.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "c1c1ca97-f7d6-468b-be94-83680da4edec",
+        "nombre": "Agua 600ml.",
+        "precio": 0.66,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790806691559_332903.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "1779d813-fa09-4b65-aa68-b6a0e0e8bc6a",
+        "nombre": "Cerdo Ahumado",
+        "precio": 5.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Cerdo Ahumado, Maíz, Pimentón",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_148bf3cd-f18c-4353-93e1-e72d2d0b7aa7_cd0e6d40-35a9-474f-9ddf-caf576488486.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "78982b48-c070-4bee-b245-e778eed1cac1",
+        "nombre": "Granjera",
+        "precio": 4.8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Pollo, Maíz, Champiñón",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_f205d050-ce22-4230-9624-5cfeaa27d127_4498e5e8-8240-4f3e-b870-5cb6ecd8bde9.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "b0f5b526-c8dc-4ad2-aa31-fc1c509656c1",
+        "nombre": "Jamón y Queso",
+        "precio": 3.51,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/0aa8c53b-07f1-446e-8b88-66c2b7ae89ea/product_1792987598346_629625.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "a76d8481-8224-4618-9b70-b9ed534aa0f3",
+        "nombre": "Jamón, Queso y Champiñones",
+        "precio": 4.2,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Champiñones",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_f99b92f8-3dd1-4f5c-9934-193a8e4dfbd4_6d06d3cd-707d-4f5e-a7c4-902a0812aa0e.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "63c16748-1d3a-409a-b96e-cfadfbe9ce0c",
+        "nombre": "Jamón, Queso y Pimentón",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Pimentón",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_9467cede-c542-423d-b5aa-26753b927f37_eb5b41ff-4653-4085-ace1-1b51c1631a0f.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "73b61409-0d01-4109-a699-a469b45d447a",
+        "nombre": "Jamón, Queso y Tocineta",
+        "precio": 4.2,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Tocineta",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_6b854788-5efb-4d5c-b257-ee594899be87_6bcb16e9-2e82-499c-b7d7-83b0152a9e1f.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "a2558e2f-548b-404e-bf67-853945cba936",
+        "nombre": "Jugo Del Valle 1 Lt.",
+        "precio": 1.09,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790807032981_75516.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "8addd2a6-a9d8-4e2d-8c3c-37e47b0a04be",
+        "nombre": "Jugo Yukipark",
+        "precio": 0.88,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790807340080_661903.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "0ae24dea-d028-49c8-90a5-d94b563bb866",
+        "nombre": "Meganapoles",
+        "precio": 4.8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Anchoas, Pollo, Salami, Chorizo, Pimentón",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_0db58831-912b-4dfe-a1e1-70ca9746e272_acf13f90-97ce-4984-8740-4f5e6ad92e46.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "f087d23d-1991-475f-a5c8-0bbdbca8ac55",
+        "nombre": "Porción de Quesillo",
+        "precio": 3,
+        "disponible": true,
+        "categoria_id": "ad92eb3e-c0c6-4c1c-b0a5-ee8126eec2b4",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/0aa8c53b-07f1-446e-8b88-66c2b7ae89ea/product_1792174602741_590867.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "4031b57d-4fef-44b3-b569-48622e646a78",
+        "nombre": "Queso y Chorizo Español",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Chorizo Español",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_21553256-e095-4c1f-837b-fbf42b429633_078b9752-e48e-462f-92b2-285d31d70f63.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "16f30d78-491b-4fce-be24-90e9f4467036",
+        "nombre": "Refresco de 1 L",
+        "precio": 1.31,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790806108847_357915.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "920925ea-90da-4451-bd99-beaedbdc25d8",
+        "nombre": "Agua con gas",
+        "precio": 0.66,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790807419695_754853.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "ea65aa52-3fc6-4669-80d6-b575bfa39647",
+        "nombre": "Especial Nápoles",
+        "precio": 4.2,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Anchoas, Maíz",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_54421b89-72ec-47e5-bf13-87059aac1d2f_5fedb690-3477-43da-884d-73af505326d4.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "09757570-2407-496d-882b-0f108246dab6",
+        "nombre": "Hawaiana",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Piña",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_efda849f-b94b-47da-a422-3b71362d64c2_2849b6f0-c681-45a1-ab26-e8ec8be17edf.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "f7590bbe-dc4a-48e3-83d9-1cd1468d684f",
+        "nombre": "Jamón, Queso y Carne Mechada",
+        "precio": 4.2,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Carne Mechada",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_52958ae0-f333-43ee-86d2-9eceef5251ba_ea0d0483-cf8b-43fd-813a-f07b8a1c062d.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "a8997396-67b6-437a-84e8-36953f738724",
+        "nombre": "Jamón, Queso y Maíz",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Maíz",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_80ad633e-e412-4f95-b68a-c49c6f1f677a_2f1d1559-cc5d-40f8-9da6-514784b96aee.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "03ac0287-ebe0-4f2c-b3da-a771db16f3b9",
+        "nombre": "Jamón, Queso y Pollo",
+        "precio": 4.2,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Pollo",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_3ba8c5ed-8760-45af-839f-50fc0d42fcf9_f4e0dc5b-5c98-4912-993e-6369fc3e85cb.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "48ee95c9-3017-46af-b9c2-63c25d8cd8fc",
+        "nombre": "Jugo Del Valle",
+        "precio": 0.66,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790806886697_127447.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "0517949a-2008-474e-9718-695c715050ec",
+        "nombre": "Jugo Hit",
+        "precio": 0.44,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790807272894_155547.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "6fbc40e9-9403-491e-852e-7a0de0241255",
+        "nombre": "Margarita",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Solo Queso",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_8212f2c3-3b56-4eb9-89e9-5e44c78de1cf_f6f1c744-ebdd-476a-9bec-59e66c58e0b3.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "2099d884-8697-4e8b-b7c4-1531872fbc0e",
+        "nombre": "Napolitana",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Anchoas",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_ec5d6c39-b146-4637-8395-9926b6ab78b2_818564ae-c4ce-4867-8e55-e5784d492c1a.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "10a2046c-b685-4970-8ca6-d7796bcec2e2",
+        "nombre": "Queso y Bocadillo",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Bocadillo",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_8851cf86-18a5-465c-a2bc-d326a0594fbb_66a8d869-5cdd-4911-ba6e-869d48d294e8.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "39b47028-5009-4ec5-a557-efeffec9c6fa",
+        "nombre": "Queso y Salami",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Salami",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_e2e2baed-1aae-49cb-a87e-aeb2a3cc9c2a_a37f67b3-ea7a-4c3e-94f1-848683832dda.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "1d9222ee-9d41-452e-b62d-af8be22c1355",
+        "nombre": "Refresco de 1.5L",
+        "precio": 1.53,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_b14e8913-cc20-4b4b-8113-f8707e9b138d_0ef85e4e-c8a7-4810-ae2c-793f81fc8c54.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "e4142579-4cc9-4637-8ac7-4548528b3e7e",
+        "nombre": "Refresco en botella",
+        "precio": 0.66,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790806096253_22086.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "3068abfa-41cb-47c8-942f-3018be501f16",
+        "nombre": "Tropical",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Bocadillo, Piña",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_c3c324d2-35af-4dc1-81d4-3bbd70ffa7ba_b0e9dd6c-0006-4299-bf38-0f845a630685.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "3952c3fa-c910-41ac-949d-18801e9a4672",
+        "nombre": "QA_CHATBOT_2026 Hamburguesa",
+        "precio": 8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Producto sintético de auditoría",
+        "opciones_menu": null,
+        "imagen_url": null,
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "d4a5ba19-321e-4775-8c4c-d4abd565842d",
+        "nombre": "Campesina",
+        "precio": 6.8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Maíz, Pimentón, Champiñones, Cebolla",
+        "opciones_menu": {
+          "tamanos": [
+            {
+              "id": "sz_1",
+              "label": "Personal",
+              "precio": 8
+            },
+            {
+              "id": "sz_2",
+              "label": "Familiar",
+              "precio": 15
+            }
+          ]
+        },
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_2916faa2-b504-4101-9fad-a136dc0ef6fb_4514fc03-4550-4730-8648-d07d6c36408b.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "c74d16ba-da74-4baf-b890-5d18d0672ce7",
+        "nombre": "Refresco de 2 Lt.",
+        "precio": 1.75,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790806212686_107228.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "c207d815-9ec0-4708-bd7d-16c6bbd09e74",
+        "nombre": "Ternerita",
+        "precio": 4.8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Chorizo, Tocineta, Carne",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_bb86ad26-d28c-46f1-9f77-97068c201a89_59d76f00-bf62-4342-835a-bbaca0275d27.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "aef40993-3fb5-4c28-a553-24c04235b95b",
+        "nombre": "Vegetariana",
+        "precio": 3.5,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Queso, Pimentón, Maíz, Piña",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_b2cf31ff-da68-475f-b03c-b4d2a9af08b5_5f36791d-52e7-40a0-94cd-62fdaf032d83.png",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "e024074d-bf1a-4169-929a-76109a5c5e07",
+        "nombre": "Agua 200 ml.",
+        "precio": 0.44,
+        "disponible": true,
+        "categoria_id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "descripcion": "",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/product_1790807692360_372329.jpg",
+        "upsell_badge": null,
+        "orden": 0
+      },
+      {
+        "id": "107acb6e-1dd6-419a-a3c9-ffec9d6fab50",
+        "nombre": "Carne Ahumada",
+        "precio": 4.8,
+        "disponible": true,
+        "categoria_id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "descripcion": "Jamón, Queso, Carne Ahumada, Maíz, Pimentón",
+        "opciones_menu": null,
+        "imagen_url": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_1aea3256-4f97-4336-986e-ec789f4643b6_1d31b1d9-49d3-4863-9111-e5a6db12c00f.png",
+        "upsell_badge": null,
+        "orden": 0
+      }
+    ],
+    "categorias": [
+      {
+        "id": "5d814a50-498e-4edf-8e04-d7116a63e034",
+        "nombre": "PIZZAS",
+        "orden": 0
+      },
+      {
+        "id": "ad92eb3e-c0c6-4c1c-b0a5-ee8126eec2b4",
+        "nombre": "Postres",
+        "orden": 4
+      },
+      {
+        "id": "9f0f5e07-5288-42d2-b365-e40975541ea9",
+        "nombre": "BEBIDAS",
+        "orden": 3
+      },
+      {
+        "id": "b23da8d3-c98b-4376-8a7a-5e3c5f28842f",
+        "nombre": "Postres QA",
+        "orden": 5
+      }
+    ],
+    "metodos_pago": [
+      {
+        "id": "69f5e0e5-c406-446a-a9ef-e0ae4fe0ef81",
+        "nombre": "Pago digital: Zelle",
+        "tipo": "transferencia__usd__1",
+        "descripcion": "Cuenta de pago digital",
+        "detalles": "{\"name\":\"Zelle\",\"fields\":[{\"type\":\"correo\",\"label\":\"Correo\",\"value\":\"pagos@qa-elmenuxfa.test\"}]}"
+      },
+      {
+        "id": "b638ffb3-26fa-4ed5-84e5-ae7b6f859c37",
+        "nombre": "Pago digital: Zelle",
+        "tipo": "transferencia__usd__2",
+        "descripcion": "Cuenta de pago digital",
+        "detalles": "{\"name\":\"Zelle\",\"fields\":[{\"type\":\"correo\",\"label\":\"Correo\",\"value\":\"pagos@qa-elmenuxfa.test\"}]}"
+      }
+    ],
+    "upsell_rules": [
+      {
+        "id": "3dec88f2-4938-4aee-b4b7-d8046a5b95a7",
+        "name": "promoción QA Promo 2e09",
+        "enabled": true,
+        "trigger_type": "cart",
+        "surface": "cart",
+        "priority": "normal"
+      }
+    ],
+    "upsell_settings": {
+      "id": "b280f725-2bec-4078-a6e1-2fece8b27b36",
+      "comercio_id": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+      "enabled": true,
+      "show_add_to_cart": true,
+      "show_cart": true,
+      "show_checkout": true,
+      "max_add_suggestions": 2,
+      "max_cart_suggestions": 3,
+      "max_checkout_suggestions": 2,
+      "free_delivery_threshold": null,
+      "free_delivery_order_types": [
+        "delivery"
+      ],
+      "created_at": "2026-11-25T19:23:18.329455+00:00",
+      "updated_at": "2026-11-25T20:23:11.755571+00:00"
+    },
+    "invites": [
+      {
+        "id": "fef785c6-2803-49a1-9891-c893c981a2b7",
+        "email": "qa-staff-2042@elmenuxfa.test",
+        "role": "caja",
+        "status": "pending",
+        "token": "99921ed0a238d67863058c61c4ec3a4a66d389b2bbd33d6f",
+        "invited_by": "e0922871-39c2-4740-a886-6cf2df1fbc4d"
+      },
+      {
+        "id": "c2216d92-816f-47c7-a465-c7e00db78b06",
+        "email": "qa-staff-d09d@elmenuxfa.test",
+        "role": "caja",
+        "status": "revoked",
+        "token": "cf8443d5ed1ce717ca6bf422dc9359d60631df35c7f647f7",
+        "invited_by": "e0922871-39c2-4740-a886-6cf2df1fbc4d"
+      }
+    ],
+    "members": []
+  }
+}

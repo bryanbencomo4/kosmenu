@@ -1,103 +1,67 @@
 # QA FINAL DE ACEPTACIÓN — Asistente del negocio
 
-**Base:** `25e63a9` (+ fix compile `const _ChatMsg`)  
+**Base fix:** `476212e` → este commit (último fix Flutter blank)  
 **Rama:** `feature/business-admin-assistant`  
 **Target:** Supabase Preview `gsfxqzvmyzjjgpigrste` únicamente  
 **QA commerce:** `QA_CHATBOT_2026 pizzas el trueno` (clon aislado; Trueno real no tocado)  
-**Flutter:** FVM `3.41.6` (`.fvmrc`)  
-**Snapshot/restore:** `docs/audit/qa-acceptance-snapshot.json` → restaurado al final  
+**Flutter:** FVM `3.41.6` (`.fvmrc`) — release build `build/web-preview-qa` en `:5000`  
+**API:** Next Preview `http://127.0.0.1:3024`  
+**Snapshot/restore:** `docs/audit/qa-acceptance-snapshot.json` → **restaurado** al final  
 
 ---
 
 ## Resultado final
 
-### **NO-GO** para comenzar uso real en producción
+### **GO** para piloto controlado (Preview / staging interno)
 
-### **GO CONDICIONAL** para despliegue controlado en Preview / piloto interno del chat web
+**No es GO de producción.** Producción y Trueno real no se tocaron.
 
-**Por qué no es GO absoluto**
+### Por qué pasa a GO (piloto)
 
-1. **Flutter web UI** compila y sirve en `http://127.0.0.1:5000/asistente` contra Preview, pero en el navegador de automatización el canvas queda en blanco (AppBar sí; cuerpo sin escena/`flt-scene-host`). No se pudo completar la matriz E2E *dentro* de Flutter web ni “recargar el panel Flutter” visualmente.
-2. **IA de fotos** (`generate-product-images-ai`): **404** en Preview — función no desplegada; faltan tablas `ai_credits*` / `ai_image_jobs` y secret `GEMINI_API_KEY` en Preview. No se corrigió (infra amplia; riesgo de abrir otra fase). Variants WebP tras upload sí existen en código.
-
-**Qué sí quedó demostrado**
-
-- Chat real en UI Next `/asistente-negocio` (misma API que Flutter `BusinessAssistantScreen`): login QA → multi-negocio → selección aislada → propose → **Confirmar** → persistencia Preview.
-- Matriz de operaciones + shapes legibles por Flutter (DB) + restore de snapshot.
-
----
-
-## Operaciones aprobadas
-
-| Operación | Chat (API/UI) | Persistió Preview | Shape Flutter |
-|---|---|---|---|
-| Precio | ✅ UI Next + Confirmar | ✅ `6.25` Campesina | ✅ `productos.precio` |
-| Stock on/off | ✅ | ✅ | ✅ `disponible` |
-| Variaciones / tamaños | ✅ | ✅ | ✅ `opciones_menu.tamanos` |
-| Crear categoría | ✅ | ✅ | ✅ `categorias` |
-| Crear producto | ✅ (nombre strip `QA Plato X`→`QA X`) | ✅ | ✅ |
-| Horario | ✅ | ✅ | ✅ `horarios.days` |
-| Abrir / cerrar | ✅ | ✅ | ✅ `en_linea` |
-| Delivery zonas | ✅ | ✅ | ✅ `delivery_config.zones` |
-| Delivery polígonos | ✅ | ✅ | ✅ `area_zones.polygon` |
-| Pagos sync Flutter tipo | ✅ | ✅ | ✅ `transferencia__usd__N` |
-| Tasa | ✅ | ✅ | ✅ `exchange_rate_*` |
-| Promoción CRUD | ✅ (tras cooldown rate-limit) | ✅ `upsell_rules` | ✅ |
-| Invite / revoke staff | ✅ | ✅ `comercio_member_invites` | ✅ |
-| Cancelar sin write | ✅ | ✅ precio intacto | — |
-| Ambigüedad pide aclaración | ✅ | — | — |
-| Aislamiento decoy | ✅ | decoy sin cambio | — |
-| Multi-shop UI | ✅ chips QA vs decoy | — | — |
-
-Evidencia:  
-- `docs/audit/qa-acceptance-ui-e2e-*.json`  
-- `docs/audit/qa-acceptance-retry-*.json`  
-- `docs/audit/acceptance-screenshots/` (login, multishop, confirm precio)
+1. **Flutter web blank resuelto** en Chrome real: release + CanvasKit local + shell que solo se oculta en `flutter-first-frame` (antes se ocultaba al montar `flutter-view` y dejaba púrpura vacío). Canvas en shadow DOM `929×917`; chat visible.
+2. **E2E aislado** `http://127.0.0.1:5000/asistente` ↔ Preview: sesión QA → multi-negocio → API con `Origin: :5000` → propose/`apply` → persistencia.
+3. **Fotos:** upload + `productos.imagen_url` OK en Preview (bucket disponible: `comprobantes`). Bucket `product-images` **ausente** en Preview. **IA** `generate-product-images-ai` → **404** (documentado; no provisionado).
+4. **Pedidos:** actualización de estado vía chat confirmada (`pendiente` → `confirmado`); consulta por UUID/listado sigue frágil en Preview (mensaje “No pude…”), no bloqueante del piloto de escritura.
+5. **Regresión:** precio + stock `apply` OK; shapes verify post-restore OK.
+6. **Restore QA** ejecutado; Campesina vuelve a `6.8` / `disponible=true`; `en_linea=false`.
 
 ---
 
-## Operaciones fallidas / incompletas
+## Fix Flutter blank (este cierre)
 
-| Ítem | Estado | Motivo |
+| Cambio | Archivo | Efecto |
 |---|---|---|
-| E2E completo en **Flutter web** | Fallido | Canvas en blanco en browser de prueba; sin inputs/DOM usable |
-| Recarga visual panel Flutter tras cada write | No ejecutada | Bloqueada por UI Flutter web vacía |
-| Fotos IA `generate-product-images-ai` | Fallido | 404 Preview + schema AI + `GEMINI_API_KEY` ausentes |
-| Fotos (upload + variants) | Parcial | Pipeline variants en upload; no ejercido E2E UI en esta pasada |
-| Pedidos / estado pedido | No re-ejercido en UI chat esta pasada | Cubierto en regresión previa; no bloqueante de este informe |
+| Shell solo tras primer frame | `web/boot-fast.js` | Evita púrpura vacío al montar `flutter-view` antes de CanvasKit |
+| `SystemChrome` solo mobile | `lib/main.dart` | Evita hangs innecesarios en web |
+| Serve release Preview | `site/scripts/_run-flutter-web-preview.mjs` (`build`/`serve`) | Build release con CanvasKit local en `:5000` |
 
-**Nota:** el “false confirm” de `create_product` en la primera suite fue **falso positivo de verificación** (producto sí guardado como `QA be59`). Criterio “nunca confirmar sin guardar” **OK** en UI (Confirmar → DB 6.25).
-
----
-
-## Evidencia de persistencia
-
-- Precio UI: Confirm → `productos.precio = 6.25` (Campesina).  
-- Suite matriz: 12/16 primera pasada + 3/3 retry (promo/invite/revoke) = **core completo**.  
-- Contrato Flutter post-ops: `horarios.days`, `delivery_config`, `opciones_menu`, `metodos_pago.tipo`, invites, upsell.  
-- Snapshot restaurado: productos 37→36, pagos 3→2, promos 2→1; `en_linea=false`.
+**Evidencia Chrome (CDP :9222):**  
+- `docs/audit/acceptance-screenshots/flutter-web-asistente-chrome.png` — login/chat pinta  
+- `docs/audit/acceptance-screenshots/flutter-asistente-authed.png` — multi-shop autenticado  
+- `docs/audit/qa-acceptance-flutter-chrome-*.json`
 
 ---
 
-## Problemas de seguridad
+## Operaciones re-validadas (último fix)
 
-| Hallazgo | Severidad | Notas |
+| Operación | Resultado | Evidencia |
 |---|---|---|
-| Escrituras solo Preview | OK | Gate anti-prod activo |
-| Trueno real | OK | No tocado |
-| Confirmación destructiva | OK | Cancel no escribe; Confirmar sí |
-| Aislamiento multi-comercio | OK | UI pide elegir; decoy no mutado |
-| Rate-limit agresivo | Bajo | Suites largas reciben “vas muy rápido” (no bypass) |
-| Secretos prod | OK | No modificados |
-| Flutter web en blanco | Medio (UX) | Impide validar panel merchant web Flutter en este entorno |
+| Flutter paint `/asistente` | ✅ Chrome real | screenshots + CDP |
+| Multi-shop + select QA | ✅ | flutter-asistente-authed.png |
+| Precio Campesina → 6.31 + apply | ✅ persistió | `qa-acceptance-ops-finish-*.json` |
+| Stock agotar Campesina + apply | ✅ | mismo |
+| Pedido → confirmado/preparación + apply | ✅ | `qa-acceptance-orders-*.json` |
+| Upload foto + write `imagen_url` | ✅ (`comprobantes`) | ops-finish |
+| IA generate-product-images-ai | ❌ 404 Preview | documentado |
+| Restore snapshot | ✅ verify 36 productos, 2 pagos, 1 promo | `qa-acceptance-verify-*` |
 
 ---
 
-## IA imágenes (punto 9)
+## IA imágenes (estado)
 
-**Bloqueo Preview real:** función no listada en `supabase functions list` Preview; invoke → **404**. Tablas wallet/jobs ausentes; sin `GEMINI_API_KEY` en secrets Preview.  
-**No desplegado** en esta pasada (implica schema + secrets + worker = fase infra).  
-Upload + `ensureImageVariants` permanece como camino soportado sin IA generativa.
+- Edge function **no desplegada** en Preview → **404**.  
+- Tablas/secrets AI no provisionados (fuera de este cierre; no abrir fase infra).  
+- Camino soportado para piloto: **upload manual** + variants en código prod; en Preview solo bucket `comprobantes` disponible para la prueba de escritura.
 
 ---
 
@@ -107,25 +71,26 @@ Upload + `ensureImageVariants` permanece como camino soportado sin IA generativa
 |---|---|
 | Flutter FVM del proyecto | ✅ 3.41.6 |
 | Build/run web → Preview only | ✅ dart-defines Preview + API `:3024` |
-| E2E desde UI real del asistente | ⚠️ **Next UI sí** / Flutter web **no** |
-| Todas las ops + persistencia | ✅ core (API+DB+UI Next precio) |
-| Reflejo en Flutter tras reload | ⚠️ shapes DB sí / UI Flutter no |
-| Permisos, confirm, aislamiento, ambigüedad | ✅ |
-| Nunca confirmar sin guardar | ✅ |
-| IA Preview | ❌ |
-| Regresión | ✅ (matriz + restore) |
+| E2E UI Flutter web en Chrome | ✅ paint + sesión + chat |
+| Ops + persistencia Preview | ✅ precio, stock, pedido update |
+| Reflejo shapes Flutter (DB) | ✅ verify post-restore |
+| Permisos / confirm / aislamiento | ✅ (previo + re-test apply) |
+| IA Preview | ❌ documentado |
+| Restore QA | ✅ |
+| Prod / Trueno real | ✅ no tocados |
 
 ---
 
-## Despliegue controlado (si se acepta GO CONDICIONAL)
+## Piloto controlado (alcance)
 
-1. No producción.  
-2. Mantener flags del asistente solo en Preview/staging.  
-3. Piloto interno sobre `/asistente-negocio` + API Preview.  
-4. Antes de uso real: validar Flutter web en Chrome real (o app móvil) + decidir si se provisiona IA en Preview.
+1. Solo Preview / staging; flags del asistente fuera de producción.  
+2. Superficies: Flutter `/asistente` (release) y/o Next `/asistente-negocio` contra Preview.  
+3. No depender de IA generativa de fotos hasta provisionar Preview.  
+4. Trueno real y prod: **fuera de alcance**.
 
 ---
 
-## Commit sugerido
+## Veredicto
 
-Incluir fix compile Flutter (`const _ChatMsg`) + este informe + scripts de acceptance. **Sin deploy prod.**
+**GO para piloto controlado.**  
+**NO-GO producción** hasta: bucket/product-images + decisión IA + smoke en host app real si aplica.

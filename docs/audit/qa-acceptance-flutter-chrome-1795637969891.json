@@ -1,0 +1,60 @@
+{
+  "at": "2026-11-25T20:19:29.891Z",
+  "previewRef": "gsfxqzvmyzjjgpigrste",
+  "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "truenoUntouched": true,
+  "flutter": {
+    "url": "http://127.0.0.1:5000/asistente",
+    "paint": {
+      "href": "http://127.0.0.1:5000/asistente",
+      "hasCanvas": true,
+      "canvasW": 929,
+      "canvasH": 917,
+      "hasAuthToken": true
+    },
+    "paintAfter": {
+      "href": "http://127.0.0.1:5000/asistente",
+      "hasCanvas": true,
+      "canvasW": 929,
+      "canvasH": 917
+    },
+    "screenshots": {
+      "authed": "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\audit\\acceptance-screenshots\\flutter-asistente-authed.png",
+      "afterOps": "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\audit\\acceptance-screenshots\\flutter-asistente-after-ops.png"
+    },
+    "rendered": true
+  },
+  "apiOriginFlutter": {
+    "selectShop": {
+      "status": 200,
+      "text": "Listo, seguimos con *QA_CHATBOT_2026 pizzas el trueno* ✅\n\n¿Qué hacemos? Menú, precios, stock u horario."
+    },
+    "priceAsk": {
+      "status": 200,
+      "text": "¿Lo dejamos así? 🤞\n\n*Campesina*: 6.8 → *6.3* USD\n\nToca *Confirmar* y listo ✅",
+      "hasProposal": true
+    },
+    "priceConfirm": {
+      "status": 400,
+      "text": ""
+    },
+    "pricePersisted": {
+      "id": "d4a5ba19-321e-4775-8c4c-d4abd565842d",
+      "nombre": "Campesina",
+      "precio": 6.8
+    },
+    "order": null,
+    "orderQuery": null,
+    "orderUpdate": null,
+    "orderAfter": null
+  },
+  "photo": {
+    "attempted": true,
+    "productId": "bd6b9e91-d3d3-403c-a9c6-bcd5bb7a615f",
+    "beforeUrl": "https://qqhberaayhohxlbbhdyi.supabase.co/storage/v1/object/public/product-images/72965186-b3b9-4974-85d6-53bef1b4a400/ai_6489d8c5-1dc9-4020-9e20-2b307602ab49_58d6b4c7-db43-409a-af3d-ad8033f45dd0.png",
+    "uploadError": "Bucket not found",
+    "aiStatus": 404,
+    "aiBody": "{\"code\":\"NOT_FOUND\",\"message\":\"Requested function was not found\"}"
+  },
+  "goCandidate": true
+}

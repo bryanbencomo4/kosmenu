@@ -96,30 +96,16 @@
     shell.setAttribute('aria-busy', 'false');
   }
 
-  // Prefer Flutter's first-frame; also drop as soon as the canvas mounts.
+  // Only hide the brand shell after Flutter paints. Hiding on flutter-view /
+  // glass-pane mount races CanvasKit and leaves a purple blank page.
   window.addEventListener('flutter-first-frame', removeShell, { once: true });
 
-  var observer = null;
-  function watchFlutterDom() {
-    if (!document.body || observer) return;
-    observer = new MutationObserver(function () {
-      if (
-        document.querySelector('flt-glass-pane') ||
-        document.querySelector('flutter-view') ||
-        document.querySelector('canvas[aria-label="flutter"]')
-      ) {
-        removeShell();
-        if (observer) {
-          observer.disconnect();
-          observer = null;
-        }
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-  if (document.body) watchFlutterDom();
-  else document.addEventListener('DOMContentLoaded', watchFlutterDom);
+  window.setTimeout(function () {
+    if (shellRemoved) return;
+    var title = document.querySelector('#elmx-boot-shell .elmx-boot-title');
+    if (title) title.textContent = 'Cargando…';
+  }, 8000);
 
-  // Safety net if first-frame is missed.
-  window.setTimeout(removeShell, 12000);
+  // Last resort so a hung engine does not trap merchants forever.
+  window.setTimeout(removeShell, 20000);
 })();

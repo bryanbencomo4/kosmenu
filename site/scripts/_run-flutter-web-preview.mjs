@@ -91,22 +91,52 @@ console.log(
 
 if (mode === 'build') {
   mkdirSync(outDir, { recursive: true });
+  // Release build with local CanvasKit (web/index.html canvasKitBaseUrl).
   const r = spawnSync(
     flutterBat,
-    [
-      'build',
-      'web',
-      '--release',
-      `--output=${outDir}`,
-      '--web-renderer=canvaskit',
-      ...defines,
-    ],
+    ['build', 'web', '--release', `--output=${outDir}`, ...defines],
     { cwd: root, encoding: 'utf8', shell: true, stdio: 'inherit' },
   );
   process.exit(r.status || 0);
 }
 
-if (mode === 'run') {
+if (mode === 'serve') {
+  // Serve an already-built Preview release on CORS-safe port 5000.
+  if (!existsSync(join(outDir, 'index.html'))) {
+    console.error('Missing build. Run: node site/scripts/_run-flutter-web-preview.mjs build');
+    process.exit(1);
+  }
+  const child = spawn(
+    process.execPath,
+    [
+      '-e',
+      `
+const http=require('http');const fs=require('fs');const path=require('path');
+const root=${JSON.stringify(outDir)}; const port=${WEB_PORT};
+const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml','.ttf':'font/ttf','.woff':'font/woff','.woff2':'font/woff2'};
+http.createServer((req,res)=>{
+  let u=decodeURIComponent((req.url||'/').split('?')[0]);
+  if(u==='/'||!path.extname(u)) u='/index.html';
+  const file=path.normalize(path.join(root, u.replace(/^\\/+/,'')));
+  if(!file.startsWith(root)) { res.writeHead(403); return res.end(); }
+  fs.readFile(file,(err,data)=>{
+    if(err){
+      // SPA fallback for /asistente
+      return fs.readFile(path.join(root,'index.html'),(e2,html)=>{
+        if(e2){res.writeHead(404);return res.end('missing');}
+        res.writeHead(200,{'content-type':'text/html'});res.end(html);
+      });
+    }
+    res.writeHead(200,{'content-type':types[path.extname(file)]||'application/octet-stream'});
+    res.end(data);
+  });
+}).listen(port,'127.0.0.1',()=>console.log(JSON.stringify({serving:root,url:'http://127.0.0.1:'+port+'/asistente'})));
+`,
+    ],
+    { cwd: root, stdio: 'inherit' },
+  );
+  child.on('exit', (code) => process.exit(code || 0));
+} else if (mode === 'run') {
   // web-server on CORS-allowed port 5000 (Flutter 3.41+: no --web-renderer flag)
   const child = spawn(
     flutterBat,
@@ -122,6 +152,6 @@ if (mode === 'run') {
   );
   child.on('exit', (code) => process.exit(code || 0));
 } else {
-  console.error('usage: run|build');
+  console.error('usage: run|build|serve');
   process.exit(1);
 }

@@ -1,0 +1,299 @@
+{
+  "at": "2026-11-25T20:21:28.660Z",
+  "cid": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+  "price": {
+    "proposeStatus": 200,
+    "proposeText": "¿Lo dejamos así? 🤞\n\n*Campesina*: 6.8 → *6.31* USD\n\nToca *Confirmar* y listo ✅",
+    "confirm": {
+      "status": 200,
+      "json": {
+        "ok": true,
+        "authenticated": true,
+        "handoffError": null,
+        "payload": null,
+        "membership": [
+          {
+            "comercioId": "28721f02-f9b8-4ce8-83b8-76a437e72201",
+            "nombre": "QA_CHATBOT_2026 decoy isolation",
+            "role": "owner"
+          },
+          {
+            "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+            "nombre": "QA_CHATBOT_2026 pizzas el trueno",
+            "role": "owner"
+          }
+        ],
+        "selectedComercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+        "handoffValid": false,
+        "recoveryHint": false,
+        "panelUrl": "https://app.elmenuxfa.com/",
+        "loginUrl": "https://app.elmenuxfa.com/?next=/asistente",
+        "registerUrl": "https://app.elmenuxfa.com/?tab=register",
+        "appHomeUrl": "https://app.elmenuxfa.com/",
+        "canonicalAppUrl": "https://app.elmenuxfa.com/asistente",
+        "chips": [
+          {
+            "id": "menu",
+            "label": "📋 Ver menú",
+            "text": "ver menú"
+          },
+          {
+            "id": "price",
+            "label": "💵 Precio",
+            "text": "cambiar precio"
+          },
+          {
+            "id": "rate",
+            "label": "💱 Tasa",
+            "text": "tasa de cambio"
+          },
+          {
+            "id": "open",
+            "label": "🟢 Abrir",
+            "text": "abrir"
+          },
+          {
+            "id": "orders",
+            "label": "🧾 Pedidos",
+            "text": "pedidos"
+          },
+          {
+            "id": "today",
+            "label": "📊 Hoy",
+            "text": "resumen de hoy"
+          },
+          {
+            "id": "link",
+            "label": "🔗 Enlace",
+            "text": "enlace del menú"
+          },
+          {
+            "id": "plan",
+            "label": "💳 Membresía",
+            "text": "mi membresía"
+          },
+          {
+            "id": "account",
+            "label": "🔐 Cuenta",
+            "text": "mi cuenta"
+          },
+          {
+            "id": "photo",
+            "label": "🖼️ Foto",
+            "text": "cambiar foto"
+          },
+          {
+            "id": "stock_out",
+            "label": "⏸️ Agotar",
+            "text": "agotar"
+          },
+          {
+            "id": "stock_on",
+            "label": "✅ Activar",
+            "text": "activar"
+          },
+          {
+            "id": "hide",
+            "label": "🙈 Ocultar",
+            "text": "ocultar producto"
+          },
+          {
+            "id": "add",
+            "label": "➕ Producto",
+            "text": "agregar producto"
+          },
+          {
+            "id": "hours",
+            "label": "🕒 Horario",
+            "text": "horario"
+          },
+          {
+            "id": "close",
+            "label": "🔴 Cerrar",
+            "text": "cerrar"
+          },
+          {
+            "id": "human",
+            "label": "🙋 Hablar con soporte",
+            "text": "hablar con un humano"
+          }
+        ],
+        "text": "¡Hecho! ✅ *Campesina* quedó en *6.31* USD\n\n(ref ba_mwwkjvna_3qv7yd)",
+        "proposal": null,
+        "menuView": null,
+        "showAccountCard": null,
+        "ordersView": null,
+        "metricsView": null,
+        "customersView": null,
+        "auditId": "ba_mwwkjvna_3qv7yd"
+      }
+    },
+    "campesina": {
+      "id": "d4a5ba19-321e-4775-8c4c-d4abd565842d",
+      "nombre": "Campesina",
+      "precio": 6.31
+    },
+    "ok": true
+  },
+  "order": {
+    "seed": {
+      "insertError": "invalid input value for enum pedido_estado: \"recibido\"",
+      "data": null
+    },
+    "query": null,
+    "update": null,
+    "after": null,
+    "ok": false
+  },
+  "photo": {
+    "buckets": [
+      "comprobantes"
+    ],
+    "productImagesBucketPresent": false,
+    "uploaded": true,
+    "aiStatus": 404,
+    "aiBody": "{\"code\":\"NOT_FOUND\",\"message\":\"Requested function was not found\"}",
+    "note": "Preview storage has comprobantes only; product-images bucket absent. Upload exercised on comprobantes + productos.imagen_url write.",
+    "uploadError": null,
+    "publicUrl": "https://gsfxqzvmyzjjgpigrste.supabase.co/storage/v1/object/public/comprobantes/09fb6dd4-e72f-4be7-822a-0972cc4e01e9/qa-acceptance/bd6b9e91-d3d3-403c-a9c6-bcd5bb7a615f-1795638083573.png",
+    "productAfter": {
+      "id": "bd6b9e91-d3d3-403c-a9c6-bcd5bb7a615f",
+      "imagen_url": "https://gsfxqzvmyzjjgpigrste.supabase.co/storage/v1/object/public/comprobantes/09fb6dd4-e72f-4be7-822a-0972cc4e01e9/qa-acceptance/bd6b9e91-d3d3-403c-a9c6-bcd5bb7a615f-1795638083573.png"
+    },
+    "ok": true,
+    "aiDocumented": true
+  },
+  "stock": {
+    "confirm": {
+      "status": 200,
+      "json": {
+        "ok": true,
+        "authenticated": true,
+        "handoffError": null,
+        "payload": null,
+        "membership": [
+          {
+            "comercioId": "28721f02-f9b8-4ce8-83b8-76a437e72201",
+            "nombre": "QA_CHATBOT_2026 decoy isolation",
+            "role": "owner"
+          },
+          {
+            "comercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+            "nombre": "QA_CHATBOT_2026 pizzas el trueno",
+            "role": "owner"
+          }
+        ],
+        "selectedComercioId": "09fb6dd4-e72f-4be7-822a-0972cc4e01e9",
+        "handoffValid": false,
+        "recoveryHint": false,
+        "panelUrl": "https://app.elmenuxfa.com/",
+        "loginUrl": "https://app.elmenuxfa.com/?next=/asistente",
+        "registerUrl": "https://app.elmenuxfa.com/?tab=register",
+        "appHomeUrl": "https://app.elmenuxfa.com/",
+        "canonicalAppUrl": "https://app.elmenuxfa.com/asistente",
+        "chips": [
+          {
+            "id": "menu",
+            "label": "📋 Ver menú",
+            "text": "ver menú"
+          },
+          {
+            "id": "price",
+            "label": "💵 Precio",
+            "text": "cambiar precio"
+          },
+          {
+            "id": "rate",
+            "label": "💱 Tasa",
+            "text": "tasa de cambio"
+          },
+          {
+            "id": "open",
+            "label": "🟢 Abrir",
+            "text": "abrir"
+          },
+          {
+            "id": "orders",
+            "label": "🧾 Pedidos",
+            "text": "pedidos"
+          },
+          {
+            "id": "today",
+            "label": "📊 Hoy",
+            "text": "resumen de hoy"
+          },
+          {
+            "id": "link",
+            "label": "🔗 Enlace",
+            "text": "enlace del menú"
+          },
+          {
+            "id": "plan",
+            "label": "💳 Membresía",
+            "text": "mi membresía"
+          },
+          {
+            "id": "account",
+            "label": "🔐 Cuenta",
+            "text": "mi cuenta"
+          },
+          {
+            "id": "photo",
+            "label": "🖼️ Foto",
+            "text": "cambiar foto"
+          },
+          {
+            "id": "stock_out",
+            "label": "⏸️ Agotar",
+            "text": "agotar"
+          },
+          {
+            "id": "stock_on",
+            "label": "✅ Activar",
+            "text": "activar"
+          },
+          {
+            "id": "hide",
+            "label": "🙈 Ocultar",
+            "text": "ocultar producto"
+          },
+          {
+            "id": "add",
+            "label": "➕ Producto",
+            "text": "agregar producto"
+          },
+          {
+            "id": "hours",
+            "label": "🕒 Horario",
+            "text": "horario"
+          },
+          {
+            "id": "close",
+            "label": "🔴 Cerrar",
+            "text": "cerrar"
+          },
+          {
+            "id": "human",
+            "label": "🙋 Hablar con soporte",
+            "text": "hablar con un humano"
+          }
+        ],
+        "text": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwkk0ce_n0s53t)",
+        "proposal": null,
+        "menuView": null,
+        "showAccountCard": null,
+        "ordersView": null,
+        "metricsView": null,
+        "customersView": null,
+        "auditId": "ba_mwwkk0ce_n0s53t"
+      }
+    },
+    "row": {
+      "id": "d4a5ba19-321e-4775-8c4c-d4abd565842d",
+      "nombre": "Campesina",
+      "disponible": false,
+      "precio": 6.31
+    },
+    "ok": true
+  }
+}
