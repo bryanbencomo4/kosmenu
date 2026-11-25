@@ -1,0 +1,132 @@
+{
+  "at": "2026-11-25T18:35:11.529Z",
+  "ref": "gsfxqzvmyzjjgpigrste",
+  "base": "http://127.0.0.1:3024",
+  "comercioId": "61693934-f0f6-4a34-b751-0c954e6b7b7e",
+  "decoyId": "474542d6-0eb1-491c-a58a-9fa8777a813d",
+  "ops": [
+    {
+      "name": "set_price",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Lo dejamos así? 🤞\n\n*Campesina*: 4.8 → *5.8* USD\n\nToca *Confirmar* y listo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Hecho! ✅ *Campesina* quedó en *5.8* USD\n\n(ref ba_mwwgre6a_ytjl2q)",
+        "ok": true
+      },
+      "db": {
+        "before": 4.8,
+        "after": 5.8,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_off",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwgrf5p_x8l3mo)",
+        "ok": true
+      },
+      "db": {
+        "disponible": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_on",
+      "propose": {
+        "hadProposal": false
+      }
+    },
+    {
+      "name": "set_hours",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\nCambia el horario a QA_CHATBOT_2026 Lun-Vie 11:00-21:00\n\nConfirma y lo guardo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Guardado! 🕒 Horario de *QA_CHATBOT_2026 pizzas el trueno* actualizado.\n\n(ref ba_mwwgrg6o_apcqcm)",
+        "ok": true
+      },
+      "db": {
+        "note": "Cambia el horario a QA_CHATBOT_2026 Lun-Vie 11:00-21:00",
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_en_linea_true",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Abierto! 🟢 *QA_CHATBOT_2026 pizzas el trueno* ya está en línea.\n\n(ref ba_mwwgrgx9_yje1d5)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_en_linea_false",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Cerrado por ahora 🔴 *QA_CHATBOT_2026 pizzas el trueno* fuera de línea.\n\n(ref ba_mwwgrhs9_cvu7ds)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": false,
+        "persisted": true
+      }
+    }
+  ],
+  "isolation": {
+    "decoyPriceBefore": 99,
+    "unchanged": false,
+    "proposalAppeared": true,
+    "assistant": "¿Lo dejamos así? 🤞\n\n*QA_CHATBOT_2026 Hamburguesa*: 8 → *1.11* USD\n\nToca *Confirmar* y listo ✅"
+  },
+  "missingTools": [
+    {
+      "prompt": "crea una categoría postres",
+      "hadProposal": false,
+      "assistant": ""
+    },
+    {
+      "prompt": "agrega un método de pago Zelle de prueba",
+      "hadProposal": false,
+      "assistant": "¡Nuevo plato! 🍽️\n\nDime *nombre* y *precio* (ej. “Arepa 3.5”) y te preparo la ficha para confirmar aquí."
+    },
+    {
+      "prompt": "crea una zona de delivery de prueba",
+      "hadProposal": false,
+      "assistant": "Estoy con *QA_CHATBOT_2026 pizzas el trueno* (🔴 fuera de línea).\n\nToca lo que necesites en la barra de abajo — o escríbeme como en WhatsApp 💬"
+    },
+    {
+      "prompt": "crea una promoción 2x1",
+      "hadProposal": false,
+      "assistant": "Estoy con *QA_CHATBOT_2026 pizzas el trueno* (🔴 fuera de línea).\n\nToca lo que necesites en la barra de abajo — o escríbeme como en WhatsApp 💬"
+    },
+    {
+      "prompt": "marca el pedido pendiente como entregado",
+      "hadProposal": false,
+      "assistant": "Estoy con *QA_CHATBOT_2026 pizzas el trueno* (🔴 fuera de línea).\n\nToca lo que necesites en la barra de abajo — o escríbeme como en WhatsApp 💬"
+    }
+  ],
+  "scoreHints": {}
+}

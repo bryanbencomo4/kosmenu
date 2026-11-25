@@ -8,6 +8,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
+import 'package:kosmenu_app/screens/business_assistant_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart' deferred as setup_screen;
 import 'package:kosmenu_app/screens/force_update_screen.dart';
 import 'package:kosmenu_app/screens/merchant_access_picker_screen.dart';
@@ -448,6 +449,12 @@ class _AuthGateState extends State<AuthGate> {
 
                 switch (boot.destination) {
                   case PostAuthDestination.dashboard:
+                    // Login is always at app root; optional ?next=/asistente
+                    // resumes the admin chat without a second login hop.
+                    final next = MerchantDeepLink.consumeNext();
+                    if (next == '/asistente') {
+                      return const BusinessAssistantScreen();
+                    }
                     // Pending /panel/conversaciones/{id} is opened by
                     // AdminDashboardScreen via MerchantDeepLink.
                     return const AdminDashboardScreen();

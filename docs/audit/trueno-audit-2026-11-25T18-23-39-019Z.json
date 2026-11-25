@@ -1,0 +1,18 @@
+{
+  "stamp": "2026-11-25T18-23-39-019Z",
+  "base": "http://127.0.0.1:3023",
+  "supabaseHost": "qqhberaayhohxlbbhdyi.supabase.co",
+  "commerceId": "0aa8c53b-07f1-446e-8b88-66c2b7ae89ea",
+  "commerceName": "pizzas el trueno",
+  "enLinea": true,
+  "productCount": 35,
+  "categoryCount": 3,
+  "pedidosCount": 13,
+  "snapBefore": "C:\\Users\\bryan\\Documents\\projects\\kosmenu_app\\docs\\audit\\trueno-snapshot-before-2026-11-25T18-23-39-019Z.json",
+  "turns": [],
+  "confirms": [],
+  "dbChecks": [],
+  "restore": null,
+  "mode": "probe",
+  "abort": "en_linea_true_refusing_writes"
+}

@@ -173,7 +173,7 @@ export function ChatSuggestedReplies({
               type="button"
               data-chat-suggested-chip={chip.id}
               onClick={() => onPick(chip)}
-              className="shrink-0 whitespace-nowrap rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--chat-text)] shadow-sm transition active:scale-[0.97] active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--chat-send)]"
+              className="shrink-0 cursor-inherit whitespace-nowrap rounded-full border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--chat-text)] shadow-sm transition active:scale-[0.97] active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--chat-send)]"
             >
               {chip.label}
             </button>

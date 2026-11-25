@@ -1,6 +1,7 @@
 /**
  * Business assistant — flags fail closed.
- * Canonical merchant URL: app.elmenuxfa.com/asistente (Flutter + Next API).
+ * Login / panel home: app.elmenuxfa.com/ (never /asistente for auth).
+ * Assistant surface after session: app.elmenuxfa.com/asistente.
  * /asistente-negocio remains an internal Next fallback only.
  */
 
@@ -28,5 +29,10 @@ export function normalizeHandoffCode(raw: string | null | undefined): string | n
   return v;
 }
 
+/** App home — login and panel live here. */
+export const BUSINESS_ASSISTANT_APP_HOME = 'https://app.elmenuxfa.com/';
+/** Login URL (root). Optional `?next=/asistente` returns to the assistant after auth. */
+export const BUSINESS_ASSISTANT_LOGIN_URL = 'https://app.elmenuxfa.com/?next=/asistente';
+/** Authenticated assistant route (not a login page). */
 export const BUSINESS_ASSISTANT_CANONICAL_APP_PATH = 'https://app.elmenuxfa.com/asistente';
 export const BUSINESS_ASSISTANT_NEXT_PATH = '/asistente-negocio';

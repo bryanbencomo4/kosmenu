@@ -16,6 +16,8 @@ class MerchantDeepLink {
   static bool _openPaymentProof = false;
   static String? _conversationId;
   static String? _conversationComercioId;
+  /// Post-login in-app route (e.g. `/asistente`). Login itself stays at app root.
+  static String? _nextRoute;
 
   static void rememberOrder(
     String? orderId, {
@@ -76,6 +78,29 @@ class MerchantDeepLink {
 
   static String? peekConversationComercioId() => _conversationComercioId;
 
+  /// Remember where to go after login at `app.elmenuxfa.com/` (never use /asistente as login).
+  static void rememberNext(String? route) {
+    final raw = (route ?? '').trim();
+    if (raw.isEmpty) return;
+    final normalized = raw.startsWith('/') ? raw : '/$raw';
+    // Allowlist only safe internal destinations.
+    if (normalized == '/asistente' || normalized.startsWith('/asistente?')) {
+      _nextRoute = '/asistente';
+    }
+  }
+
+  static void rememberNextFromUri(Uri uri) {
+    rememberNext(uri.queryParameters['next']);
+  }
+
+  static String? peekNext() => _nextRoute;
+
+  static String? consumeNext() {
+    final next = _nextRoute;
+    _nextRoute = null;
+    return next;
+  }
+
   static String? consumeConversation() {
     final id = _conversationId;
     _conversationId = null;
@@ -114,5 +139,6 @@ class MerchantDeepLink {
     _openPaymentProof = false;
     _conversationId = null;
     _conversationComercioId = null;
+    _nextRoute = null;
   }
 }

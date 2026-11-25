@@ -1,0 +1,10 @@
+{
+  "bootNeedsSelect": true,
+  "shopChipCount": 2,
+  "shopChipsHaveComercioId": true,
+  "byNameSelected": true,
+  "byNameText": "¡Buenas tardes, *QA_CHATBOT_2026 pizzas el trueno*! 👋\n\n🔴 Tu menú está oculto al público. ¿Lo abrimos?\n\nHoy todavía no pude cargar el resumen 🙈 — igual te ayu",
+  "byChipSelected": true,
+  "priceHadProposal": true,
+  "priceText": "¿Lo dejamos así? 🤞\n\n*Margarita*: 3.5 → *6.25* USD\n\nToca *Confirmar* y listo ✅"
+}

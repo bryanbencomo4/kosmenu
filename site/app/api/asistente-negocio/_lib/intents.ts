@@ -1,0 +1,386 @@
+export type BusinessIntent =
+  | { kind: 'list_menu' }
+  | { kind: 'propose_price'; productHint?: string; newPrice?: number }
+  | { kind: 'propose_availability'; productHint?: string; available?: boolean }
+  | { kind: 'change_image'; productHint?: string }
+  | { kind: 'read_hours' }
+  | { kind: 'propose_hours'; hoursText?: string }
+  | { kind: 'propose_en_linea'; enLinea?: boolean }
+  | { kind: 'recent_orders'; filter?: 'all' | 'pending' | 'today' }
+  | { kind: 'home_metrics'; focus?: 'all' | 'sales' | 'customers' | 'orders' }
+  | { kind: 'customers' }
+  | { kind: 'order_detail'; hint: string }
+  | { kind: 'currency' }
+  | { kind: 'membership' }
+  | { kind: 'account'; mode?: 'password' | 'email' | 'menu' }
+  | { kind: 'share_menu' }
+  | { kind: 'refuse_sensitive' }
+  | { kind: 'register' }
+  | { kind: 'add_product' }
+  | {
+      kind: 'unsupported';
+      topic: 'payments' | 'delivery' | 'promo' | 'staff' | 'category' | 'order_status';
+    }
+  | { kind: 'select_comercio'; nameHint: string }
+  | { kind: 'escalate_human'; reason?: string }
+  | { kind: 'confirm_apply' }
+  | { kind: 'cancel_confirm' }
+  | { kind: 'chat'; reply: string }
+  | { kind: 'help' };
+
+/** Write-like intents that need confirm before apply. */
+const WRITE_KINDS = new Set([
+  'propose_price',
+  'propose_availability',
+  'propose_hours',
+  'propose_en_linea',
+]);
+
+/** True when rules already matched a concrete admin action (skip Gemini). */
+export function isConcreteBusinessIntent(intent: BusinessIntent): boolean {
+  return intent.kind !== 'help';
+}
+
+export function isWriteBusinessIntent(intent: BusinessIntent): boolean {
+  return WRITE_KINDS.has(intent.kind);
+}
+
+export function foldText(s: string) {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function parsePrice(text: string): number | undefined {
+  const m = text.match(
+    /(?:a|por|precio(?:\s+a)?|dejar(?:lo)?(?:\s+en)?|poner(?:lo)?(?:\s+en)?|cuesta|vale|=)\s*\$?\s*(\d+(?:[.,]\d{1,2})?)/i,
+  );
+  if (!m?.[1]) {
+    const bare = text.match(/\b(\d+(?:[.,]\d{1,2})?)\s*(?:usd|\$)?\b/i);
+    if (!bare?.[1]) return undefined;
+    const n = Number(bare[1].replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  const n = Number(m[1].replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * Split simple dual requests: "cierra … y dime …".
+ * Avoids splitting product names like "arepa y queso".
+ */
+export function splitMultiUtterance(raw: string): string[] {
+  const parts = raw
+    .split(
+      /\s+y\s+(?=(?:dime|muestr|consult|revis|cambi|pon(?:le|me)?|activ|cerr|abr|desactiv|manda|public|sube|baja|agrega|añade))/i,
+    )
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length >= 2 ? parts.slice(0, 2) : [raw.trim()].filter(Boolean);
+}
+
+export function parseBusinessIntent(
+  raw: string,
+  opts?: { pendingOp?: string | null },
+): BusinessIntent {
+  const t = foldText(raw);
+
+  // Only whole-message confirms — "sí pero…" must not apply a write.
+  if (/^(si|sí|confirmar|confirma|aplicar|dale|ok|okay|acepto)[!?.]*$/.test(t)) {
+    return { kind: 'confirm_apply' };
+  }
+  if (/^(no|cancelar|cancela|descartar)[!?.]*$/.test(t)) {
+    return { kind: 'cancel_confirm' };
+  }
+
+  // Never reveal secrets — before account/password change helpers.
+  if (
+    /\b(codigo de (verificacion|acceso)|otp|clave api|api key|token de acceso|pin de seguridad)\b/.test(
+      t,
+    ) ||
+    (/\b(envia|enviame|pasame|dame|dime|muestrame|revela|copia|quiero que me (des|muestres)|necesito que me des|necesito el)\b/.test(
+      t,
+    ) &&
+      /\b(contrase[nñ]a|password|token|otp|pin|clave api|api key|codigo de (verificacion|acceso)|datos de acceso|telefono privado|teléfono privado)\b/.test(
+        t,
+      )) ||
+    (/\b(contrase[nñ]a|password|token|otp|pin|clave api|api key|codigo de (verificacion|acceso)|telefono privado|teléfono privado|datos de acceso)\b/.test(
+      t,
+    ) &&
+      /\b(otro|otra|due[nñ]o|competencia|vendedor|empleado|ajeno|propietario)\b/.test(t)) ||
+    /\b(acceso de administrador de mi competencia)\b/.test(t)
+  ) {
+    return { kind: 'refuse_sensitive' };
+  }
+
+  if (
+    /\b(hablar con (un )?humano|hablar con (un )?asesor|pasar a (un )?asesor|pasar a (un )?humano|soporte humano|atencion humana|atención humana|necesito ayuda humana|necesito un asesor|necesito que soporte|contactar soporte|quiero (un )?asesor|hablar con (una )?persona|atender(me)? (alguien|una persona|un asesor)|prefiero que me atienda|me pueden llamar|persona de soporte|asesor humano|persona del equipo|(un )?asesor (revise|humano)|necesito que (un )?asesor|quiero que (me )?contacten|quiero que una persona|soporte me explique)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'escalate_human', reason: raw.trim().slice(0, 240) };
+  }
+
+  // "otro menú / otro negocio" must NOT fall into list_menu.
+  if (
+    /\b(otro negocio|nueva cuenta|nuevo negocio|segundo negocio|otro local|otra tienda|segunda sucursal|crear(me)? (un )?negocio|registrar(me)?|dos sucursales|cambiar de restaurante|negocios (que )?tengo)\b/.test(
+      t,
+    ) ||
+    (/\b(menu|menú)\b/.test(t) &&
+      /\b(otro|otra|nuevo|nueva|crear|segundo)\b/.test(t) &&
+      /\b(negocio|local|comercio|tienda|cuenta|cafeteria|pasteleria)\b/.test(t))
+  ) {
+    return { kind: 'register' };
+  }
+
+  if (
+    /\b(enlace|link|qr|codigo qr|compart(ir|e) (mi )?menu|compart(ir|e) (el )?menu|pasame el enlace|imprimir.*(qr|menu))\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'share_menu' };
+  }
+
+  // Modules not writable yet — classify BEFORE add_product so they never leak there.
+  if (
+    /\b(metodo(s)? de pago|métodos? de pago|pago(s)?|zelle|pago movil|pago móvil|transferencia|punto de venta|pos|stripe|cobro(s)?)\b/.test(
+      t,
+    ) &&
+    /\b(agrega|añade|crear|crea|configura|pon|activo|activar|nuevo|nueva)\b/.test(t)
+  ) {
+    return { kind: 'unsupported', topic: 'payments' };
+  }
+  if (
+    /\b(delivery|domicilio|envio|envío|zona(s)? de (delivery|envio|envío|cobertura)|costo de envio|costo de envío)\b/.test(
+      t,
+    ) &&
+    /\b(agrega|añade|crear|crea|configura|pon|nueva|nuevo)\b/.test(t)
+  ) {
+    return { kind: 'unsupported', topic: 'delivery' };
+  }
+  if (
+    /\b(promocion|promoción|promo|2x1|descuento|cupon|cupón|oferta)\b/.test(t) &&
+    /\b(agrega|añade|crear|crea|activa|activar|nueva|nuevo|pon)\b/.test(t)
+  ) {
+    return { kind: 'unsupported', topic: 'promo' };
+  }
+  if (
+    /\b(trabajador|trabajadores|empleado|empleados|staff|mesero|meseros|cajero|cajeros|permisos de (usuario|empleado))\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'unsupported', topic: 'staff' };
+  }
+  if (
+    (/\b(categoria|categoría|categorias|categorías)\b/.test(t) &&
+      /\b(agrega|añade|crear|crea|nueva|nuevo)\b/.test(t)) ||
+    /\b(crea|crear)\s+(una\s+)?categor/.test(t)
+  ) {
+    return { kind: 'unsupported', topic: 'category' };
+  }
+  if (
+    /\b(pedido|orden)\b/.test(t) &&
+    /\b(entregado|en camino|en preparacion|en preparación|marcar como|cambiar (el )?estado|listo para entregar)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'unsupported', topic: 'order_status' };
+  }
+
+  if (
+    (/\b(agregar|añadir|añade|agrega|incorpora|nuevo producto|producto nuevo|producto llamado)\b/.test(
+      t,
+    ) ||
+      (/\b(crea|crear)\b/.test(t) &&
+        /\b(producto|plato|combo|arepa|pizza|hamburguesa|bebida|ensalada|menu infantil|menú infantil)\b/.test(
+          t,
+        ))) &&
+    !/\b(foto|imagen|precio|tasa|anuncio|promocion|promoción|pago|zelle|delivery|domicilio|categoria|categoría|empleado|trabajador)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'add_product' };
+  }
+  if (/\b(tasa|moneda|dolar|dólar|bolivares|bolívares)\b/.test(t) || /\btasa de cambio\b/.test(t)) {
+    return { kind: 'currency' };
+  }
+  if (
+    /\b(membres[ií]a|membresia|suscripci[oó]n|subscription|mi plan|el plan|que plan|qué plan|facturaci[oó]n|billing|renovar|cu[aá]nto (tiempo|falta).*(pagar|membres|plan)|cu[aá]nto (me )?(toca|debo|tengo que) pagar|cuando (pago|vence)|fecha de corte|pr[oó]ximo pago|plan (anual|actual|contratado))\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'membership' };
+  }
+  if (
+    /\b(cambiar contrase[nñ]a|nueva contrase[nñ]a|olvide mi contrase|olvidé mi contrase|recuperar (el )?acceso|reset(ear)? (la )?pass|cambiar (el )?email|cambiar (el )?correo|mi cuenta|actualizar (email|correo|contrase)|cambiar la clave)\b/.test(
+      t,
+    )
+  ) {
+    if (/\b(email|correo)\b/.test(t)) return { kind: 'account', mode: 'email' };
+    if (/\b(contrase|pass|clave|acceso)\b/.test(t)) return { kind: 'account', mode: 'password' };
+    return { kind: 'account', mode: 'menu' };
+  }
+  if (
+    /\b(detalle (del |de |del)?pedido|ver pedido|pedido (numero|número|#)?\s*\d+|pedido [a-f0-9]{6,}|ref(erencia)? [a-f0-9]{6,})\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'order_detail', hint: raw.trim().slice(0, 120) };
+  }
+
+  // Names before "clientes" count / metrics.
+  if (
+    /\b(nombres? de (los )?clientes|lista de clientes|quienes (son|pidieron|compraron)|quiénes (son|pidieron|compraron)|clientes (recientes|que pidieron|que mas compran|que más compran)|dame (los )?(nombres? de )?(los )?clientes|dale (el |los )?nombres? de (los )?clientes|ultimo cliente|último cliente|quien fue el ultimo)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'customers' };
+  }
+
+  // Pending / today order lists before generic "cuántos pedidos" metrics.
+  if (/\b(pedidos|ordenes|órdenes|ultimos pedidos|últimos pedidos)\b/.test(t)) {
+    if (/\b(pendiente|pendientes)\b/.test(t)) {
+      return { kind: 'recent_orders', filter: 'pending' };
+    }
+    if (/\bhoy\b/.test(t) && !/\bcuant[oa]s?\b/.test(t)) {
+      return { kind: 'recent_orders', filter: 'today' };
+    }
+    if (!/\bcuant[oa]s?\b/.test(t)) {
+      return { kind: 'recent_orders', filter: 'all' };
+    }
+  }
+
+  if (
+    /\b(resumen( de)? hoy|como va( el)? (dia|día|negocio)|cómo va( el)? (dia|día|negocio)|ventas( de)? hoy|cuanto(s)? (he )?vendido|cuánto(s)? (he )?vendido|cuanto vendimos|cuánto vendimos|ticket prom|promedio que gasta)\b/.test(
+      t,
+    ) ||
+    (/\bcuant[oa]s?\b/.test(t) &&
+      /\b(clientes|pedidos|ventas)\b/.test(t) &&
+      !/\b(pendiente|pendientes)\b/.test(t)) ||
+    (/\bhoy\b/.test(t) && /\b(ventas|resumen|vendi|vendí|vendimos)\b/.test(t))
+  ) {
+    let focus: 'all' | 'sales' | 'customers' | 'orders' = 'all';
+    if (/\bclientes?\b/.test(t)) focus = 'customers';
+    else if (/\bventas?\b|\bvendido\b|\bvendimos\b|\bvendi\b|\bvendí\b/.test(t)) focus = 'sales';
+    else if (/\bpedidos?\b/.test(t)) focus = 'orders';
+    return { kind: 'home_metrics', focus };
+  }
+
+  if (/\b(pedidos|ordenes|órdenes|ultimos pedidos|últimos pedidos)\b/.test(t)) {
+    return { kind: 'recent_orders', filter: 'all' };
+  }
+  if (/\b(foto|imagen|picture|logo)\b/.test(t) && !/\b(enlace|link|qr)\b/.test(t)) {
+    return { kind: 'change_image', productHint: raw };
+  }
+
+  if (/\b(horario|horarios)\b/.test(t)) {
+    if (
+      /\b(cambiar|actualizar|modificar|poner|dejar|atender|correge|corrige|ajustar|configurar)\b/.test(
+        t,
+      ) ||
+      /:\s*\d/.test(raw) ||
+      /\b\d{1,2}:\d{2}\b/.test(t)
+    ) {
+      return { kind: 'propose_hours', hoursText: raw.trim() };
+    }
+    return { kind: 'read_hours' };
+  }
+
+  // Product availability BEFORE open/close — "activa Campesina" ≠ abrir el local.
+  const availOff =
+    /\b(agotado|agotar|agotada|agota|no disponible|desactivar|desactiva|ocultar|oculta|ocultalo|inhabilitar|inhabilita|deshabilitar|deshabilita)\b/.test(
+      t,
+    );
+  const availOn =
+    /\b(activar|activa|activo|habilitar|habilita|habilito|reactiva|reactivar|disponibilizar|desagotar|marcar como disponible|pon(?:er)? disponible|deja(?:r)? disponible)\b/.test(
+      t,
+    ) || /\bdisponible\b/.test(t);
+  const availLocal =
+    /\b(local|negocio|comercio|tienda|menu|menú|caja|en linea|en línea)\b/.test(t);
+  if (
+    opts?.pendingOp === 'edit_availability' ||
+    ((availOn || availOff) && !availLocal) ||
+    (/\b(agotado|agotar|agotada|ocultar producto)\b/.test(t) && availLocal === false)
+  ) {
+    return {
+      kind: 'propose_availability',
+      productHint: raw,
+      available: !availOff,
+    };
+  }
+
+  if (
+    /\b(abrir|abre|encender|poner online|en linea|en línea|activar el local|activar el negocio|aparece abierto|esta abierto|está abierto)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'propose_en_linea', enLinea: true };
+  }
+  if (
+    /\b(cerrar|cierra|apagar|poner offline|fuera de linea|fuera de línea|cerrar caja|cerrar por hoy)\b/.test(
+      t,
+    ) &&
+    !/\b(producto|plato|item)\b/.test(t)
+  ) {
+    return { kind: 'propose_en_linea', enLinea: false };
+  }
+  if (/\b(estado|estoy abierto|estas abierto|estás abierto)\b/.test(t)) {
+    return { kind: 'propose_en_linea' };
+  }
+
+  // Price: explicit price language OR "cuánto cuesta X".
+  if (
+    opts?.pendingOp === 'edit_price' ||
+    /\bprecio\b/.test(t) ||
+    /\b(cuanto cuesta|cuánto cuesta|cuanto vale|cuánto vale)\b/.test(t) ||
+    (/\b(cambiar|actualizar|modificar|subir|bajar|dejar|pon|coloca|aumenta|baja)\b/.test(t) &&
+      /\b(precio|precios|cuesta|costo|vale|\$|usd|bs|\d)\b/.test(t))
+  ) {
+    return {
+      kind: 'propose_price',
+      productHint: raw,
+      newPrice: parsePrice(raw),
+    };
+  }
+
+  // Browse menu / products / category lists.
+  if (
+    /^(ver menu|ver menú|mostrar menu|mostrar menú|productos|carta|precios)$/.test(t) ||
+    /\b(ver (el )?menu|ver (el )?menú|mostrar (el )?menu|mostrar (el )?menú|lista de productos|ver productos|ver carta|ver precios|muestrame (todos )?los productos|muéstrame (todos )?los productos|productos (que )?tengo|listar|categoria|categoría|bebidas|desayunos|postres)\b/.test(
+      t,
+    )
+  ) {
+    return { kind: 'list_menu' };
+  }
+
+  if (
+    (/\b(usar|seleccionar|elegir|cambiar (a|al)|seguir con)\b/.test(t) &&
+      /\b(negocio|local|comercio|tienda)\b/.test(t)) ||
+    (/^(usar|seleccionar|elegir)\b/.test(t) && t.length < 120)
+  ) {
+    return { kind: 'select_comercio', nameHint: raw };
+  }
+
+  return { kind: 'help' };
+}
+
+/**
+ * Up to 2 concrete intents for simple multi utterances.
+ * Prefer executing reads + at most one write (caller enforces).
+ */
+export function parseBusinessIntents(
+  raw: string,
+  opts?: { pendingOp?: string | null },
+): BusinessIntent[] {
+  const chunks = splitMultiUtterance(raw);
+  if (chunks.length < 2) return [parseBusinessIntent(raw, opts)];
+
+  const intents = chunks
+    .map((c) => parseBusinessIntent(c, opts))
+    .filter((i) => i.kind !== 'help' && i.kind !== 'chat');
+
+  if (intents.length >= 2) return intents.slice(0, 2);
+  return [parseBusinessIntent(raw, opts)];
+}

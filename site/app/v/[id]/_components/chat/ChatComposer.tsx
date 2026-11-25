@@ -91,6 +91,8 @@ type ChatComposerProps = {
    * Used by the platform WA inbox (Wasender rejects audio/webm uploads).
    */
   preferWhatsappVoiceMime?: boolean;
+  /** Hide attach control (admin text shell). */
+  hideAttach?: boolean;
 };
 
 /** Live state of a mic press, kept in a ref so pointer handlers never go stale. */
@@ -163,6 +165,7 @@ export function ChatComposer({
   sendTestId = 'chat-composer-send',
   placeholder = 'Escribe un mensaje',
   preferWhatsappVoiceMime = false,
+  hideAttach = false,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1154,20 +1157,22 @@ export function ChatComposer({
                 spellCheck
               />
               {/* Attach sits on the right inside the pill, like WhatsApp. */}
-              <button
-                type="button"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
-                aria-label="Adjuntar"
-                aria-expanded={attachOpen}
-                disabled={disabled || Boolean(voiceDraft)}
-                onClick={() => {
-                  setEmojiOpen(false);
-                  setAttachOpen((v) => !v);
-                }}
-                data-chat-attach-toggle="1"
-              >
-                <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.85} aria-hidden />
-              </button>
+              {hideAttach ? null : (
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-[color-mix(in_srgb,var(--chat-text)_8%,transparent)]"
+                  aria-label="Adjuntar"
+                  aria-expanded={attachOpen}
+                  disabled={disabled || Boolean(voiceDraft)}
+                  onClick={() => {
+                    setEmojiOpen(false);
+                    setAttachOpen((v) => !v);
+                  }}
+                  data-chat-attach-toggle="1"
+                >
+                  <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.85} aria-hidden />
+                </button>
+              )}
             </div>
             )}
 

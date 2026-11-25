@@ -241,6 +241,8 @@ class _KosmenuAppState extends State<KosmenuApp> {
   String _resolveInitialRoute() {
     if (kIsWeb) {
       final uri = Uri.base;
+      // Capture post-login destination while auth stays on app root.
+      MerchantDeepLink.rememberNextFromUri(uri);
       if (uri.queryParameters['flow'] == 'password-recovery') {
         return '/auth/recovery';
       }

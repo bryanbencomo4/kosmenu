@@ -1,0 +1,57 @@
+{
+  "at": "2026-11-25T18:31:54.596Z",
+  "preview": {
+    "urlPresent": true,
+    "refDeclared": "gsfxqzvmyzjjgpigrste",
+    "refFromUrl": "gsfxqzvmyzjjgpigrste",
+    "matchesExpectedPreview": true,
+    "isProductionUrl": false,
+    "hasServiceKey": true,
+    "hasAnonKey": true
+  },
+  "prodDotLocalRef": "qqhberaayhohxlbbhdyi",
+  "tables": {
+    "comercios": {
+      "ok": true,
+      "count": 20,
+      "error": null
+    },
+    "productos": {
+      "ok": true,
+      "count": 669,
+      "error": null
+    },
+    "categorias": {
+      "ok": true,
+      "count": 99,
+      "error": null
+    },
+    "pedidos": {
+      "ok": true,
+      "count": 11,
+      "error": null
+    },
+    "comercio_members": {
+      "ok": true,
+      "count": 0,
+      "error": null
+    },
+    "subscriptions": {
+      "ok": true,
+      "count": 2,
+      "error": null
+    },
+    "plans": {
+      "ok": true,
+      "count": 2,
+      "error": null
+    }
+  },
+  "verdict": "READY_isolated_preview_for_qa_clone",
+  "truenoInPreview": {
+    "found": true,
+    "error": null,
+    "en_linea": true,
+    "nombre": "pizzas el trueno"
+  }
+}

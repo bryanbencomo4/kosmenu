@@ -1,0 +1,46 @@
+{
+  "at": "2026-11-25T18:37:13.350Z",
+  "availabilityOnProbes": [
+    {
+      "prompt": "Activa Campesina",
+      "hadProposal": false,
+      "assistant": "Estoy con *QA_CHATBOT_2026 pizzas el trueno* (🔴 fuera de línea).\n\nToca lo que necesites en la barra de abajo — o escríbeme como en WhatsApp 💬",
+      "proposalOp": null
+    },
+    {
+      "prompt": "Marca Campesina como disponible",
+      "hadProposal": true,
+      "assistant": "¿Activamos *Campesina* otra vez? ✅\n\nConfirma y queda disponible.",
+      "proposalOp": null,
+      "apply": {
+        "status": 200,
+        "text": "¡Listo! ✅ *Campesina* otra vez disponible.\n\n(ref ba_mwwgtvzg_mlmz64)",
+        "ok": true
+      },
+      "db": {
+        "disponible": true,
+        "precio": 5.8,
+        "nombre": "Campesina"
+      }
+    }
+  ],
+  "assistantCrossCommerce": {
+    "decoyBefore": 99,
+    "hadProposal": true,
+    "assistant": "¿Lo dejamos así? 🤞\n\n*QA_CHATBOT_2026 Hamburguesa*: 1.11 → *2.22* USD\n\nToca *Confirmar* y listo ✅",
+    "decoyAfter": 99,
+    "decoyUntouched": true,
+    "hamburguesaPrice": 2.22
+  },
+  "rlsSameOwnerDirectUpdate": {
+    "updateRows": [
+      {
+        "id": "72ead54a-2f63-45d6-a78f-17fa9fbc885e",
+        "precio": 98.5
+      }
+    ],
+    "error": null,
+    "afterProbe": 98.5,
+    "note": "Owner JWT can write products in any owned commerce; chat isolation is comercioId-scoped."
+  }
+}

@@ -5,8 +5,198 @@ import type { WaHandoffPayload } from '../_lib/wa-handoff';
 import { resolveWaHandoffStore } from '../_lib/wa-handoff-store';
 import { appCorsPreflight, withAppCors } from '../_lib/app-cors';
 import { getUserFromBearerRequest } from '../_lib/supabase-user-auth';
-import { getServiceSupabaseClient } from '../_lib/supabase-server';
-import { isBusinessAssistantApiEnabled } from '../../_lib/business-assistant';
+import { consumeRateLimit, getClientIp } from '../_lib/rate-limit';
+import {
+  BUSINESS_ASSISTANT_APP_HOME,
+  BUSINESS_ASSISTANT_CANONICAL_APP_PATH,
+  BUSINESS_ASSISTANT_LOGIN_URL,
+  isBusinessAssistantApiEnabled,
+} from '../../_lib/business-assistant';
+import { resolveMembership } from './_lib/auth';
+import { getBusinessAssistantRuntimeConfig } from './_lib/config';
+import {
+  greetingText,
+  helpText,
+  homeGreetingText,
+  multiBusinessText,
+  needsAuthText,
+  noBusinessText,
+  rateLimitText,
+} from './_lib/copy';
+import { suggestBusinessChips } from './_lib/chips';
+import { classifyBusinessTurnWithGemini } from './_lib/gemini-nlu';
+import {
+  isConcreteBusinessIntent,
+  isWriteBusinessIntent,
+  parseBusinessIntent,
+  parseBusinessIntents,
+  type BusinessIntent,
+} from './_lib/intents';
+import type { BusinessShop } from './_lib/auth';
+import { escalateBusinessAssistantToHuman } from './_lib/escalate';
+import { readMembership } from './_lib/membership';
+import { resolveShopByName } from './_lib/product-match';
+import {
+  applyConfirm,
+  guideChangeImage,
+  listMenu,
+  listCustomers,
+  loadShopHomeMetrics,
+  proposeAvailability,
+  proposeEnLinea,
+  proposeHours,
+  proposePrice,
+  readHomeMetrics,
+  readHours,
+  readOrderDetail,
+  recentOrders,
+  type BusinessToolResult,
+} from './_lib/tools';
+
+async function executeBusinessIntent(params: {
+  intent: BusinessIntent;
+  userId: string;
+  shop: BusinessShop;
+  userText: string;
+  conversationHint?: string | null;
+  geminiReply?: string;
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+}): Promise<BusinessToolResult> {
+  const { intent, userId, shop, userText, conversationHint, geminiReply, history } =
+    params;
+  switch (intent.kind) {
+    case 'list_menu':
+      return listMenu(shop);
+    case 'propose_price':
+      return proposePrice(userId, shop, {
+        productHint: intent.productHint || conversationHint || undefined,
+        newPrice: intent.newPrice,
+      });
+    case 'propose_availability':
+      return proposeAvailability(userId, shop, {
+        productHint: intent.productHint,
+        available: intent.available,
+      });
+    case 'change_image':
+      return guideChangeImage(shop, intent.productHint);
+    case 'read_hours':
+      return readHours(shop);
+    case 'propose_hours':
+      return proposeHours(userId, shop, intent.hoursText || userText);
+    case 'propose_en_linea':
+      return proposeEnLinea(userId, shop, intent.enLinea);
+    case 'recent_orders':
+      return recentOrders(shop, { filter: intent.filter || 'all' });
+    case 'home_metrics':
+      return readHomeMetrics(shop, intent.focus || 'all');
+    case 'customers':
+      return listCustomers(shop);
+    case 'order_detail':
+      return readOrderDetail(shop, intent.hint || userText);
+    case 'currency':
+      return {
+        text: shop.tasa
+          ? `💱 En *${shop.nombre}* la tasa está en *${shop.tasa}* (${shop.moneda ?? 'moneda local'}).\n\n¿La actualizamos? Dime el nuevo valor (ej. “tasa 42.5”).`
+          : `💱 En *${shop.nombre}* aún no veo tasa cargada (${shop.moneda ?? '—'}).\n\nDime el valor (ej. “tasa 42.5”) y la dejamos lista aquí.`,
+      };
+    case 'membership':
+      return readMembership(shop);
+    case 'account': {
+      const mode = intent.mode || 'menu';
+      if (mode === 'password') {
+        return {
+          text: `Vamos a cambiar tu *contraseña* 🔐\n\nUsa la tarjetita de abajo — no salgas del chat. Nunca te pediré ni mostraré tokens.`,
+          showAccountCard: 'password',
+        };
+      }
+      if (mode === 'email') {
+        return {
+          text: `Vamos a actualizar tu *email* ✉️\n\nUsa la tarjetita de abajo. Te puede llegar un correo de confirmación.`,
+          showAccountCard: 'email',
+        };
+      }
+      return {
+        text: `Tu cuenta de acceso 👤\n\nPuedo ayudarte a *cambiar contraseña* o *cambiar email* aquí mismo, con seguridad.\n\n¿Qué quieres actualizar?`,
+        showAccountCard: 'menu',
+      };
+    }
+    case 'share_menu': {
+      if (shop.slug) {
+        const path = `/v/${encodeURIComponent(shop.slug)}`;
+        return {
+          text: [
+            `Aquí tienes el enlace público de *${shop.nombre}* 🔗`,
+            '',
+            `https://elmenuxfa.com${path}`,
+            '',
+            'Úsalo en WhatsApp, Instagram o para generar tu QR. No incluye tokens ni datos privados.',
+          ].join('\n'),
+        };
+      }
+      return {
+        text: `Aún no veo un *slug* público cargado para *${shop.nombre}* 🙈\n\nCuando esté listo te paso el enlace aquí mismo.`,
+      };
+    }
+    case 'refuse_sensitive':
+      return {
+        text: [
+          'Eso no lo puedo compartir 🔒',
+          '',
+          'Nunca revelo contraseñas, tokens, OTP ni claves API — ni tuyas ni de otro negocio.',
+          '',
+          'Si quieres *cambiar* tu email o contraseña, dímelo y te abro la tarjeta segura aquí en el chat.',
+        ].join('\n'),
+      };
+    case 'register':
+      return {
+        text: [
+          `Sí — puedes tener *otro menú* para otro negocio 🏪`,
+          '',
+          `Ahora estás en *${shop.nombre}*. Dime el *nombre* del otro local y lo armamos aquí mismo paso a paso.`,
+        ].join('\n'),
+      };
+    case 'add_product':
+      return {
+        text: `¡Nuevo plato! 🍽️\n\nDime *nombre* y *precio* (ej. “Arepa 3.5”) y te preparo la ficha para confirmar aquí.`,
+      };
+    case 'unsupported': {
+      const copy: Record<typeof intent.topic, string> = {
+        payments:
+          'Métodos de pago todavía no los configuro desde el chat 💳\n\nÚsalos en el panel admin. Aquí sí puedo ayudarte con *precios*, *stock*, *horario* y *abrir/cerrar*.',
+        delivery:
+          'Zonas de delivery aún no las armo desde aquí 🛵\n\nConfigúralas en el panel. En el chat sí manejo *menú*, *precios*, *stock* y *horario*.',
+        promo:
+          'Promociones / 2x1 todavía no las creo por chat 🏷️\n\nEso vive en el panel por ahora. ¿Cambiamos un *precio* o el *horario* mientras tanto?',
+        staff:
+          'Trabajadores y permisos aún no los gestiono en el chat 👥\n\nEso está en el panel. Aquí te ayudo con el *menú* y el *estado* del local.',
+        category:
+          'Crear categorías todavía no está en el chat 📂\n\nPuedes hacerlo en el panel. Aquí sí consulto el menú y edito *precio* / *disponibilidad*.',
+        order_status:
+          'Cambiar el estado de un pedido aún no lo hago por chat 🧾\n\nPuedo *listar* pedidos; el cambio de estado sigue en el panel.',
+      };
+      return { text: copy[intent.topic] };
+    }
+    case 'escalate_human':
+      return escalateBusinessAssistantToHuman({
+        userId,
+        shop,
+        userText,
+        reason: intent.reason || userText,
+        history,
+      });
+    case 'chat':
+      return { text: intent.reply };
+    case 'select_comercio':
+      return {
+        text: `Listo, seguimos con *${shop.nombre}* ✅\n\n¿Qué hacemos? Menú, precios, stock u horario.`,
+      };
+    case 'help':
+    default:
+      return {
+        text: geminiReply?.trim() || helpText(shop.nombre, shop.enLinea),
+      };
+  }
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,9 +212,11 @@ const bodySchema = z.object({
     .max(40)
     .optional(),
   handoffCode: z.string().trim().max(64).optional(),
-  /** peek | consume — consume only after user engages */
   handoffAction: z.enum(['peek', 'consume']).optional(),
   comercioId: z.string().trim().max(64).optional(),
+  /** Structured confirm from UI cards (preferred over typing "confirmar"). */
+  confirmToken: z.string().trim().min(10).max(4000).optional(),
+  confirmAction: z.enum(['apply', 'cancel']).optional(),
 });
 
 function getHandoffStore() {
@@ -35,95 +227,34 @@ export async function OPTIONS(req: Request) {
   return appCorsPreflight(req, CORS);
 }
 
-async function resolveMembership(userId: string, preferredComercioId?: string | null) {
-  const sb = getServiceSupabaseClient();
-  const { data: owned } = await sb
-    .from('comercios')
-    .select('id,nombre,slug,moneda,tasa_cambio_pesos')
-    .eq('owner_id', userId)
-    .limit(20);
-  const { data: memberRows } = await sb
-    .from('comercio_members')
-    .select('comercio_id,role,status')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .limit(20);
-
-  const byId = new Map<
-    string,
-    { comercioId: string; nombre: string; slug: string | null; role: string; moneda: string | null; tasa: string | null }
-  >();
-  for (const row of owned || []) {
-    byId.set(String(row.id), {
-      comercioId: String(row.id),
-      nombre: String(row.nombre || 'Negocio'),
-      slug: row.slug ? String(row.slug) : null,
-      role: 'owner',
-      moneda: row.moneda ? String(row.moneda) : null,
-      tasa: row.tasa_cambio_pesos != null ? String(row.tasa_cambio_pesos) : null,
-    });
-  }
-  for (const m of memberRows || []) {
-    const id = String(m.comercio_id);
-    if (byId.has(id)) continue;
-    const { data: c } = await sb
-      .from('comercios')
-      .select('id,nombre,slug,moneda,tasa_cambio_pesos')
-      .eq('id', id)
-      .maybeSingle();
-    if (!c) continue;
-    byId.set(id, {
-      comercioId: id,
-      nombre: String(c.nombre || 'Negocio'),
-      slug: c.slug ? String(c.slug) : null,
-      role: String(m.role || 'member'),
-      moneda: c.moneda ? String(c.moneda) : null,
-      tasa: c.tasa_cambio_pesos != null ? String(c.tasa_cambio_pesos) : null,
-    });
-  }
-  const list = [...byId.values()];
-  const preferred = preferredComercioId
-    ? list.find((c) => c.comercioId === preferredComercioId) || null
-    : list.length === 1
-      ? list[0]
-      : null;
-  return { list, selected: preferred };
-}
-
-function fold(s: string) {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
-function greeting(payload: WaHandoffPayload | null, authenticated: boolean): string {
-  if (payload?.pendingOperation === 'edit_price' || payload?.intent?.includes('edit_price')) {
-    const hint = payload.conversationHint || 'el cambio de precio';
-    if (!authenticated) {
-      return `¡Hola! 😊 Vamos a revisar: ${hint}.\n\nPrimero inicia sesión en tu cuenta de elmenuxfa.com para continuar de forma segura. Tu solicitud ya está preparada.`;
-    }
-    return `¡Hola! 😊 Continuamos con: ${hint}.\n\nPuedo consultar el menú y preparar la modificación. Para aplicarla te llevaré al formulario del panel con confirmación.`;
-  }
-  if (payload?.pendingOperation === 'register_business') {
-    const name = payload.businessNameDraft ? ` *${payload.businessNameDraft}*` : '';
-    return `¡Excelente! 🙌 Continuamos el registro${name}.\n\nPuedo orientarte aquí; la creación de cuenta se completa con autenticación en el panel.`;
-  }
-  if (payload?.conversationHint) {
-    return `¡Hola! 😊 Retomamos: ${payload.conversationHint}.`;
-  }
-  return '¡Hola! 😊 Soy el asistente para negocios de elmenuxfa.com. ¿Consultamos tu menú, precios o te ayudo a registrar un negocio?';
-}
-
-/**
- * POST /api/asistente-negocio — conversational business assistant backend.
- * Flag: BUSINESS_ASSISTANT_ENABLED=1
- */
 function json(req: Request, data: unknown, status = 200) {
   return withAppCors(req, NextResponse.json(data, { status }), CORS);
 }
 
+function withResult(
+  base: Record<string, unknown>,
+  result: BusinessToolResult,
+): Record<string, unknown> {
+  return {
+    ...base,
+    text: result.text,
+    proposal: result.proposal ?? null,
+    productsSample: result.productsSample,
+    menuView: result.menuView ?? null,
+    showAccountCard: result.showAccountCard ?? null,
+    ordersView: result.ordersView ?? null,
+    metricsView: result.metricsView ?? null,
+    customersView: result.customersView ?? null,
+    auditId: result.auditId,
+  };
+}
+
+/**
+ * POST /api/asistente-negocio — merchant admin assistant.
+ * Flag: BUSINESS_ASSISTANT_ENABLED=1 (also allowed in test/preview/local empty VERCEL_ENV).
+ */
 export async function POST(req: Request) {
+  const cfg = getBusinessAssistantRuntimeConfig();
   const vercelEnv = (process.env.VERCEL_ENV || '').trim().toLowerCase();
   const allow =
     isBusinessAssistantApiEnabled() ||
@@ -132,6 +263,23 @@ export async function POST(req: Request) {
     vercelEnv === '';
   if (!allow) {
     return json(req, { ok: false, error: 'disabled' }, 403);
+  }
+
+  const ip = getClientIp(req);
+  const ipRate = consumeRateLimit(
+    `business-assistant:ip:${ip}`,
+    cfg.rateLimitPerIpPerMinute,
+    60_000,
+  );
+  if (!ipRate.ok) {
+    return json(
+      req,
+      {
+        ok: true,
+        text: rateLimitText(),
+      },
+      429,
+    );
   }
 
   let body: z.infer<typeof bodySchema>;
@@ -143,6 +291,25 @@ export async function POST(req: Request) {
 
   const user = await getUserFromBearerRequest(req);
   const authenticated = Boolean(user);
+
+  if (user) {
+    const userRate = consumeRateLimit(
+      `business-assistant:user:${user.id}`,
+      cfg.rateLimitPerUserPerMinute,
+      60_000,
+    );
+    if (!userRate.ok) {
+      return json(
+        req,
+        {
+          ok: true,
+          authenticated: true,
+          text: rateLimitText(),
+        },
+        429,
+      );
+    }
+  }
 
   let payload: WaHandoffPayload | null = null;
   let handoffError: string | null = null;
@@ -165,171 +332,297 @@ export async function POST(req: Request) {
 
   const membership = user
     ? await resolveMembership(user.id, body.comercioId || payload?.candidateComercioId)
-    : { list: [], selected: null };
+    : { list: [] as Awaited<ReturnType<typeof resolveMembership>>['list'], selected: null as Awaited<ReturnType<typeof resolveMembership>>['selected'] };
+  let selectedShop = membership.selected;
 
   const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user');
-  const isBoot = !lastUser;
+  const isBoot = !lastUser && !body.confirmToken;
+
+  const baseAuth = {
+    ok: true as const,
+    authenticated,
+    handoffError,
+    payload,
+    membership: membership.list.map((c) => ({
+      comercioId: c.comercioId,
+      nombre: c.nombre,
+      role: c.role,
+    })),
+    selectedComercioId: selectedShop?.comercioId ?? null,
+    handoffValid: Boolean(payload) && !handoffError,
+    recoveryHint: handoffError === 'expired' || handoffError === 'consumed',
+    panelUrl: cfg.panelUrl,
+    loginUrl: cfg.loginUrl || BUSINESS_ASSISTANT_LOGIN_URL,
+    registerUrl: cfg.registerUrl,
+    appHomeUrl: BUSINESS_ASSISTANT_APP_HOME,
+    canonicalAppUrl: BUSINESS_ASSISTANT_CANONICAL_APP_PATH,
+  };
 
   if (isBoot) {
-    return json(req, {
-      ok: true,
-      authenticated,
-      handoffError,
-      payload,
-      membership: membership.list.map((c) => ({
-        comercioId: c.comercioId,
-        nombre: c.nombre,
-        role: c.role,
-      })),
-      selectedComercioId: membership.selected?.comercioId ?? null,
-      text: handoffError
-        ? handoffError === 'expired'
-          ? 'Este enlace venció (TTL). No quedó atrapado: escribe de nuevo por WhatsApp y te enviaremos un acceso nuevo. Mientras tanto puedes iniciar sesión y consultar tu menú aquí.'
+    let bootText: string;
+    let bootMetrics: Awaited<ReturnType<typeof loadShopHomeMetrics>> = null;
+    let chipPhase: 'auth' | 'boot' | 'multi_shop' | 'no_shop' = 'boot';
+
+    if (handoffError) {
+      bootText =
+        handoffError === 'expired'
+          ? 'Este enlace de WhatsApp ya venció ⏰\n\nEntra aquí abajo y seguimos igual 💪'
           : handoffError === 'consumed'
-            ? 'Este enlace ya fue usado. Si necesitas continuar, escribe de nuevo por WhatsApp para un acceso nuevo.'
-            : 'No pude validar el acceso de WhatsApp. No hay una solicitud preparada. Puedes iniciar sesión o pedir un enlace nuevo.'
-        : greeting(payload, authenticated),
-      needsAuth: !authenticated && Boolean(payload?.pendingOperation?.startsWith('edit') || payload?.intent?.includes('admin')),
-      handoffValid: Boolean(payload) && !handoffError,
-      recoveryHint: handoffError === 'expired' || handoffError === 'consumed',
-      panelUrl: 'https://app.elmenuxfa.com/',
-      registerUrl: 'https://app.elmenuxfa.com/?tab=register',
-    });
-  }
-
-  if (!authenticated) {
-    return json(req, {
-      ok: true,
-      authenticated: false,
-      payload,
-      handoffValid: Boolean(payload) && !handoffError,
-      text: handoffError
-        ? 'Inicia sesión para consultar tu negocio. El enlace de WhatsApp ya no es válido; pide uno nuevo si necesitas retomar esa solicitud.'
-        : 'Para consultar tu menú o preparar cambios necesito que inicies sesión en elmenuxfa.com. Tu solicitud de WhatsApp se conserva en este enlace hasta que expire.',
-      needsAuth: true,
-      panelUrl: 'https://app.elmenuxfa.com/',
-      registerUrl: 'https://app.elmenuxfa.com/?tab=register',
-    });
-  }
-
-  if (!membership.selected && membership.list.length > 1) {
-    const list = membership.list.map((c) => `• ${c.nombre}`).join('\n');
-    return json(req, {
-      ok: true,
-      authenticated: true,
-      payload,
-      membership: membership.list,
-      text: `Tienes acceso a varios negocios:\n${list}\n\nDime cuál quieres usar.`,
-      needsComercioSelect: true,
-    });
-  }
-
-  if (!membership.selected) {
-    return json(req, {
-      ok: true,
-      authenticated: true,
-      payload,
-      text:
-        'No encontré un negocio vinculado a esta cuenta. Si quieres registrar uno, continúa aquí:\nhttps://app.elmenuxfa.com/?tab=register',
-      registerUrl: 'https://app.elmenuxfa.com/?tab=register',
-    });
-  }
-
-  const shop = membership.selected;
-  const sb = getServiceSupabaseClient();
-  const t = fold(lastUser!.text);
-
-  // Read products
-  if (/\b(productos|menu|menú|carta|precios|pizza|margarita)\b/.test(t) || payload?.pendingOperation === 'edit_price') {
-    const { data: products } = await sb
-      .from('productos')
-      .select('id,nombre,precio,disponible,categoria')
-      .eq('comercio_id', shop.comercioId)
-      .limit(40);
-
-    const hint = fold(payload?.conversationHint || lastUser!.text);
-    const match =
-      (products || []).find((p) => fold(String(p.nombre || '')).includes('margarita')) ||
-      (products || []).find((p) => hint.includes(fold(String(p.nombre || '')))) ||
-      null;
-
-    if (/\b(cambiar|actualizar|modificar|precio)\b/.test(t) || payload?.pendingOperation === 'edit_price') {
-      const label = match ? String(match.nombre) : 'el producto';
-      const current = match?.precio != null ? String(match.precio) : '—';
-      return json(req, {
-        ok: true,
-        authenticated: true,
-        selectedComercioId: shop.comercioId,
-        text: [
-          `En *${shop.nombre}* ${match ? `*${match.nombre}*` : 'ese producto'} está en ${current}${shop.moneda ? ` ${shop.moneda}` : ''}.`,
-          '',
-          'Puedo preparar el cambio, pero aplicarlo requiere el formulario del panel (con tu sesión y confirmación).',
-          '',
-          `Abrir panel: https://app.elmenuxfa.com/`,
-          match ? `(Busca ${label} en productos para editar el precio.)` : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        proposal: {
-          action: 'edit_price',
-          productId: match ? String(match.id) : null,
-          productName: match ? String(match.nombre) : null,
-          currentPrice: current,
-          panelUrl: 'https://app.elmenuxfa.com/',
-        },
-        productsSample: (products || []).slice(0, 8).map((p) => ({
-          nombre: p.nombre,
-          precio: p.precio,
-          disponible: p.disponible,
-        })),
-      });
+            ? 'Ese enlace ya se usó 🙂\n\nEntra aquí abajo y continuamos 💬'
+            : 'No pude leer el enlace de WhatsApp 😅\n\nEntra aquí abajo y arrancamos de cero ✨';
+      chipPhase = authenticated ? 'boot' : 'auth';
+    } else if (
+      authenticated &&
+      selectedShop &&
+      !payload?.pendingOperation &&
+      !payload?.conversationHint
+    ) {
+      bootMetrics = await loadShopHomeMetrics(selectedShop);
+      bootText = homeGreetingText(selectedShop, bootMetrics);
+      chipPhase = 'boot';
+    } else if (authenticated && !selectedShop && membership.list.length > 1) {
+      bootText = multiBusinessText(membership.list.map((c) => c.nombre));
+      chipPhase = 'multi_shop';
+    } else if (authenticated && !selectedShop) {
+      bootText = noBusinessText();
+      chipPhase = 'no_shop';
+    } else {
+      bootText = greetingText(payload, authenticated);
+      chipPhase = authenticated ? 'boot' : 'auth';
     }
 
-    const lines = (products || [])
-      .slice(0, 12)
-      .map((p) => `• ${p.nombre}: ${p.precio ?? '—'}${p.disponible === false ? ' (agotado)' : ''}`)
-      .join('\n');
     return json(req, {
-      ok: true,
-      authenticated: true,
+      ...baseAuth,
+      text: bootText,
+      needsAuth: !authenticated,
+      showAuthCard: !authenticated,
+      needsComercioSelect: Boolean(authenticated && !selectedShop && membership.list.length > 1),
+      chips: suggestBusinessChips({
+        phase: chipPhase,
+        shop: selectedShop,
+        metrics: bootMetrics,
+        shopNames: membership.list.map((c) => c.nombre),
+        shops: membership.list.map((c) => ({
+          comercioId: c.comercioId,
+          nombre: c.nombre,
+        })),
+        handoffPending: payload?.pendingOperation || null,
+      }),
+    });
+  }
+
+  // Structured confirm from UI (does not require last user text).
+  if (body.confirmToken && body.confirmAction === 'cancel') {
+    return json(req, {
+      ...baseAuth,
+      text: 'Listo, cancelado ❌ No toqué nada.',
+      proposal: null,
+      chips: suggestBusinessChips({ phase: 'after_cancel', shop: selectedShop }),
+    });
+  }
+
+  if (body.confirmToken && body.confirmAction === 'apply') {
+    if (!user) {
+      return json(req, {
+        ...baseAuth,
+        text: needsAuthText(false),
+        needsAuth: true,
+        showAuthCard: true,
+        chips: suggestBusinessChips({ phase: 'auth' }),
+      });
+    }
+    const result = await applyConfirm({
+      userId: user.id,
+      shops: membership.list,
+      token: body.confirmToken,
+    });
+    return json(
+      req,
+      withResult(
+        {
+          ...baseAuth,
+          selectedComercioId: selectedShop?.comercioId ?? null,
+          chips: suggestBusinessChips({
+            phase: 'after_apply',
+            shop: selectedShop,
+            result,
+          }),
+        },
+        result,
+      ),
+    );
+  }
+
+  if (!authenticated || !user) {
+    return json(req, {
+      ...baseAuth,
+      text: needsAuthText(Boolean(handoffError)),
+      needsAuth: true,
+      showAuthCard: true,
+      chips: suggestBusinessChips({ phase: 'auth' }),
+    });
+  }
+
+  if (!selectedShop && membership.list.length > 1) {
+    const byName = resolveShopByName(membership.list, lastUser!.text);
+    if (byName) selectedShop = byName;
+    if (!selectedShop) {
+      const intent = parseBusinessIntent(lastUser!.text);
+      if (intent.kind === 'select_comercio') {
+        selectedShop = resolveShopByName(membership.list, intent.nameHint);
+      }
+    }
+    if (!selectedShop) {
+      return json(req, {
+        ...baseAuth,
+        text: multiBusinessText(membership.list.map((c) => c.nombre)),
+        needsComercioSelect: true,
+        chips: suggestBusinessChips({
+          phase: 'multi_shop',
+          shops: membership.list.map((c) => ({
+            comercioId: c.comercioId,
+            nombre: c.nombre,
+          })),
+        }),
+      });
+    }
+    // Fresh selection: greet that shop, persist id for the client.
+    if (!body.comercioId || body.comercioId !== selectedShop.comercioId) {
+      const bootMetrics = await loadShopHomeMetrics(selectedShop);
+      return json(req, {
+        ...baseAuth,
+        selectedComercioId: selectedShop.comercioId,
+        text: homeGreetingText(selectedShop, bootMetrics),
+        needsComercioSelect: false,
+        chips: suggestBusinessChips({
+          phase: 'boot',
+          shop: selectedShop,
+          metrics: bootMetrics,
+        }),
+      });
+    }
+  }
+
+  if (!selectedShop) {
+    return json(req, {
+      ...baseAuth,
+      text: noBusinessText(),
+      showAuthCard: false,
+      chips: suggestBusinessChips({ phase: 'no_shop' }),
+    });
+  }
+
+  const shop = selectedShop;
+  const pendingOp = payload?.pendingOperation;
+  const multiIntents = parseBusinessIntents(lastUser!.text, { pendingOp });
+  let intent = multiIntents[0]!;
+  let geminiReply: string | undefined;
+
+  // Gemini only for ambiguous turns — never replaces confirm/cancel or clear chip intents.
+  if (multiIntents.length < 2 && !isConcreteBusinessIntent(intent)) {
+    const gemini = await classifyBusinessTurnWithGemini({
+      shopName: shop.nombre,
+      enLinea: shop.enLinea,
+      userText: lastUser!.text,
+      history: (body.messages || []).slice(-8),
+    });
+    if (gemini) {
+      intent = gemini.intent;
+      geminiReply = gemini.reply;
+    }
+  }
+
+  if (intent.kind === 'confirm_apply') {
+    return json(req, {
+      ...baseAuth,
       selectedComercioId: shop.comercioId,
-      text: `Menú de *${shop.nombre}* (lectura):\n${lines || 'Sin productos visibles.'}\n\nMoneda: ${shop.moneda ?? '—'}${shop.tasa ? ` · tasa: ${shop.tasa}` : ''}`,
+      text: 'Toca *Confirmar* en la tarjetita de arriba ✅ (o pide el cambio otra vez).',
+      chips: [
+        { id: 'cancel', label: '❌ Cancelar', text: 'cancelar' },
+        { id: 'menu', label: '📋 Ver menú', text: 'ver menú' },
+        { id: 'orders', label: '🧾 Pedidos', text: 'pedidos' },
+      ],
     });
   }
-
-  if (/\b(tasa|cambio|moneda|dolar|dólar)\b/.test(t)) {
+  if (intent.kind === 'cancel_confirm') {
     return json(req, {
-      ok: true,
-      authenticated: true,
+      ...baseAuth,
       selectedComercioId: shop.comercioId,
-      text: `*${shop.nombre}* — moneda: ${shop.moneda ?? 'no definida'}${shop.tasa ? `, tasa: ${shop.tasa}` : ''}.\n\nPara actualizarla usa el panel (configuración): https://app.elmenuxfa.com/`,
-      panelUrl: 'https://app.elmenuxfa.com/',
+      text: 'Listo, cancelado ❌ No toqué nada.',
+      proposal: null,
+      chips: suggestBusinessChips({ phase: 'after_cancel', shop }),
     });
   }
 
-  if (/\b(registrar|crear cuenta|nuevo negocio)\b/.test(t)) {
-    return json(req, {
-      ok: true,
-      authenticated: true,
-      text: 'Para registrar un negocio adicional usa el flujo seguro del panel:\nhttps://app.elmenuxfa.com/?tab=register',
-      registerUrl: 'https://app.elmenuxfa.com/?tab=register',
+  // Safe multi: reads first, at most one write (confirm). No new orchestrator.
+  let result: BusinessToolResult;
+  if (multiIntents.length >= 2) {
+    const writes = multiIntents.filter(isWriteBusinessIntent);
+    const reads = multiIntents.filter((i) => !isWriteBusinessIntent(i));
+    const ordered = [...reads, ...writes.slice(0, 1)].slice(0, 2);
+    const parts: BusinessToolResult[] = [];
+    for (const step of ordered) {
+      parts.push(
+        await executeBusinessIntent({
+          intent: step,
+          userId: user.id,
+          shop,
+          userText: lastUser!.text,
+          conversationHint: payload?.conversationHint,
+          history: body.messages || [],
+        }),
+      );
+    }
+    const extraWrite =
+      writes.length > 1
+        ? '\n\nLa segunda modificación la hacemos después de confirmar la primera ✅'
+        : '';
+    result = {
+      text: parts.map((p) => p.text).join('\n\n') + extraWrite,
+      proposal: parts.find((p) => p.proposal)?.proposal,
+      productsSample: parts.find((p) => p.productsSample)?.productsSample,
+      menuView: parts.find((p) => p.menuView)?.menuView,
+      showAccountCard: parts.find((p) => p.showAccountCard)?.showAccountCard,
+      ordersView: parts.find((p) => p.ordersView)?.ordersView,
+      metricsView: parts.find((p) => p.metricsView)?.metricsView,
+      customersView: parts.find((p) => p.customersView)?.customersView,
+      auditId: parts.find((p) => p.auditId)?.auditId,
+    };
+    intent = ordered[ordered.length - 1] || intent;
+  } else {
+    result = await executeBusinessIntent({
+      intent,
+      userId: user.id,
+      shop,
+      userText: lastUser!.text,
+      conversationHint: payload?.conversationHint,
+      geminiReply,
+      history: body.messages || [],
     });
   }
 
-  if (/\b(agregar|añadir|nuevo producto)\b/.test(t)) {
-    return json(req, {
-      ok: true,
-      authenticated: true,
-      selectedComercioId: shop.comercioId,
-      text: `Puedo ayudarte a preparar un producto para *${shop.nombre}*, pero la creación se confirma en el panel:\nhttps://app.elmenuxfa.com/\n\nDime nombre y precio tentativos si quieres que deje la nota lista.`,
-      panelUrl: 'https://app.elmenuxfa.com/',
-    });
-  }
+  const chipIntent: BusinessIntent =
+    intent.kind === 'chat' ||
+    intent.kind === 'escalate_human' ||
+    intent.kind === 'help' ||
+    intent.kind === 'refuse_sensitive'
+      ? { kind: 'help' }
+      : intent;
 
-  return json(req, {
-    ok: true,
-    authenticated: true,
-    selectedComercioId: shop.comercioId,
-    text: `Estoy con *${shop.nombre}*. Puedo consultar productos, precios, moneda/tasa, o prepararte un cambio para confirmarlo en el panel. ¿Qué revisamos?`,
-  });
+  return json(
+    req,
+    withResult(
+      {
+        ...baseAuth,
+        selectedComercioId: shop.comercioId,
+        chips: suggestBusinessChips({
+          phase: 'turn',
+          shop,
+          intent: chipIntent,
+          result,
+        }),
+      },
+      result,
+    ),
+  );
 }

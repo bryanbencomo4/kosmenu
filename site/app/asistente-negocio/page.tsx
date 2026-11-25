@@ -22,8 +22,8 @@ function firstParam(value: string | string[] | undefined): string | null {
 }
 
 /**
- * Business assistant (Next). Canonical public URL goal: app.elmenuxfa.com/asistente
- * via Flutter host redirect — this page is the real implementation on elmenuxfa.com.
+ * Business assistant (Next fallback). Login stays at app.elmenuxfa.com/;
+ * authenticated chat lives at app.elmenuxfa.com/asistente.
  */
 export default async function BusinessAssistantPage({ searchParams }: PageProps) {
   const params = await Promise.resolve(searchParams ?? {});
@@ -50,7 +50,7 @@ export default async function BusinessAssistantPage({ searchParams }: PageProps)
   }
 
   return (
-    <main className="min-h-[100dvh] w-full bg-[#f7f4ef]">
+    <main className="min-h-[100dvh] w-full">
       <BusinessAssistantView initialHandoffCode={handoffCode} />
     </main>
   );

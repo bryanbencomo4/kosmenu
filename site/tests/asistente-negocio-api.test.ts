@@ -17,6 +17,10 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
 
 vi.mock('../app/_lib/business-assistant', () => ({
   isBusinessAssistantApiEnabled: () => true,
+  BUSINESS_ASSISTANT_APP_HOME: 'https://app.elmenuxfa.com/',
+  BUSINESS_ASSISTANT_LOGIN_URL: 'https://app.elmenuxfa.com/?next=/asistente',
+  BUSINESS_ASSISTANT_CANONICAL_APP_PATH: 'https://app.elmenuxfa.com/asistente',
+  BUSINESS_ASSISTANT_NEXT_PATH: '/asistente-negocio',
 }));
 
 describe('POST /api/asistente-negocio', () => {
@@ -48,14 +52,16 @@ describe('POST /api/asistente-negocio', () => {
       ok: boolean;
       text: string;
       needsAuth?: boolean;
+      showAuthCard?: boolean;
       authenticated: boolean;
     };
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.authenticated).toBe(false);
-    expect(json.text).toMatch(/Margarita|precio/i);
-    expect(json.text).toMatch(/inicia sesión|acceso/i);
+    expect(json.text).toMatch(/Margarita|precio|cambio/i);
+    expect(json.text).toMatch(/abajo|chat|entra/i);
     expect(json.needsAuth).toBe(true);
+    expect(json.showAuthCard).toBe(true);
 
     const still = await store.validate({ code: rec.code });
     expect(still.ok).toBe(true);

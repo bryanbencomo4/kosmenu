@@ -134,9 +134,11 @@ export function ChatHorizontalScroller({
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = ref.current;
     if (!el || el.scrollWidth <= el.clientWidth) return;
+    // Allow drag starting on chip buttons; only block true form controls / opt-outs.
+    // Click is preserved via DRAG_SLOP + suppressClick after a real drag.
     if (
       (e.target as Element | null)?.closest(
-        'input,textarea,select,button,[data-chat-no-drag],[data-chat-thumb-retry],[data-chat-no-swipe]',
+        'input,textarea,select,[data-chat-no-drag],[data-chat-thumb-retry],[data-chat-no-swipe],[data-chat-h-scroll-prev],[data-chat-h-scroll-next]',
       )
     ) {
       return;
@@ -223,7 +225,7 @@ export function ChatHorizontalScroller({
         onPointerCancel={endDrag}
         onClickCapture={onClickCapture}
         onDragStart={onDragStart}
-        className={`touch-pan-x touch-pan-y cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
+        className={`touch-pan-x cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-x] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
           snap ? 'snap-x snap-proximity scroll-pl-3' : ''
         } ${className}`}
       >

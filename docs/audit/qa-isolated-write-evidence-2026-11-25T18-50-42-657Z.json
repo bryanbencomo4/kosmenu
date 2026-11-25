@@ -1,0 +1,151 @@
+{
+  "at": "2026-11-25T18:50:26.213Z",
+  "ref": "gsfxqzvmyzjjgpigrste",
+  "base": "http://127.0.0.1:3024",
+  "comercioId": "b6090b37-b02d-4122-9965-fbef8854e8fe",
+  "decoyId": "732394a4-c900-45f1-8aa6-58c65ae71b93",
+  "ops": [
+    {
+      "name": "set_price",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Lo dejamos así? 🤞\n\n*Campesina*: 4.8 → *5.8* USD\n\nToca *Confirmar* y listo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Hecho! ✅ *Campesina* quedó en *5.8* USD\n\n(ref ba_mwwhb2r2_i8i37v)",
+        "ok": true
+      },
+      "db": {
+        "before": 4.8,
+        "after": 5.8,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_off",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Listo ⏸️ *Campesina* marcado como agotado.\n\n(ref ba_mwwhb42k_p1aq0y)",
+        "ok": true
+      },
+      "db": {
+        "disponible": false,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_availability_on",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Listo! ✅ *Campesina* otra vez disponible.\n\n(ref ba_mwwhb54e_on8omm)",
+        "ok": true
+      },
+      "db": {
+        "disponible": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_hours",
+      "propose": {
+        "hadProposal": true,
+        "assistant": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–21:00\n• Jueves: 11:00–21:00\n• Viernes: 11:00–21:00\n• Sábado: cerrado\n• Domingo: cerrado\n\nConfirma y lo guardo ✅"
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Guardado! 🕒 Horario de *QA_CHATBOT_2026 pizzas el trueno* actualizado (Lun–Vie 11:00–21:00).\n\n(ref ba_mwwhb61m_o6yf8m)",
+        "ok": true
+      },
+      "db": {
+        "summary": "¿Queda así el horario de *QA_CHATBOT_2026 pizzas el trueno*? 🕒\n\n*Resumen:* Lun–Vie 11:00–21:00\n\n• Lunes: 11:00–21:00\n• Martes: 11:00–21:00\n• Miércoles: 11:00–2",
+        "mondayOpen": true,
+        "mondayRange": {
+          "end": "21:00",
+          "start": "11:00"
+        },
+        "persisted": true,
+        "flutterCompatible": true
+      }
+    },
+    {
+      "name": "set_en_linea_true",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "¡Abierto! 🟢 *QA_CHATBOT_2026 pizzas el trueno* ya está en línea.\n\n(ref ba_mwwhb6xh_gdgvc3)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": true,
+        "persisted": true
+      }
+    },
+    {
+      "name": "set_en_linea_false",
+      "propose": {
+        "hadProposal": true
+      },
+      "apply": {
+        "status": 200,
+        "action": "apply",
+        "text": "Cerrado por ahora 🔴 *QA_CHATBOT_2026 pizzas el trueno* fuera de línea.\n\n(ref ba_mwwhb7pj_pubjrh)",
+        "ok": true
+      },
+      "db": {
+        "en_linea": false,
+        "persisted": true
+      }
+    }
+  ],
+  "isolation": {
+    "decoyPriceBefore": 99,
+    "decoyPriceAfter": 99,
+    "unchanged": true,
+    "proposalAppeared": false,
+    "hamburguesaUntouched": true,
+    "assistant": "No encontré ese producto en *QA_CHATBOT_2026 pizzas el trueno* 😅\n\nDime el nombre tal cual o escribe “ver menú”.",
+    "safe": true
+  },
+  "missingTools": [
+    {
+      "prompt": "crea una categoría postres",
+      "hadProposal": false,
+      "assistant": "Crear categorías todavía no está en el chat 📂\n\nPuedes hacerlo en el panel. Aquí sí consulto el menú y edito *precio* / *disponibilidad*."
+    },
+    {
+      "prompt": "agrega un método de pago Zelle de prueba",
+      "hadProposal": false,
+      "assistant": "Métodos de pago todavía no los configuro desde el chat 💳\n\nÚsalos en el panel admin. Aquí sí puedo ayudarte con *precios*, *stock*, *horario* y *abrir/cerrar*."
+    },
+    {
+      "prompt": "crea una zona de delivery de prueba",
+      "hadProposal": false,
+      "assistant": "Zonas de delivery aún no las armo desde aquí 🛵\n\nConfigúralas en el panel. En el chat sí manejo *menú*, *precios*, *stock* y *horario*."
+    },
+    {
+      "prompt": "crea una promoción 2x1",
+      "hadProposal": false,
+      "assistant": "Promociones / 2x1 todavía no las creo por chat 🏷️\n\nEso vive en el panel por ahora. ¿Cambiamos un *precio* o el *horario* mientras tanto?"
+    },
+    {
+      "prompt": "marca el pedido pendiente como entregado",
+      "hadProposal": false,
+      "assistant": "Cambiar el estado de un pedido aún no lo hago por chat 🧾\n\nPuedo *listar* pedidos; el cambio de estado sigue en el panel."
+    }
+  ],
+  "scoreHints": {}
+}
