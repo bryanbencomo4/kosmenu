@@ -305,7 +305,7 @@ export async function proposeHours(
   hoursText: string,
 ): Promise<BusinessToolResult> {
   const parsed = parseBusinessHoursText(hoursText);
-  if (!parsed.ok) {
+  if (parsed.ok === false) {
     return {
       text: `No pude armar un horario válido 😅\n\n${parsed.error}\n\nEjemplo: *Lun-Vie 11:00-21:00* o *todos los días 10:00-22:00*.`,
     };
@@ -644,14 +644,18 @@ export async function applyConfirm(params: {
       userId: params.userId,
       comercioId: shop.comercioId,
     });
-    if (v.ok) {
+    if (v.ok === true) {
       payload = v.payload;
       nonce = v.nonce;
       expiresAt = v.expiresAt;
       matchedShop = shop;
       break;
     }
-    if (v.error === 'replay' || v.error === 'expired' || v.error === 'invalid_signature') {
+    if (
+      v.error === 'replay' ||
+      v.error === 'expired' ||
+      v.error === 'invalid_signature'
+    ) {
       hardFail = v.error;
     }
   }
@@ -755,7 +759,7 @@ export async function applyConfirm(params: {
       let schedule = payload.data.schedule as FlutterBusinessSchedule | undefined;
       if (!schedule || typeof schedule !== 'object' || !schedule.days) {
         const parsed = parseBusinessHoursText(hoursText);
-        if (!parsed.ok) throw new Error('invalid_hours');
+        if (parsed.ok === false) throw new Error('invalid_hours');
         schedule = parsed.schedule;
       }
       const horarios: FlutterBusinessSchedule = {

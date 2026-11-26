@@ -91,11 +91,10 @@ export async function POST(req: Request) {
   let variants: { ok: boolean; generated?: string[]; error?: string } | null = null;
   try {
     const result = await ensureImageVariants({ imageUrl: publicUrl });
-    variants = {
-      ok: result.ok,
-      generated: result.ok ? result.generated : undefined,
-      error: result.ok ? undefined : result.error,
-    };
+    variants =
+      result.ok === true
+        ? { ok: true, generated: result.generated }
+        : { ok: false, error: result.error };
   } catch (err) {
     variants = {
       ok: false,

@@ -374,7 +374,7 @@ export async function POST(
       businessName,
       messages,
     });
-    if (!issued.ok) {
+    if (issued.ok === false) {
       return NextResponse.json({ error: issued.error }, { status: 503 });
     }
     // Staff-visible system note (does not auto-send WhatsApp — operator copies/sends).

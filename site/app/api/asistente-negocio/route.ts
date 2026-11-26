@@ -339,6 +339,19 @@ function withResult(
   };
 }
 
+function asChatHistory(
+  messages:
+    | Array<{ role?: 'user' | 'assistant'; text?: string }>
+    | undefined,
+): Array<{ role: 'user' | 'assistant'; text: string }> {
+  return (messages || [])
+    .map((m) => ({
+      role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
+      text: String(m.text || '').trim(),
+    }))
+    .filter((m) => m.text.length > 0);
+}
+
 /**
  * POST /api/asistente-negocio — merchant admin assistant.
  * Flag: BUSINESS_ASSISTANT_ENABLED=1 (also allowed in test/preview/local empty VERCEL_ENV).
@@ -628,7 +641,7 @@ export async function POST(req: Request) {
       shopName: shop.nombre,
       enLinea: shop.enLinea,
       userText: lastUser!.text,
-      history: (body.messages || []).slice(-8),
+      history: asChatHistory(body.messages).slice(-8),
     });
     if (gemini) {
       intent = gemini.intent;
@@ -673,7 +686,7 @@ export async function POST(req: Request) {
           shop,
           userText: lastUser!.text,
           conversationHint: payload?.conversationHint,
-          history: body.messages || [],
+          history: asChatHistory(body.messages),
         }),
       );
     }
@@ -701,7 +714,7 @@ export async function POST(req: Request) {
       userText: lastUser!.text,
       conversationHint: payload?.conversationHint,
       geminiReply,
-      history: body.messages || [],
+      history: asChatHistory(body.messages),
     });
   }
 
