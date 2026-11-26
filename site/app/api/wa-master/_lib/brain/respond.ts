@@ -950,11 +950,20 @@ function registerFlow(c: Ctx): BrainResult {
 }
 
 export async function runCentralBrain(params: BrainParams): Promise<BrainResult | null> {
+  const out = await runCentralBrainInner(params);
+  // The brain never executes legacy admin proposals; a stale one must not block it
+  // (or resurface later), so drop it as soon as the brain owns the turn.
+  if (out && params.memory.summary.pendingAdminProposal) {
+    out.memoryPatch = { ...(out.memoryPatch || {}), pendingAdminProposal: null };
+  }
+  return out;
+}
+
+async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | null> {
   const { memory, identity, text } = params;
   const sum = memory.summary;
 
   // Legacy multi-step flows keep their own logic.
-  if (sum.pendingAdminProposal) return null;
   if (sum.pendingQuestion === 'business_name' || sum.pendingQuestion === 'comercio_select') return null;
 
   const shops = identity.comercios || [];

@@ -245,6 +245,31 @@ describe('Central brain — guide of 250 messages', () => {
     expect(r).toMatch(/no (lo )?puedo|no comparto|privacidad/i);
   });
 
+  it('stale legacy state (pendingAdminProposal, menuId) does not block the brain', async () => {
+    const base = createEmptyMemory(PILOT, Date.now(), 86_400_000);
+    const stale = {
+      ...base,
+      summary: {
+        ...base.summary,
+        menuId: 'biz_links',
+        menuProfile: 'registered',
+        pendingAdminProposal: {
+          label: 'Actualizar tasa de cambio',
+          action: 'set_fx',
+          comercioId: 'x',
+          currentValue: null,
+          requiresAuth: true,
+          proposedValue: 'pendiente',
+        },
+      },
+    } as unknown as ReturnType<typeof createEmptyMemory>;
+    const r = await turn(PILOT, 'necesito cambiar la tasa', stale);
+    const txt = r.out.replies.join('\n');
+    expect(txt).toMatch(/Tasas y cobros/);
+    expect(txt).not.toMatch(/[1-9]️⃣|Elige cómo/);
+    expect(r.out.memory.summary.pendingAdminProposal ?? null).toBeNull();
+  });
+
   it('screenshot regression: tasa → natural prose, replying "1" does NOT open a numbered menu', async () => {
     const first = await turn(PILOT, 'necesito cambiar la tasa');
     const r1 = first.out.replies.join('\n');
