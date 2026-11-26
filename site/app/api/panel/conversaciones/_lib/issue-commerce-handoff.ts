@@ -89,6 +89,7 @@ export async function issueCommerceChatbotHandoff(input: {
     const site = (
       input.publicSiteBaseUrl ||
       process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.SITE_URL ||
       'https://elmenuxfa.com'
     ).replace(/\/$/, '');
     const url = buildWaHandoffUrl({

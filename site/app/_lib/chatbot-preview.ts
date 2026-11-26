@@ -7,7 +7,11 @@
  */
 
 /** Slugs with assistant entry points on the public menu. */
-export const CHATBOT_UX_ENABLED_SLUGS = ['pizzas-el-trueno'] as const;
+export const CHATBOT_UX_ENABLED_SLUGS = [
+  'pizzas-el-trueno',
+  // Preview QA clone (isolated; not Trueno real)
+  'qa-chatbot-2026-trueno',
+] as const;
 
 /** True when this public menu may show assistant entry (home / FAB). */
 export function isChatbotUxEnabledForSlug(

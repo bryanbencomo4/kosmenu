@@ -1,15 +1,18 @@
-import { Suspense } from 'react';
+import { redirect } from 'next/navigation';
 
-import { PanelLoginClient } from './PanelLoginClient';
+import { merchantAppAuthHref } from '../../_lib/public-site-config';
+import { safePanelNext } from '../_lib/safe-panel-next';
 
-export default function PanelLoginPage({
+/**
+ * Merchant auth lives only on app.elmenuxfa.com (Flutter AuthScreen).
+ * This route exists so old /panel/login?next=… bookmarks still work.
+ */
+export default async function PanelLoginPage({
   searchParams,
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  return (
-    <Suspense fallback={<p className="p-6 text-sm text-stone-500">Cargando…</p>}>
-      <PanelLoginClient searchParamsPromise={searchParams} />
-    </Suspense>
-  );
+  const sp = searchParams ? await searchParams : {};
+  const next = safePanelNext(typeof sp.next === 'string' ? sp.next : '');
+  redirect(merchantAppAuthHref(next));
 }

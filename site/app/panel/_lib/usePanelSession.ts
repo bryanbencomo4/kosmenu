@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 import { getBrowserSupabase } from '../../_lib/supabase-browser';
+import { merchantAppAuthHref } from '../../_lib/public-site-config';
 import { resolveE2ePanelBearer } from './e2e-panel-bearer';
+import { safePanelNext } from './safe-panel-next';
 
 function readE2eBearer() {
   if (typeof window === 'undefined') return null;
@@ -16,7 +18,6 @@ function readE2eBearer() {
 
 export function usePanelSession(options?: { requireAuth?: boolean }) {
   const requireAuth = options?.requireAuth !== false;
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [token, setToken] = useState<string | null>(null);
@@ -61,8 +62,9 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
       const e2eBearer = readE2eBearer();
       if (requireAuth && !access && !e2eBearer) {
         const qs = searchParams?.toString();
-        const next = `${pathname}${qs ? `?${qs}` : ''}`;
-        router.replace(`/panel/login?next=${encodeURIComponent(next)}`);
+        const next = safePanelNext(`${pathname}${qs ? `?${qs}` : ''}`);
+        // Canonical merchant login is Flutter AuthScreen on app.elmenuxfa.com.
+        window.location.replace(merchantAppAuthHref(next));
       }
     })();
     const sb = getBrowserSupabase();
@@ -80,15 +82,15 @@ export function usePanelSession(options?: { requireAuth?: boolean }) {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [refresh, requireAuth, router, pathname, searchParams]);
+  }, [refresh, requireAuth, pathname, searchParams]);
 
   const signOut = useCallback(async () => {
     const sb = getBrowserSupabase();
     await sb?.auth.signOut();
     setToken(null);
     setUserId(null);
-    router.replace('/panel/login');
-  }, [router]);
+    window.location.replace(merchantAppAuthHref('/panel/conversaciones'));
+  }, []);
 
   return { token, email, userId, ready, refresh, signOut };
 }

@@ -7,11 +7,12 @@ import 'package:http/http.dart' as http;
 import 'package:kosmenu_app/screens/business_assistant_hash_stub.dart'
     if (dart.library.html) 'package:kosmenu_app/screens/business_assistant_hash_web.dart';
 import 'package:kosmenu_app/services/elmenuxfa_api_config.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Conversational business assistant at app.elmenuxfa.com/asistente
 /// Uses existing Supabase session + Next /api/asistente-negocio.
-/// Login/register happen in-chat — never leave the thread for the panel.
+/// Auth is the same AuthScreen on app root — never a second login form.
 class BusinessAssistantScreen extends StatefulWidget {
   const BusinessAssistantScreen({super.key, this.handoffCode});
 
@@ -93,12 +94,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   var _handoffValid = false;
   var _recoveryHint = false;
   var _needsAuth = false;
-  var _authModeRegister = false;
   final _chips = <_Chip>[];
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  var _authBusy = false;
-  String? _authError;
   StreamSubscription<AuthState>? _authSub;
 
   /// Shared conversational tokens (aligned with Next chat-theme light).
@@ -142,8 +138,6 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   void dispose() {
     _authSub?.cancel();
     _input.dispose();
-    _email.dispose();
-    _password.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -391,8 +385,13 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
     Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
   }
 
+  void _openCanonicalLogin() {
+    // Same AuthScreen as panel — app root with post-login return to /asistente.
+    MerchantDeepLink.rememberNext('/asistente');
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+  }
+
   Widget _buildAuthCard(BuildContext context) {
-    // Compact inline auth — no duplicate chips, no oversized card.
     return Container(
       width: MediaQuery.sizeOf(context).width * 0.86,
       margin: const EdgeInsets.only(bottom: 10, top: 2),
@@ -405,186 +404,40 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => setState(() => _authModeRegister = false),
-                style: TextButton.styleFrom(
-                  foregroundColor:
-                      !_authModeRegister ? _send : _headerMuted,
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 28),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  'Entrar',
-                  style: TextStyle(
-                    fontWeight:
-                        !_authModeRegister ? FontWeight.w700 : FontWeight.w500,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              TextButton(
-                onPressed: () => setState(() => _authModeRegister = true),
-                style: TextButton.styleFrom(
-                  foregroundColor:
-                      _authModeRegister ? _send : _headerMuted,
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 28),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  'Registrarme',
-                  style: TextStyle(
-                    fontWeight:
-                        _authModeRegister ? FontWeight.w700 : FontWeight.w500,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _email,
-            keyboardType: TextInputType.emailAddress,
-            decoration: InputDecoration(
-              hintText: 'Email',
-              isDense: true,
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0x22000000)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0x22000000)),
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          const Text(
+            '🔐 Entrar al panel',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              color: _headerFg,
             ),
           ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _password,
-            obscureText: true,
-            onSubmitted: (_) => _submitAuth(),
-            decoration: InputDecoration(
-              hintText: 'Contraseña',
-              isDense: true,
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0x22000000)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0x22000000)),
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            ),
+          const SizedBox(height: 4),
+          const Text(
+            'Usa el mismo inicio de sesión de tu negocio',
+            style: TextStyle(fontSize: 12, color: _headerMuted),
           ),
-          if (_authError != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              _authError!,
-              style: const TextStyle(color: Colors.red, fontSize: 12),
-            ),
-          ],
           const SizedBox(height: 10),
           SizedBox(
             height: 40,
             child: FilledButton(
-              onPressed: _authBusy ? null : _submitAuth,
+              onPressed: _openCanonicalLogin,
               style: FilledButton.styleFrom(
-                backgroundColor: _send,
+                backgroundColor: const Color(0xFF5B21B6),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: Text(
-                _authBusy
-                    ? 'Un segundo…'
-                    : (_authModeRegister ? 'Crear cuenta' : 'Entrar'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
+              child: const Text(
+                'Ir a iniciar sesión',
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _submitAuth() async {
-    final mail = _email.text.trim();
-    final pass = _password.text;
-    if (mail.isEmpty || pass.length < 6) {
-      setState(() => _authError = 'Email y clave (mín. 6) 🙂');
-      return;
-    }
-    setState(() {
-      _authBusy = true;
-      _authError = null;
-    });
-    try {
-      if (_authModeRegister) {
-        final res = await Supabase.instance.client.auth.signUp(
-          email: mail,
-          password: pass,
-        );
-        if (res.session == null) {
-          setState(() {
-            _authError = null;
-            _authModeRegister = false;
-            _messages.add(
-              const _ChatMsg(
-                role: 'assistant',
-                text:
-                    'Te envié un correo para confirmar ✉️ Luego entra aquí con tu clave.',
-              ),
-            );
-          });
-          return;
-        }
-      } else {
-        await Supabase.instance.client.auth.signInWithPassword(
-          email: mail,
-          password: pass,
-        );
-      }
-      setState(() {
-        _needsAuth = false;
-        if (_pendingHandoffHint != null &&
-            _pendingHandoffHint!.isNotEmpty &&
-            _input.text.trim().isEmpty) {
-          _input.text = _pendingHandoffHint!;
-        }
-        _messages.add(
-          _ChatMsg(
-            role: 'assistant',
-            text: _pendingHandoffHint != null && _pendingHandoffHint!.isNotEmpty
-                ? '¡Ya estás dentro! 🙌\n\nRetomo: *$_pendingHandoffHint*. ¿Seguimos?'
-                : '¡Ya estás dentro! 🙌\n\n¿Qué hacemos: menú, precio, horario…?',
-          ),
-        );
-      });
-      await _boot(force: true);
-    } catch (e) {
-      setState(() {
-        _authError = e.toString().contains('Invalid')
-            ? 'Email o clave incorrectos 🙈'
-            : 'No pude entrar. Intenta de nuevo.';
-      });
-    } finally {
-      if (mounted) setState(() => _authBusy = false);
-      _scrollToEnd();
-    }
   }
 
   @override

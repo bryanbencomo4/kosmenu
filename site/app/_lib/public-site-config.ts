@@ -141,6 +141,39 @@ export const appLoginHref = appSiteUrl;
 /** Flutter web app — open the Registrarse tab. */
 export const appSignupHref = `${appSiteUrl.replace(/\/$/, '')}/?tab=register`;
 
+/**
+ * Canonical merchant auth URL on app.elmenuxfa.com (Flutter AuthScreen).
+ * Panel + business bot must use this — never a second Next login form.
+ *
+ * - `/panel/...` → same path on the Flutter host (AuthGate + inbox)
+ * - `/asistente` / asistente-negocio → `/?next=/asistente`
+ * - otherwise → app root (login)
+ */
+export function merchantAppAuthHref(nextPath?: string | null): string {
+  const origin = appSiteUrl.replace(/\/$/, '');
+  const raw = String(nextPath || '').trim();
+  const pathOnly = raw.split('#')[0] || '';
+  if (pathOnly.startsWith('/panel/')) {
+    if (
+      pathOnly.includes('://') ||
+      pathOnly.includes('\\') ||
+      pathOnly.includes('..') ||
+      pathOnly.startsWith('//')
+    ) {
+      return `${origin}/`;
+    }
+    return `${origin}${pathOnly}`;
+  }
+  if (
+    pathOnly === '/asistente' ||
+    pathOnly.startsWith('/asistente?') ||
+    pathOnly.startsWith('/asistente-negocio')
+  ) {
+    return `${origin}/?next=${encodeURIComponent('/asistente')}`;
+  }
+  return `${origin}/`;
+}
+
 /** Flutter web app — merchant order management screen. */
 export function merchantPanelOrderHref(orderId: string) {
   const origin = appSiteUrl.replace(/\/$/, '');

@@ -111,7 +111,9 @@ function ConversationDetailInner({
   paramsPromise: Promise<{ conversationId: string }>;
   searchParamsPromise?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { token, email, userId, ready, signOut } = usePanelSession();
+  const { token, email, userId, ready, refresh, signOut } = usePanelSession({
+    requireAuth: true,
+  });
   const [conversationId, setConversationId] = useState('');
   const [comercioId, setComercioId] = useState('');
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -231,9 +233,8 @@ function ConversationDetailInner({
           ),
         );
         if (res.status === 401) {
-          window.location.href = `/panel/login?next=${encodeURIComponent(
-            `/panel/conversaciones/${encodeURIComponent(conversationId)}`,
-          )}`;
+          await refresh();
+          setError('Sesión expirada. Entra de nuevo en el chat.');
         }
         return;
       }
@@ -408,9 +409,8 @@ function ConversationDetailInner({
     if (!res.ok) {
       setError(friendlyPanelError(String(data.error || ''), res.status));
       if (res.status === 401) {
-        window.location.href = `/panel/login?next=${encodeURIComponent(
-          `/panel/conversaciones/${encodeURIComponent(conversationId)}`,
-        )}`;
+        await refresh();
+        setError('Sesión expirada. Entra de nuevo en el chat.');
       }
       return;
     }
@@ -711,6 +711,15 @@ function ConversationDetailInner({
     return (
       <p className="p-4 text-sm text-[var(--chat-text-muted)]">
         Comprobando sesión…
+      </p>
+    );
+  }
+
+  // Unauthenticated users go to /panel/login (same card as app.elmenuxfa.com).
+  if (!token) {
+    return (
+      <p className="p-4 text-sm text-[var(--chat-text-muted)]">
+        Redirigiendo al inicio de sesión…
       </p>
     );
   }
