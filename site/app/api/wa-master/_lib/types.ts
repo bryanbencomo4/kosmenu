@@ -125,6 +125,19 @@ export type WaMasterSummary = {
   menuUpdatedAtMs: number;
   misunderstandCount: number;
   supportIssueText: string | null;
+  /** Central brain: one open follow-up (zone / restaurant name / offered assistant link). */
+  brainPending?: WaMasterBrainPending | null;
+};
+
+export type WaMasterBrainPending = {
+  kind: 'zone' | 'name' | 'offer';
+  topic: string;
+  query?: string | null;
+  category?: string | null;
+  openOnly?: boolean;
+  url?: string | null;
+  panelHint?: string | null;
+  atMs: number;
 };
 
 /** L3 — durable contact profile (no secrets) */

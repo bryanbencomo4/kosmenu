@@ -29,8 +29,10 @@ import {
 import { runCommercialSpecialist } from './specialists/commercial';
 import { runConsumerSpecialist } from './specialists/consumer';
 import { tryHandleSmartMenu } from './menus';
+import { runCentralBrain } from './brain/respond';
 import type {
   WaMasterIdentity,
+  WaMasterIntent,
   WaMasterMemory,
   WaMasterOrchestratorInput,
   WaMasterOrchestratorResult,
@@ -68,17 +70,62 @@ export async function runWaMasterOrchestrator(
   };
   memory = appendTurn(memory, { role: 'user', text, atMs: nowMs });
 
-  // Smart numbered menus (0/8/9 + profile roots) — before specialists.
-  const menuHit = await tryHandleSmartMenu({
-    text,
-    identity,
-    memory,
-    config,
-    nowMs,
-    fromDigits: input.fromDigits,
-    handoffStore: deps.handoffStore,
-    fastHumanCoverage: true,
-  });
+  const discoveryCtx: WaMasterDiscoveryCtx = deps.discoveryCtx ?? { pageSize: 5 };
+  const executeDiscovery: WaMasterDiscoveryExecute =
+    deps.executeDiscovery ||
+    (async (name, args, ctx) => {
+      try {
+        const real = await loadDefaultDiscoveryExecute();
+        return real(name, args, ctx);
+      } catch {
+        return {
+          ok: false,
+          tool: name,
+          restaurants: [],
+          error: 'discovery_unavailable',
+        };
+      }
+    });
+
+  // Central brain (natural language, DB-backed) replaces the numbered smart menus.
+  const brainHit = config.brainEnabled
+    ? await runCentralBrain({
+        text,
+        identity,
+        memory,
+        config,
+        nowMs,
+        fromDigits: input.fromDigits,
+        handoffStore: deps.handoffStore,
+        discoveryCtx,
+        executeDiscovery,
+      })
+    : null;
+  const brainOwned = Boolean(brainHit && !brainHit.delegate);
+
+  // Legacy smart numbered menus (0/8/9 + profile roots) — only when the brain is off.
+  const menuHit = config.brainEnabled
+    ? {
+        handled: false,
+        replies: [] as string[],
+        memoryPatch: {},
+        escalateHuman: false,
+        specialist: 'orchestrator' as const,
+        intents: ['unknown'] as WaMasterIntent[],
+        toolsUsed: [] as string[],
+        skipGeminiPolish: false,
+        delegate: undefined,
+      }
+    : await tryHandleSmartMenu({
+        text,
+        identity,
+        memory,
+        config,
+        nowMs,
+        fromDigits: input.fromDigits,
+        handoffStore: deps.handoffStore,
+        fastHumanCoverage: true,
+      });
   if (menuHit.handled && !menuHit.delegate) {
     memory = patchSummary(memory, menuHit.memoryPatch, nowMs);
     for (const r of menuHit.replies) {
@@ -112,7 +159,14 @@ export async function runWaMasterOrchestrator(
     intents = [menuHit.delegate.intent];
     specialist = menuHit.delegate.specialist;
   }
+  if (brainHit) {
+    memory = patchSummary(memory, brainHit.memoryPatch, nowMs);
+    intents = [brainHit.delegate?.intent ?? brainHit.intent];
+    specialist = brainHit.delegate?.specialist ?? brainHit.specialist;
+  }
 
+  // Legacy intent overrides (skipped when the brain already owns this turn).
+  if (!brainOwned) {
   // Phone-linked shops + merchant ops (tasa/precios/…) → admin guide, even if NLU missed.
   const merchantTopic = detectMerchantHelpTopic(text);
   if (
@@ -215,6 +269,7 @@ export async function runWaMasterOrchestrator(
       specialist = 'admin';
     }
   }
+  }
 
   const primary =
     intents.find((i) => i !== 'multi' && i !== 'greeting') || intents[0] || 'unknown';
@@ -232,23 +287,7 @@ export async function runWaMasterOrchestrator(
   }
 
   const authGate = deps.authGate ?? createMemoryWaMasterAuthGate();
-  const discoveryCtx: WaMasterDiscoveryCtx = deps.discoveryCtx ?? { pageSize: 5 };
   const loadMenu = deps.loadMenu ?? defaultMenuLoader;
-  const executeDiscovery: WaMasterDiscoveryExecute =
-    deps.executeDiscovery ||
-    (async (name, args, ctx) => {
-      try {
-        const real = await loadDefaultDiscoveryExecute();
-        return real(name, args, ctx);
-      } catch {
-        return {
-          ok: false,
-          tool: name,
-          restaurants: [],
-          error: 'discovery_unavailable',
-        };
-      }
-    });
 
   let mode: WaMasterOrchestratorResult['mode'] = 'deterministic';
   let agentError: string | undefined;
@@ -262,8 +301,30 @@ export async function runWaMasterOrchestrator(
   let skipGeminiPolish = false;
 
   try {
-    // Simple memory answers first (receptionist + legacy) — no link spam.
-    if (
+    if (brainOwned && brainHit) {
+      replies = brainHit.replies;
+      toolsUsed = brainHit.toolsUsed;
+      specialist = brainHit.specialist;
+      skipGeminiPolish = true;
+      escalateHuman = Boolean(brainHit.escalateHuman);
+      if (escalateHuman && !replies.length) {
+        // Final copy is decided after durable ticket registration (wa-entry).
+        const built = buildDeterministicReplies({
+          intents: ['support.human'],
+          specialist: 'support',
+          identity,
+          memory,
+          config,
+          text,
+        });
+        replies = built.replies.length
+          ? built.replies
+          : [
+              'Claro, registro tu solicitud con el contexto de esta conversación para que un asesor se comunique contigo lo antes posible.',
+            ];
+        toolsUsed = [...toolsUsed, ...built.toolsUsed];
+      }
+    } else if (
       /\b(recuerdas|como se llama|cómo se llama|nombre de mi (negocio|restaurante))\b/i.test(
         text,
       ) &&

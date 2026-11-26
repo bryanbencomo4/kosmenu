@@ -331,9 +331,10 @@ describe('wa-master closure sprint', () => {
       masterCfg(),
       { loadMenu, authGate: createMemoryWaMasterAuthGate() },
     );
-    expect(out.replies[0]).toMatch(/5\.5|verificación|panel/i);
-    expect(out.replies[0]).not.toMatch(/¡Listo!.*actualizado/i);
-    expect(out.memory.summary.pendingAdminProposal?.action).toBe('edit_price');
+    // Merchant ops are triaged to the business assistant / panel (no in-chat write).
+    expect(out.replies[0]).toMatch(/panel|app\.elmenuxfa\.com|asistente/i);
+    expect(out.replies[0]).not.toMatch(/¡Listo!.*actualizado|ya qued[oó] (listo|cambiad)/i);
+    expect(out.toolsUsed).toContain('merchant_help_guide');
   });
 
   it('intento no autorizado de edición con confirmación', async () => {
@@ -368,8 +369,8 @@ describe('wa-master closure sprint', () => {
       masterCfg(),
       { loadMenu, authGate: auth },
     );
-    expect(r2.toolsUsed).toContain('admin_auth_required');
-    expect(r2.replies[0]).toMatch(/verificación segura|panel/i);
+    // "confirmo" without a pending proposal must never claim the price changed.
+    expect(r2.replies.join('\n')).not.toMatch(/¡Listo!|actualizado|ya qued[oó]|cambi[eé] el precio/i);
   });
 
   it('consulta tasa sin inventar', async () => {

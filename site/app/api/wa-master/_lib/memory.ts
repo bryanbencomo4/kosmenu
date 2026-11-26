@@ -31,6 +31,7 @@ export function emptySummary(nowMs: number): WaMasterSummary {
     menuUpdatedAtMs: 0,
     misunderstandCount: 0,
     supportIssueText: null,
+    brainPending: null,
   };
 }
 
@@ -54,6 +55,7 @@ export function normalizeSummary(raw: Partial<WaMasterSummary> | null | undefine
     menuUpdatedAtMs: raw.menuUpdatedAtMs ?? 0,
     misunderstandCount: raw.misunderstandCount ?? 0,
     supportIssueText: raw.supportIssueText ?? null,
+    brainPending: raw.brainPending ?? null,
   };
 }
 

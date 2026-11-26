@@ -17,6 +17,11 @@ export type WaMasterConfig = {
   receptionistMode: boolean;
   /** Optional Gemini TTS voice notes (Wasender audio). Fail-closed. */
   voiceNotesEnabled: boolean;
+  /**
+   * Central brain: natural-language topic router (guide A–D) that replaces numbered
+   * smart menus. Falls back to the legacy specialist chain when it cannot decide.
+   */
+  brainEnabled: boolean;
   /** Owner personal line for last-resort escalate (digits only). */
   ownerEscalateDigits: string;
   maxTurnsInPrompt: number;
@@ -60,6 +65,7 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     simulateAgent: envBool(env, 'PLATFORM_WA_MASTER_SIMULATE', true),
     receptionistMode: envBool(env, 'PLATFORM_WA_MASTER_RECEPTIONIST', false),
     voiceNotesEnabled: envBool(env, 'PLATFORM_WA_MASTER_VOICE', false),
+    brainEnabled: envBool(env, 'PLATFORM_WA_MASTER_BRAIN', false),
     ownerEscalateDigits: envStr(env, 'PLATFORM_WA_MASTER_OWNER_DIGITS', '584140821633').replace(
       /\D/g,
       '',

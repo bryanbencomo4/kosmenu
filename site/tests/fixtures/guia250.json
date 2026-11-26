@@ -1,0 +1,1537 @@
+{
+ "replies": [
+  "¡Hola! Somos ElMenúXFA, una plataforma que ayuda a restaurantes y comercios a publicar su menú digital y facilitar los pedidos. También ayudamos a los clientes a encontrar negocios. ¿Quieres usarlo como consumidor o tienes un negocio?",
+  "¡Hola! Gracias por escribir a ElMenúXFA. Cuéntame qué necesitas: buscar un restaurante, consultar un menú, conocer el servicio para tu negocio o recibir soporte. Te ayudo paso a paso.",
+  "¡Claro! Puedo buscarlo en el directorio. Dime el nombre del restaurante o la ciudad y el sector donde estás, y te compartiré los datos y enlaces que encuentre.",
+  "¡Qué bueno! Podemos orientarte para incorporar tu negocio. Cuéntame qué tipo de comercio tienes, cómo se llama y en qué ciudad funciona.",
+  "No necesitas descargar una aplicación para consultar los menús: puedes abrirlos desde el navegador de tu teléfono. Si quieres administrar un negocio, te indicaré el acceso correspondiente.",
+  "¡Claro! Puedo ayudarte por aquí. Si necesitas atención de una persona, registro tu solicitud y un asesor se comunicará contigo lo antes posible. ¿Qué necesitas resolver?",
+  "¡Perfecto! El pedido se realiza desde el menú del restaurante cuando tiene esa opción habilitada. Dime qué restaurante buscas o en qué zona estás y te paso el menú para continuar.",
+  "¡Claro! Dime qué tipo de comida buscas y en qué ciudad o sector estás. Consultaré los restaurantes disponibles y te compartiré opciones reales con sus menús.",
+  "¡Claro! Voy a buscar el menú público del restaurante. Dime su nombre y, si lo sabes, la ciudad o sector. Te compartiré el enlace correcto y el contacto publicado.",
+  "Voy a revisar qué negocios tienen delivery configurado para tu zona. ¿En qué ciudad y sector necesitas recibir el pedido?",
+  "Puedo revisar el horario y el estado de atención que el restaurante tenga registrado. ¿Qué local quieres consultar y en qué ciudad está?",
+  "Puedo facilitarte el contacto que el restaurante tenga publicado. Dime el nombre exacto y la ciudad para verificar que te comparta el negocio correcto.",
+  "Puedo facilitarte el contacto del restaurante o el enlace de su asistente si lo tiene habilitado. ¿Cuál es el nombre del local?",
+  "Los métodos de pago dependen de cada restaurante. Dime cuál estás consultando y revisaré los que tenga publicados; si no aparecen, te facilitaré su contacto.",
+  "Lamento el inconveniente. Dime el nombre del restaurante y qué ocurrió exactamente. Voy a revisar qué puedo resolver desde aquí y, si hace falta, canalizaré el caso con el equipo correspondiente.",
+  "¡Claro! Cuéntame qué tipo de negocio tienes y cómo recibes actualmente los pedidos. Así te explico qué herramientas de ElMenúXFA se ajustan a tu operación.",
+  "¡Excelente! Te ayudo con el registro. Primero dime el nombre del negocio, qué tipo de comercio es y en qué ciudad funciona. Después te comparto el enlace y los requisitos vigentes.",
+  "Sí, el menú puede compartirse mediante un enlace y un código QR, según la configuración del negocio. Si quieres, te muestro un ejemplo real y te explico cómo funcionaría para tu local.",
+  "Te puedo explicar los planes y precios vigentes. Voy a consultar la información comercial actual para darte montos y condiciones correctas, sin pasarte tarifas desactualizadas.",
+  "El asistente puede orientar a los clientes usando la información real del negocio y las funciones que tenga habilitadas. Te explico qué incluye actualmente y qué necesitas para activarlo.",
+  "Podemos revisar las opciones de delivery, zonas y tarifas disponibles para tu negocio. La configuración exacta depende de las funciones habilitadas en tu cuenta.",
+  "Con gusto. Puedo registrar tus datos y el motivo de la consulta para que un asesor te contacte. ¿Cómo se llama tu negocio y en qué horario te viene bien?",
+  "¡Claro! Voy a identificar tu comercio y revisar qué necesitas. Si puedo resolverlo con las herramientas autorizadas, lo hacemos por aquí; si requiere una pantalla segura, te paso al asistente empresarial con el contexto de esta conversación.",
+  "Puedo ayudarte con ese cambio. Primero identificaré el comercio y el producto exacto; te mostraré el valor actual y el nuevo antes de pedirte confirmación. Solo diré que quedó listo después de verificar que se guardó.",
+  "Puedo ayudarte a revisar esa configuración. Primero confirmaré tu comercio y los permisos de tu cuenta; luego te indicaré qué datos necesito y te pediré autorización antes de guardar cualquier cambio.",
+  "Vamos a revisar ese producto. Dime su nombre exacto y confirmaré el estado actual; si hay más de una coincidencia, te pediré que elijas antes de modificarlo.",
+  "Puedo localizar los enlaces de tu comercio y distinguir el menú público, el enlace para pedidos y el QR. Primero verificaré cuál negocio tienes seleccionado para no enviarte un enlace equivocado.",
+  "Puedo consultar la información disponible de tu comercio. Voy a verificar tu acceso y revisar los pedidos o ventas que correspondan al período que necesitas.",
+  "Te ayudo con el acceso mediante el procedimiento seguro de la cuenta. No compartas contraseñas, tokens ni códigos de verificación por WhatsApp; te indicaré el enlace oficial para continuar.",
+  "Puedo revisar los comercios asociados a tu cuenta y ayudarte a cambiar entre ellos. Primero verificaré tus membresías y permisos para asegurar que trabajemos sobre el local correcto.",
+  "Claro. Voy a registrar tu solicitud con el contexto de esta conversación para que un asesor pueda atenderte sin que tengas que explicar todo otra vez. En unos momentos alguien del equipo se pondrá en contacto contigo."
+ ],
+ "cases": [
+  {
+   "n": 1,
+   "sec": "Nuevo",
+   "user": "Hola, buenas, ¿qué es ElMenúXFA?",
+   "cluster": 0
+  },
+  {
+   "n": 2,
+   "sec": "Nuevo",
+   "user": "Hola 👋 me pueden explicar qué hacen?",
+   "cluster": 1
+  },
+  {
+   "n": 3,
+   "sec": "Nuevo",
+   "user": "Buenas, primera vez que les escribo, ¿cómo funciona esto?",
+   "cluster": 0
+  },
+  {
+   "n": 4,
+   "sec": "Nuevo",
+   "user": "¿Ustedes son un restaurante o qué servicio ofrecen?",
+   "cluster": 0
+  },
+  {
+   "n": 5,
+   "sec": "Nuevo",
+   "user": "Me pasaron este número, ¿me pueden ayudar?",
+   "cluster": 1
+  },
+  {
+   "n": 6,
+   "sec": "Nuevo",
+   "user": "Hola, necesito información por favor.",
+   "cluster": 1
+  },
+  {
+   "n": 7,
+   "sec": "Nuevo",
+   "user": "¿Cómo puedo conseguir un menú digital?",
+   "cluster": 1
+  },
+  {
+   "n": 8,
+   "sec": "Nuevo",
+   "user": "¿Aquí puedo buscar restaurantes?",
+   "cluster": 2
+  },
+  {
+   "n": 9,
+   "sec": "Nuevo",
+   "user": "Buenas, quisiera saber cómo funciona su plataforma.",
+   "cluster": 0
+  },
+  {
+   "n": 10,
+   "sec": "Nuevo",
+   "user": "¿Ustedes trabajan solamente con restaurantes?",
+   "cluster": 1
+  },
+  {
+   "n": 11,
+   "sec": "Nuevo",
+   "user": "Me hablaron de ustedes y quiero conocer el servicio.",
+   "cluster": 1
+  },
+  {
+   "n": 12,
+   "sec": "Nuevo",
+   "user": "¿Puedo pedir comida por este número?",
+   "cluster": 1
+  },
+  {
+   "n": 13,
+   "sec": "Nuevo",
+   "user": "Quiero ver los restaurantes que tienen registrados.",
+   "cluster": 3
+  },
+  {
+   "n": 14,
+   "sec": "Nuevo",
+   "user": "¿Tienen alguna aplicación para pedir comida?",
+   "cluster": 4
+  },
+  {
+   "n": 15,
+   "sec": "Nuevo",
+   "user": "¿Cómo puedo utilizar sus servicios?",
+   "cluster": 1
+  },
+  {
+   "n": 16,
+   "sec": "Nuevo",
+   "user": "¿Necesito registrarme para ver los menús?",
+   "cluster": 3
+  },
+  {
+   "n": 17,
+   "sec": "Nuevo",
+   "user": "¿Esto funciona por WhatsApp?",
+   "cluster": 1
+  },
+  {
+   "n": 18,
+   "sec": "Nuevo",
+   "user": "Hola, ¿me pueden orientar? No sé cómo empezar.",
+   "cluster": 1
+  },
+  {
+   "n": 19,
+   "sec": "Nuevo",
+   "user": "¿Puedo tener mi propio menú aquí?",
+   "cluster": 3
+  },
+  {
+   "n": 20,
+   "sec": "Nuevo",
+   "user": "¿Cómo hago para encontrar un negocio en su plataforma?",
+   "cluster": 0
+  },
+  {
+   "n": 21,
+   "sec": "Nuevo",
+   "user": "¿Tienen servicio en San Cristóbal?",
+   "cluster": 1
+  },
+  {
+   "n": 22,
+   "sec": "Nuevo",
+   "user": "¿Trabajan en Caracas o solamente en Táchira?",
+   "cluster": 1
+  },
+  {
+   "n": 23,
+   "sec": "Nuevo",
+   "user": "Quiero saber si puedo usar esto para mi emprendimiento.",
+   "cluster": 3
+  },
+  {
+   "n": 24,
+   "sec": "Nuevo",
+   "user": "¿Me pueden enviar un ejemplo de cómo funciona?",
+   "cluster": 0
+  },
+  {
+   "n": 25,
+   "sec": "Nuevo",
+   "user": "¿Cómo puedo hablar con alguien de atención al cliente?",
+   "cluster": 5
+  },
+  {
+   "n": 26,
+   "sec": "Nuevo",
+   "user": "¿Este número es el oficial de ElMenúXFA?",
+   "cluster": 1
+  },
+  {
+   "n": 27,
+   "sec": "Nuevo",
+   "user": "¿Puedo consultar varias cosas por aquí?",
+   "cluster": 1
+  },
+  {
+   "n": 28,
+   "sec": "Nuevo",
+   "user": "Me interesa conocer sus servicios, ¿me ayudan?",
+   "cluster": 1
+  },
+  {
+   "n": 29,
+   "sec": "Nuevo",
+   "user": "Hola, ¿con quién tengo el gusto?",
+   "cluster": 1
+  },
+  {
+   "n": 30,
+   "sec": "Nuevo",
+   "user": "¿Cómo puedo recibir el enlace de un restaurante?",
+   "cluster": 1
+  },
+  {
+   "n": 31,
+   "sec": "Nuevo",
+   "user": "Necesito el contacto de un negocio que trabaja con ustedes.",
+   "cluster": 1
+  },
+  {
+   "n": 32,
+   "sec": "Nuevo",
+   "user": "¿Puedo compartir un menú con otra persona?",
+   "cluster": 5
+  },
+  {
+   "n": 33,
+   "sec": "Nuevo",
+   "user": "¿Hay que descargar algo para utilizar el servicio?",
+   "cluster": 4
+  },
+  {
+   "n": 34,
+   "sec": "Nuevo",
+   "user": "¿Puedo utilizarlo desde mi teléfono?",
+   "cluster": 1
+  },
+  {
+   "n": 35,
+   "sec": "Nuevo",
+   "user": "¿Cómo funciona lo de los asistentes virtuales?",
+   "cluster": 0
+  },
+  {
+   "n": 36,
+   "sec": "Nuevo",
+   "user": "¿Cada restaurante tiene su propio asistente?",
+   "cluster": 1
+  },
+  {
+   "n": 37,
+   "sec": "Nuevo",
+   "user": "¿Puedo hablar directamente con el restaurante?",
+   "cluster": 1
+  },
+  {
+   "n": 38,
+   "sec": "Nuevo",
+   "user": "Me gustaría saber qué opciones tienen disponibles.",
+   "cluster": 1
+  },
+  {
+   "n": 39,
+   "sec": "Nuevo",
+   "user": "Hola, quiero hacer una consulta pero no sé si estoy escribiendo al número correcto.",
+   "cluster": 1
+  },
+  {
+   "n": 40,
+   "sec": "Nuevo",
+   "user": "¿Qué diferencia hay entre ustedes y una aplicación de delivery?",
+   "cluster": 4
+  },
+  {
+   "n": 41,
+   "sec": "Nuevo",
+   "user": "¿Puedo usar el servicio si no tengo cuenta?",
+   "cluster": 1
+  },
+  {
+   "n": 42,
+   "sec": "Nuevo",
+   "user": "Quiero información para mi negocio y también buscar restaurantes.",
+   "cluster": 2
+  },
+  {
+   "n": 43,
+   "sec": "Nuevo",
+   "user": "¿Me pueden enviar el menú de algún restaurante cercano?",
+   "cluster": 2
+  },
+  {
+   "n": 44,
+   "sec": "Nuevo",
+   "user": "¿Cómo sé si un restaurante está afiliado a ustedes?",
+   "cluster": 1
+  },
+  {
+   "n": 45,
+   "sec": "Nuevo",
+   "user": "¿Tienen algún catálogo de negocios?",
+   "cluster": 2
+  },
+  {
+   "n": 46,
+   "sec": "Nuevo",
+   "user": "¿Puedo registrarme como cliente?",
+   "cluster": 3
+  },
+  {
+   "n": 47,
+   "sec": "Nuevo",
+   "user": "¿Qué tengo que hacer para comenzar?",
+   "cluster": 1
+  },
+  {
+   "n": 48,
+   "sec": "Nuevo",
+   "user": "¿Tienen atención personalizada?",
+   "cluster": 5
+  },
+  {
+   "n": 49,
+   "sec": "Nuevo",
+   "user": "Hola, me recomendaron este número, ¿me pueden ayudar con una información?",
+   "cluster": 1
+  },
+  {
+   "n": 50,
+   "sec": "Nuevo",
+   "user": "No conozco la plataforma, explíquenme cómo puedo aprovecharla.",
+   "cluster": 0
+  },
+  {
+   "n": 51,
+   "sec": "Consumidor",
+   "user": "Hola, quiero pedir unas hamburguesas. ¿Qué restaurantes me recomiendan en Caracas?",
+   "cluster": 6
+  },
+  {
+   "n": 52,
+   "sec": "Consumidor",
+   "user": "¿Dónde puedo conseguir pizza en San Cristóbal?",
+   "cluster": 7
+  },
+  {
+   "n": 53,
+   "sec": "Consumidor",
+   "user": "Busco un restaurante de comida china en mi zona.",
+   "cluster": 7
+  },
+  {
+   "n": 54,
+   "sec": "Consumidor",
+   "user": "¿Me pasan el menú de Pizzas El Trueno?",
+   "cluster": 8
+  },
+  {
+   "n": 55,
+   "sec": "Consumidor",
+   "user": "Quiero comer algo, ¿qué restaurantes tienen disponibles?",
+   "cluster": 7
+  },
+  {
+   "n": 56,
+   "sec": "Consumidor",
+   "user": "¿Qué negocios tienen delivery en Táriba?",
+   "cluster": 9
+  },
+  {
+   "n": 57,
+   "sec": "Consumidor",
+   "user": "Busco un sitio donde vendan sushi.",
+   "cluster": 7
+  },
+  {
+   "n": 58,
+   "sec": "Consumidor",
+   "user": "¿Hay algún restaurante que venda pollo a la broaster?",
+   "cluster": 7
+  },
+  {
+   "n": 59,
+   "sec": "Consumidor",
+   "user": "Quiero ver el menú de un restaurante que se llama La Esquina.",
+   "cluster": 8
+  },
+  {
+   "n": 60,
+   "sec": "Consumidor",
+   "user": "¿Me pueden recomendar un sitio para desayunar?",
+   "cluster": 7
+  },
+  {
+   "n": 61,
+   "sec": "Consumidor",
+   "user": "¿Qué restaurantes están abiertos ahorita?",
+   "cluster": 10
+  },
+  {
+   "n": 62,
+   "sec": "Consumidor",
+   "user": "Necesito un menú para pedir una cena.",
+   "cluster": 8
+  },
+  {
+   "n": 63,
+   "sec": "Consumidor",
+   "user": "¿Dónde consigo perros calientes por aquí?",
+   "cluster": 7
+  },
+  {
+   "n": 64,
+   "sec": "Consumidor",
+   "user": "¿Tienen restaurantes de comida venezolana?",
+   "cluster": 7
+  },
+  {
+   "n": 65,
+   "sec": "Consumidor",
+   "user": "Quiero pedir una hamburguesa con papas y refresco.",
+   "cluster": 6
+  },
+  {
+   "n": 66,
+   "sec": "Consumidor",
+   "user": "¿Cuál es el WhatsApp de Pizzas El Trueno?",
+   "cluster": 11
+  },
+  {
+   "n": 67,
+   "sec": "Consumidor",
+   "user": "Me pasaron el nombre de un restaurante, ¿pueden conseguirme su menú?",
+   "cluster": 8
+  },
+  {
+   "n": 68,
+   "sec": "Consumidor",
+   "user": "Busco comida económica para dos personas.",
+   "cluster": 12
+  },
+  {
+   "n": 69,
+   "sec": "Consumidor",
+   "user": "¿Qué restaurantes tienen promociones hoy?",
+   "cluster": 10
+  },
+  {
+   "n": 70,
+   "sec": "Consumidor",
+   "user": "¿Hay algún negocio que venda desayunos a domicilio?",
+   "cluster": 9
+  },
+  {
+   "n": 71,
+   "sec": "Consumidor",
+   "user": "Quiero el enlace del menú digital de un restaurante.",
+   "cluster": 8
+  },
+  {
+   "n": 72,
+   "sec": "Consumidor",
+   "user": "¿Puedo ver los precios antes de hacer el pedido?",
+   "cluster": 6
+  },
+  {
+   "n": 73,
+   "sec": "Consumidor",
+   "user": "¿Cómo hago para pedir por el menú digital?",
+   "cluster": 8
+  },
+  {
+   "n": 74,
+   "sec": "Consumidor",
+   "user": "Quiero hablar con el asistente de Pizzas El Trueno.",
+   "cluster": 12
+  },
+  {
+   "n": 75,
+   "sec": "Consumidor",
+   "user": "¿Me pueden enviar el contacto y el menú de ese negocio?",
+   "cluster": 11
+  },
+  {
+   "n": 76,
+   "sec": "Consumidor",
+   "user": "¿Cómo sé si hacen delivery hasta mi casa?",
+   "cluster": 9
+  },
+  {
+   "n": 77,
+   "sec": "Consumidor",
+   "user": "¿Qué restaurantes permiten retirar el pedido en el local?",
+   "cluster": 6
+  },
+  {
+   "n": 78,
+   "sec": "Consumidor",
+   "user": "Quiero pedir una pizza Margarita familiar.",
+   "cluster": 6
+  },
+  {
+   "n": 79,
+   "sec": "Consumidor",
+   "user": "¿Puedo pedir directamente desde el menú?",
+   "cluster": 8
+  },
+  {
+   "n": 80,
+   "sec": "Consumidor",
+   "user": "¿El restaurante acepta pago móvil?",
+   "cluster": 13
+  },
+  {
+   "n": 81,
+   "sec": "Consumidor",
+   "user": "¿Tienen algún restaurante que acepte Zelle?",
+   "cluster": 13
+  },
+  {
+   "n": 82,
+   "sec": "Consumidor",
+   "user": "¿Puedo pagar en efectivo cuando llegue el pedido?",
+   "cluster": 6
+  },
+  {
+   "n": 83,
+   "sec": "Consumidor",
+   "user": "¿Cómo veo las formas de pago de un restaurante?",
+   "cluster": 13
+  },
+  {
+   "n": 84,
+   "sec": "Consumidor",
+   "user": "Quiero saber cuánto cuesta el delivery.",
+   "cluster": 9
+  },
+  {
+   "n": 85,
+   "sec": "Consumidor",
+   "user": "¿El restaurante tiene algún número para llamar?",
+   "cluster": 11
+  },
+  {
+   "n": 86,
+   "sec": "Consumidor",
+   "user": "¿Puedo hacer un pedido sin registrarme?",
+   "cluster": 6
+  },
+  {
+   "n": 87,
+   "sec": "Consumidor",
+   "user": "¿Dónde veo la ubicación del restaurante?",
+   "cluster": 7
+  },
+  {
+   "n": 88,
+   "sec": "Consumidor",
+   "user": "Necesito un restaurante que venda comida para niños.",
+   "cluster": 7
+  },
+  {
+   "n": 89,
+   "sec": "Consumidor",
+   "user": "¿Qué tienen para almorzar hoy?",
+   "cluster": 10
+  },
+  {
+   "n": 90,
+   "sec": "Consumidor",
+   "user": "¿Hay algún negocio que venda postres?",
+   "cluster": 7
+  },
+  {
+   "n": 91,
+   "sec": "Consumidor",
+   "user": "¿Me consigues un restaurante que venda tortas?",
+   "cluster": 7
+  },
+  {
+   "n": 92,
+   "sec": "Consumidor",
+   "user": "Quiero ver los menús de restaurantes en Palmira.",
+   "cluster": 8
+  },
+  {
+   "n": 93,
+   "sec": "Consumidor",
+   "user": "¿Cuál es el restaurante más cercano que tienen?",
+   "cluster": 7
+  },
+  {
+   "n": 94,
+   "sec": "Consumidor",
+   "user": "¿Me pueden recomendar algo para cenar que no sea pizza?",
+   "cluster": 7
+  },
+  {
+   "n": 95,
+   "sec": "Consumidor",
+   "user": "¿Dónde puedo conseguir empanadas?",
+   "cluster": 7
+  },
+  {
+   "n": 96,
+   "sec": "Consumidor",
+   "user": "Quiero pedir comida para una reunión de 15 personas.",
+   "cluster": 6
+  },
+  {
+   "n": 97,
+   "sec": "Consumidor",
+   "user": "¿Puedo compartir el enlace del menú con mi familia?",
+   "cluster": 8
+  },
+  {
+   "n": 98,
+   "sec": "Consumidor",
+   "user": "¿El menú que me enviaron es el mismo que tiene el restaurante en físico?",
+   "cluster": 8
+  },
+  {
+   "n": 99,
+   "sec": "Consumidor",
+   "user": "¿Cómo contacto al restaurante si tengo una duda sobre un plato?",
+   "cluster": 11
+  },
+  {
+   "n": 100,
+   "sec": "Consumidor",
+   "user": "¿Me pueden conectar con el asistente del restaurante?",
+   "cluster": 12
+  },
+  {
+   "n": 101,
+   "sec": "Consumidor",
+   "user": "¿Puedo pedir varias cosas de diferentes categorías?",
+   "cluster": 6
+  },
+  {
+   "n": 102,
+   "sec": "Consumidor",
+   "user": "¿Cómo selecciono el tamaño de la pizza?",
+   "cluster": 7
+  },
+  {
+   "n": 103,
+   "sec": "Consumidor",
+   "user": "¿Puedo agregar ingredientes adicionales?",
+   "cluster": 7
+  },
+  {
+   "n": 104,
+   "sec": "Consumidor",
+   "user": "¿Cómo indico que no quiero cebolla?",
+   "cluster": 7
+  },
+  {
+   "n": 105,
+   "sec": "Consumidor",
+   "user": "Quiero saber si tienen opciones vegetarianas.",
+   "cluster": 7
+  },
+  {
+   "n": 106,
+   "sec": "Consumidor",
+   "user": "¿Puedo solicitar una factura de mi pedido?",
+   "cluster": 6
+  },
+  {
+   "n": 107,
+   "sec": "Consumidor",
+   "user": "¿Cómo sé si recibieron mi pedido?",
+   "cluster": 6
+  },
+  {
+   "n": 108,
+   "sec": "Consumidor",
+   "user": "Hice un pedido y quiero saber cuánto tarda.",
+   "cluster": 6
+  },
+  {
+   "n": 109,
+   "sec": "Consumidor",
+   "user": "¿Dónde puedo consultar el estado de mi pedido?",
+   "cluster": 6
+  },
+  {
+   "n": 110,
+   "sec": "Consumidor",
+   "user": "Me equivoqué al hacer el pedido, ¿qué puedo hacer?",
+   "cluster": 6
+  },
+  {
+   "n": 111,
+   "sec": "Consumidor",
+   "user": "Quiero cancelar un pedido que acabo de realizar.",
+   "cluster": 6
+  },
+  {
+   "n": 112,
+   "sec": "Consumidor",
+   "user": "El restaurante no me responde, ¿me ayudan?",
+   "cluster": 7
+  },
+  {
+   "n": 113,
+   "sec": "Consumidor",
+   "user": "Me llegó un pedido diferente al que solicité.",
+   "cluster": 6
+  },
+  {
+   "n": 114,
+   "sec": "Consumidor",
+   "user": "¿Cómo puedo reportar un problema con mi comida?",
+   "cluster": 14
+  },
+  {
+   "n": 115,
+   "sec": "Consumidor",
+   "user": "El enlace del menú no me abre.",
+   "cluster": 8
+  },
+  {
+   "n": 116,
+   "sec": "Consumidor",
+   "user": "¿Por qué no me aparecen los productos?",
+   "cluster": 7
+  },
+  {
+   "n": 117,
+   "sec": "Consumidor",
+   "user": "¿Puedo pedir para retirar dentro de una hora?",
+   "cluster": 6
+  },
+  {
+   "n": 118,
+   "sec": "Consumidor",
+   "user": "¿Tienen algún restaurante que venda comida por kilo?",
+   "cluster": 7
+  },
+  {
+   "n": 119,
+   "sec": "Consumidor",
+   "user": "Busco un sitio para comprar bebidas y snacks.",
+   "cluster": 6
+  },
+  {
+   "n": 120,
+   "sec": "Consumidor",
+   "user": "Quiero el menú de ese restaurante que aparece en Instagram.",
+   "cluster": 8
+  },
+  {
+   "n": 121,
+   "sec": "Consumidor",
+   "user": "Tengo el nombre del negocio pero no su número, ¿pueden ayudarme?",
+   "cluster": 11
+  },
+  {
+   "n": 122,
+   "sec": "Consumidor",
+   "user": "¿Cuál es el horario de atención de ese restaurante?",
+   "cluster": 10
+  },
+  {
+   "n": 123,
+   "sec": "Consumidor",
+   "user": "¿El negocio está abierto hoy?",
+   "cluster": 10
+  },
+  {
+   "n": 124,
+   "sec": "Consumidor",
+   "user": "¿Puedo hacer un pedido para mañana?",
+   "cluster": 6
+  },
+  {
+   "n": 125,
+   "sec": "Consumidor",
+   "user": "Quiero pedir, pero primero necesito saber qué tienen disponible.",
+   "cluster": 6
+  },
+  {
+   "n": 126,
+   "sec": "Consumidor",
+   "user": "¿Me pasan el link para hacer el pedido directamente?",
+   "cluster": 8
+  },
+  {
+   "n": 127,
+   "sec": "Consumidor",
+   "user": "¿El restaurante tiene WhatsApp propio?",
+   "cluster": 11
+  },
+  {
+   "n": 128,
+   "sec": "Consumidor",
+   "user": "¿Cómo puedo saber si tienen una promoción de dos por uno?",
+   "cluster": 7
+  },
+  {
+   "n": 129,
+   "sec": "Consumidor",
+   "user": "¿Puedo pedir para varias direcciones?",
+   "cluster": 6
+  },
+  {
+   "n": 130,
+   "sec": "Consumidor",
+   "user": "Quiero ver los precios en bolívares.",
+   "cluster": 7
+  },
+  {
+   "n": 131,
+   "sec": "Consumidor",
+   "user": "¿La tasa que usa el restaurante es la del día?",
+   "cluster": 7
+  },
+  {
+   "n": 132,
+   "sec": "Consumidor",
+   "user": "¿Me pueden buscar un restaurante que esté abierto después de las 10?",
+   "cluster": 10
+  },
+  {
+   "n": 133,
+   "sec": "Consumidor",
+   "user": "¿Puedo hablar con una persona del restaurante?",
+   "cluster": 12
+  },
+  {
+   "n": 134,
+   "sec": "Consumidor",
+   "user": "Ya encontré el restaurante, ¿qué hago ahora?",
+   "cluster": 7
+  },
+  {
+   "n": 135,
+   "sec": "Consumidor",
+   "user": "Quiero el menú, el WhatsApp y la ubicación de ese negocio.",
+   "cluster": 11
+  },
+  {
+   "n": 136,
+   "sec": "Negocio Prospecto",
+   "user": "Hola, tengo un restaurante y quiero trabajar con ustedes.",
+   "cluster": 15
+  },
+  {
+   "n": 137,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo registro mi negocio en ElMenúXFA?",
+   "cluster": 16
+  },
+  {
+   "n": 138,
+   "sec": "Negocio Prospecto",
+   "user": "Tengo una hamburguesería, ¿puedo tener mi menú digital?",
+   "cluster": 17
+  },
+  {
+   "n": 139,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cuánto cuesta afiliar un restaurante?",
+   "cluster": 18
+  },
+  {
+   "n": 140,
+   "sec": "Negocio Prospecto",
+   "user": "¿Qué planes tienen disponibles?",
+   "cluster": 18
+  },
+  {
+   "n": 141,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cuánto cuesta el servicio mensual?",
+   "cluster": 18
+  },
+  {
+   "n": 142,
+   "sec": "Negocio Prospecto",
+   "user": "¿Tienen un plan anual?",
+   "cluster": 18
+  },
+  {
+   "n": 143,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo probar el sistema antes de pagar?",
+   "cluster": 18
+  },
+  {
+   "n": 144,
+   "sec": "Negocio Prospecto",
+   "user": "¿Qué incluye el plan más económico?",
+   "cluster": 18
+  },
+  {
+   "n": 145,
+   "sec": "Negocio Prospecto",
+   "user": "¿El menú tiene código QR?",
+   "cluster": 17
+  },
+  {
+   "n": 146,
+   "sec": "Negocio Prospecto",
+   "user": "¿Me pueden mostrar un ejemplo de menú funcionando?",
+   "cluster": 15
+  },
+  {
+   "n": 147,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo colocar las fotos de mis productos?",
+   "cluster": 15
+  },
+  {
+   "n": 148,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo cambiar los precios cuando quiera?",
+   "cluster": 18
+  },
+  {
+   "n": 149,
+   "sec": "Negocio Prospecto",
+   "user": "¿El sistema permite recibir pedidos por WhatsApp?",
+   "cluster": 15
+  },
+  {
+   "n": 150,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo tener un asistente virtual para mis clientes?",
+   "cluster": 19
+  },
+  {
+   "n": 151,
+   "sec": "Negocio Prospecto",
+   "user": "¿Ese asistente puede responder preguntas sobre mis productos?",
+   "cluster": 19
+  },
+  {
+   "n": 152,
+   "sec": "Negocio Prospecto",
+   "user": "¿El asistente puede ayudar a los clientes a realizar pedidos?",
+   "cluster": 19
+  },
+  {
+   "n": 153,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo atender los pedidos desde mi teléfono?",
+   "cluster": 15
+  },
+  {
+   "n": 154,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo funciona el sistema de delivery?",
+   "cluster": 20
+  },
+  {
+   "n": 155,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo configurar mis propias zonas de delivery?",
+   "cluster": 20
+  },
+  {
+   "n": 156,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo trabajar con delivery y retiro en tienda?",
+   "cluster": 20
+  },
+  {
+   "n": 157,
+   "sec": "Negocio Prospecto",
+   "user": "¿El sistema permite tener varios usuarios?",
+   "cluster": 15
+  },
+  {
+   "n": 158,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo tener varios empleados atendiendo los pedidos?",
+   "cluster": 15
+  },
+  {
+   "n": 159,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo administrar dos restaurantes desde una misma cuenta?",
+   "cluster": 15
+  },
+  {
+   "n": 160,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo registrar una cafetería o una pastelería?",
+   "cluster": 16
+  },
+  {
+   "n": 161,
+   "sec": "Negocio Prospecto",
+   "user": "¿También trabajan con tiendas que venden productos y no comida?",
+   "cluster": 15
+  },
+  {
+   "n": 162,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo puedo empezar a cargar mis productos?",
+   "cluster": 16
+  },
+  {
+   "n": 163,
+   "sec": "Negocio Prospecto",
+   "user": "¿Ustedes me ayudan a configurar el menú?",
+   "cluster": 15
+  },
+  {
+   "n": 164,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo importar mi menú desde Excel?",
+   "cluster": 15
+  },
+  {
+   "n": 165,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo funciona el código QR para las mesas?",
+   "cluster": 17
+  },
+  {
+   "n": 166,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo imprimir mis códigos QR?",
+   "cluster": 17
+  },
+  {
+   "n": 167,
+   "sec": "Negocio Prospecto",
+   "user": "¿El cliente puede ver el menú sin descargar una aplicación?",
+   "cluster": 15
+  },
+  {
+   "n": 168,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo compartir mi menú por Instagram?",
+   "cluster": 17
+  },
+  {
+   "n": 169,
+   "sec": "Negocio Prospecto",
+   "user": "¿El menú tiene un enlace personalizado?",
+   "cluster": 17
+  },
+  {
+   "n": 170,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo utilizar el sistema desde una computadora?",
+   "cluster": 15
+  },
+  {
+   "n": 171,
+   "sec": "Negocio Prospecto",
+   "user": "¿Tienen soporte si tengo algún problema?",
+   "cluster": 15
+  },
+  {
+   "n": 172,
+   "sec": "Negocio Prospecto",
+   "user": "¿Qué necesito para registrarme?",
+   "cluster": 16
+  },
+  {
+   "n": 173,
+   "sec": "Negocio Prospecto",
+   "user": "Quiero afiliar mi restaurante, ¿qué datos necesitan?",
+   "cluster": 16
+  },
+  {
+   "n": 174,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo tener un menú en dólares y bolívares?",
+   "cluster": 15
+  },
+  {
+   "n": 175,
+   "sec": "Negocio Prospecto",
+   "user": "¿El sistema actualiza la tasa de cambio?",
+   "cluster": 15
+  },
+  {
+   "n": 176,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo configurar los métodos de pago de mi negocio?",
+   "cluster": 15
+  },
+  {
+   "n": 177,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo colocar mi logo y los colores de mi restaurante?",
+   "cluster": 15
+  },
+  {
+   "n": 178,
+   "sec": "Negocio Prospecto",
+   "user": "¿El menú permite mostrar promociones?",
+   "cluster": 15
+  },
+  {
+   "n": 179,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo destacar los productos más vendidos?",
+   "cluster": 15
+  },
+  {
+   "n": 180,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo funciona el control de inventario?",
+   "cluster": 15
+  },
+  {
+   "n": 181,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo marcar un producto como agotado?",
+   "cluster": 15
+  },
+  {
+   "n": 182,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo recibir notificaciones cuando entre un pedido?",
+   "cluster": 15
+  },
+  {
+   "n": 183,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo imprimir los pedidos en cocina?",
+   "cluster": 15
+  },
+  {
+   "n": 184,
+   "sec": "Negocio Prospecto",
+   "user": "¿El sistema tiene reportes de ventas?",
+   "cluster": 15
+  },
+  {
+   "n": 185,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo saber cuánto vendí durante el día?",
+   "cluster": 18
+  },
+  {
+   "n": 186,
+   "sec": "Negocio Prospecto",
+   "user": "¿Hay algún costo adicional por cada pedido?",
+   "cluster": 18
+  },
+  {
+   "n": 187,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo se realiza el pago de la suscripción?",
+   "cluster": 15
+  },
+  {
+   "n": 188,
+   "sec": "Negocio Prospecto",
+   "user": "¿Qué pasa si dejo de pagar un mes?",
+   "cluster": 18
+  },
+  {
+   "n": 189,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo cancelar el servicio cuando quiera?",
+   "cluster": 15
+  },
+  {
+   "n": 190,
+   "sec": "Negocio Prospecto",
+   "user": "Quiero que alguien me explique el funcionamiento antes de registrarme.",
+   "cluster": 16
+  },
+  {
+   "n": 191,
+   "sec": "Negocio Prospecto",
+   "user": "¿Me pueden contactar para una demostración?",
+   "cluster": 21
+  },
+  {
+   "n": 192,
+   "sec": "Negocio Prospecto",
+   "user": "Tengo un negocio pequeño, ¿vale la pena contratar el servicio?",
+   "cluster": 16
+  },
+  {
+   "n": 193,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo comenzar con pocos productos y agregar más después?",
+   "cluster": 16
+  },
+  {
+   "n": 194,
+   "sec": "Negocio Prospecto",
+   "user": "¿El sistema funciona para un negocio que solo vende por delivery?",
+   "cluster": 20
+  },
+  {
+   "n": 195,
+   "sec": "Negocio Prospecto",
+   "user": "Quiero contratar el servicio, ¿me pasan el enlace de registro?",
+   "cluster": 16
+  },
+  {
+   "n": 196,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo cambiar de plan después de registrarme?",
+   "cluster": 18
+  },
+  {
+   "n": 197,
+   "sec": "Negocio Prospecto",
+   "user": "¿Qué diferencia hay entre tener un menú digital y tener un asistente virtual?",
+   "cluster": 19
+  },
+  {
+   "n": 198,
+   "sec": "Negocio Prospecto",
+   "user": "¿Puedo usar el QR en las mesas y el enlace en Instagram al mismo tiempo?",
+   "cluster": 17
+  },
+  {
+   "n": 199,
+   "sec": "Negocio Prospecto",
+   "user": "¿Cómo puedo hacer que mis clientes pidan directamente desde el menú?",
+   "cluster": 15
+  },
+  {
+   "n": 200,
+   "sec": "Negocio Prospecto",
+   "user": "Me interesa afiliar mi negocio, pero necesito hablar con alguien primero.",
+   "cluster": 16
+  },
+  {
+   "n": 201,
+   "sec": "Negocio Registrado",
+   "user": "Hola, ya tengo mi restaurante registrado, necesito ayuda.",
+   "cluster": 22
+  },
+  {
+   "n": 202,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo entro al asistente de mi negocio?",
+   "cluster": 22
+  },
+  {
+   "n": 203,
+   "sec": "Negocio Registrado",
+   "user": "Quiero cambiar el precio de una pizza.",
+   "cluster": 23
+  },
+  {
+   "n": 204,
+   "sec": "Negocio Registrado",
+   "user": "Necesito agregar un producto nuevo al menú.",
+   "cluster": 24
+  },
+  {
+   "n": 205,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo marco una hamburguesa como agotada?",
+   "cluster": 25
+  },
+  {
+   "n": 206,
+   "sec": "Negocio Registrado",
+   "user": "Quiero volver a activar un producto que estaba agotado.",
+   "cluster": 25
+  },
+  {
+   "n": 207,
+   "sec": "Negocio Registrado",
+   "user": "¿Dónde consigo el enlace de mi menú digital?",
+   "cluster": 26
+  },
+  {
+   "n": 208,
+   "sec": "Negocio Registrado",
+   "user": "Necesito el enlace para imprimir mi código QR.",
+   "cluster": 26
+  },
+  {
+   "n": 209,
+   "sec": "Negocio Registrado",
+   "user": "¿Cuál es el enlace que debo compartir para recibir pedidos?",
+   "cluster": 26
+  },
+  {
+   "n": 210,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo puedo enviarle mi menú a un cliente por WhatsApp?",
+   "cluster": 26
+  },
+  {
+   "n": 211,
+   "sec": "Negocio Registrado",
+   "user": "Quiero cambiar el horario de atención de mi restaurante.",
+   "cluster": 23
+  },
+  {
+   "n": 212,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo cierro temporalmente mi negocio?",
+   "cluster": 22
+  },
+  {
+   "n": 213,
+   "sec": "Negocio Registrado",
+   "user": "Necesito activar nuevamente los pedidos.",
+   "cluster": 25
+  },
+  {
+   "n": 214,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo cambio la tasa de cambio?",
+   "cluster": 24
+  },
+  {
+   "n": 215,
+   "sec": "Negocio Registrado",
+   "user": "Quiero consultar cuántos pedidos recibí hoy.",
+   "cluster": 27
+  },
+  {
+   "n": 216,
+   "sec": "Negocio Registrado",
+   "user": "¿Cuánto vendí ayer?",
+   "cluster": 27
+  },
+  {
+   "n": 217,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo reviso los pedidos pendientes?",
+   "cluster": 27
+  },
+  {
+   "n": 218,
+   "sec": "Negocio Registrado",
+   "user": "Necesito cambiar el estado de un pedido.",
+   "cluster": 23
+  },
+  {
+   "n": 219,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo agrego un método de pago?",
+   "cluster": 24
+  },
+  {
+   "n": 220,
+   "sec": "Negocio Registrado",
+   "user": "Quiero modificar la tarifa de delivery.",
+   "cluster": 23
+  },
+  {
+   "n": 221,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo agrego una nueva zona de reparto?",
+   "cluster": 24
+  },
+  {
+   "n": 222,
+   "sec": "Negocio Registrado",
+   "user": "Quiero cambiar la foto de uno de mis productos.",
+   "cluster": 23
+  },
+  {
+   "n": 223,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo agrego tamaños y extras a una pizza?",
+   "cluster": 22
+  },
+  {
+   "n": 224,
+   "sec": "Negocio Registrado",
+   "user": "Necesito crear una categoría nueva.",
+   "cluster": 24
+  },
+  {
+   "n": 225,
+   "sec": "Negocio Registrado",
+   "user": "¿Cuándo vence mi suscripción?",
+   "cluster": 22
+  },
+  {
+   "n": 226,
+   "sec": "Negocio Registrado",
+   "user": "¿Qué plan tengo contratado actualmente?",
+   "cluster": 22
+  },
+  {
+   "n": 227,
+   "sec": "Negocio Registrado",
+   "user": "Quiero cambiar el correo de mi cuenta.",
+   "cluster": 23
+  },
+  {
+   "n": 228,
+   "sec": "Negocio Registrado",
+   "user": "No puedo entrar a mi cuenta, ¿cómo recupero el acceso?",
+   "cluster": 28
+  },
+  {
+   "n": 229,
+   "sec": "Negocio Registrado",
+   "user": "¿Puedo agregar a un empleado para que atienda los pedidos?",
+   "cluster": 27
+  },
+  {
+   "n": 230,
+   "sec": "Negocio Registrado",
+   "user": "Tengo otro local y quiero agregarlo a mi cuenta.",
+   "cluster": 28
+  },
+  {
+   "n": 231,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo puedo administrar los dos restaurantes?",
+   "cluster": 29
+  },
+  {
+   "n": 232,
+   "sec": "Negocio Registrado",
+   "user": "¿Por qué no aparecen mis productos en el menú?",
+   "cluster": 24
+  },
+  {
+   "n": 233,
+   "sec": "Negocio Registrado",
+   "user": "Un cliente dice que no puede hacer pedidos, ¿qué reviso?",
+   "cluster": 27
+  },
+  {
+   "n": 234,
+   "sec": "Negocio Registrado",
+   "user": "No me están llegando las notificaciones de los pedidos.",
+   "cluster": 27
+  },
+  {
+   "n": 235,
+   "sec": "Negocio Registrado",
+   "user": "Quiero saber quién realizó el último pedido.",
+   "cluster": 27
+  },
+  {
+   "n": 236,
+   "sec": "Negocio Registrado",
+   "user": "¿Puedo consultar las ventas por producto?",
+   "cluster": 27
+  },
+  {
+   "n": 237,
+   "sec": "Negocio Registrado",
+   "user": "Necesito saber cuál fue mi producto más vendido.",
+   "cluster": 27
+  },
+  {
+   "n": 238,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo creo una promoción para este fin de semana?",
+   "cluster": 24
+  },
+  {
+   "n": 239,
+   "sec": "Negocio Registrado",
+   "user": "Quiero actualizar la descripción de mi restaurante.",
+   "cluster": 23
+  },
+  {
+   "n": 240,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo cambio el logo que aparece en mi menú?",
+   "cluster": 24
+  },
+  {
+   "n": 241,
+   "sec": "Negocio Registrado",
+   "user": "El asistente no está respondiendo correctamente sobre mis productos.",
+   "cluster": 24
+  },
+  {
+   "n": 242,
+   "sec": "Negocio Registrado",
+   "user": "¿Puedo hacer todos estos cambios desde el chat sin entrar al panel?",
+   "cluster": 28
+  },
+  {
+   "n": 243,
+   "sec": "Negocio Registrado",
+   "user": "Quiero saber si mi negocio está visible para los clientes.",
+   "cluster": 27
+  },
+  {
+   "n": 244,
+   "sec": "Negocio Registrado",
+   "user": "Necesito revisar si mi menú está funcionando correctamente.",
+   "cluster": 22
+  },
+  {
+   "n": 245,
+   "sec": "Negocio Registrado",
+   "user": "¿Cómo puedo compartir mi menú con un código QR nuevo?",
+   "cluster": 26
+  },
+  {
+   "n": 246,
+   "sec": "Negocio Registrado",
+   "user": "Tengo un problema con mi cuenta y necesito que lo revisen.",
+   "cluster": 28
+  },
+  {
+   "n": 247,
+   "sec": "Negocio Registrado",
+   "user": "Quiero hablar con un asesor que conozca mi negocio.",
+   "cluster": 30
+  },
+  {
+   "n": 248,
+   "sec": "Negocio Registrado",
+   "user": "Ya les expliqué mi problema anteriormente, ¿tienen esa información?",
+   "cluster": 22
+  },
+  {
+   "n": 249,
+   "sec": "Negocio Registrado",
+   "user": "¿Pueden revisar mi restaurante y decirme qué tengo pendiente por configurar?",
+   "cluster": 22
+  },
+  {
+   "n": 250,
+   "sec": "Negocio Registrado",
+   "user": "Necesito ayuda con mi negocio, pero prefiero resolverlo por aquí sin entrar al panel.",
+   "cluster": 28
+  }
+ ]
+}

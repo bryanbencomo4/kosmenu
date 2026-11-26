@@ -124,7 +124,7 @@ describe('wa-master E2E integrated', () => {
     // 1–2 unknown wants info
     const r1 = await turn('Hola, quiero información');
     expect(r1.action).toBe('replied');
-    expect(r1.replies[0]?.text).toMatch(/menú digital|pedir comida|restaurantes/i);
+    expect(r1.replies[0]?.text).toMatch(/menú digital|pedir comida|comida para pedir|restaurantes/i);
 
     // 3–4 search → real directory options in WhatsApp
     const r3 = await turn('Busco restaurantes');
@@ -311,3 +311,4 @@ describe('wa-master E2E integrated', () => {
     expect(await store.get(digits)).toBeNull();
   });
 });
+

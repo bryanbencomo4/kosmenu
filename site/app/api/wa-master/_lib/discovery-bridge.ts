@@ -11,6 +11,11 @@ export type WaMasterDiscoveryCard = {
   chatUrl?: string | null;
   isOpen?: boolean | null;
   openLabel?: string | null;
+  zona?: string | null;
+  categoria?: string | null;
+  currencies?: string[];
+  paymentChannels?: string[];
+  acceptsVesBcv?: boolean;
 };
 
 export type WaMasterDiscoveryToolResult = {
@@ -61,6 +66,11 @@ export async function loadDefaultDiscoveryExecute(): Promise<WaMasterDiscoveryEx
         chatUrl: r.chatUrl,
         isOpen: r.isOpen,
         openLabel: r.openLabel,
+        zona: r.zona,
+        categoria: r.categoria,
+        currencies: r.currencies,
+        paymentChannels: r.paymentChannels,
+        acceptsVesBcv: r.acceptsVesBcv,
       })),
       restaurant: result.restaurant
         ? {
