@@ -50,4 +50,11 @@ export {
 } from './auth';
 export { runWaMasterAgentNlu } from './agent';
 export { issueMasterHandoff, getDefaultWaHandoffStore } from './handoff';
+export {
+  formatPublishedPricing,
+  PLATFORM_WHAT_IS,
+  PLATFORM_PLANS,
+  openWelcomeUnknown,
+} from './knowledge/platform';
+export { buildHandoffContextFromMemory } from './knowledge/handoff-context';
 export type * from './types';

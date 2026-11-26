@@ -3,6 +3,7 @@ import type { WaMasterAuthGate } from '../auth';
 import { unauthorizedAdminMessage } from '../auth';
 import type { WaMasterConfig } from '../config';
 import { issueMasterHandoff } from '../handoff';
+import { buildHandoffContextFromMemory } from '../knowledge/handoff-context';
 import { buildPublicMenuLinks, formatMenuLinksReply } from '../menu-links';
 import type {
   WaMasterAdminProposal,
@@ -98,14 +99,20 @@ export async function runAdminSpecialist(params: {
       destination: 'business_assistant',
       fromDigits: identity.fromDigits,
       nowMs,
-      payload: {
+      payload: buildHandoffContextFromMemory({
+        memory,
+        identity,
+        text,
         intent: intent.startsWith('admin') ? intent : 'admin.edit_price',
-        pendingOperation: intent === 'admin.edit_price' || /\bprecio\b/.test(t)
-          ? 'edit_price'
-          : 'admin_help',
-        candidateComercioId: candidate,
-        conversationHint: text.trim().slice(0, 160),
-      },
+        pendingOperation:
+          intent === 'admin.edit_price' || /\bprecio\b/.test(t) ? 'edit_price' : 'admin_help',
+        comercioId: candidate,
+        profile: 'business',
+        extra: {
+          candidateComercioId: candidate,
+          conversationHint: text.trim().slice(0, 160),
+        },
+      }),
     });
     if (handoff) {
       const known = shopName
@@ -263,12 +270,19 @@ export async function runAdminSpecialist(params: {
       destination: 'business_assistant',
       fromDigits: identity.fromDigits,
       nowMs,
-      payload: {
+      payload: buildHandoffContextFromMemory({
+        memory,
+        identity,
+        text,
         intent: 'admin.edit_product',
         pendingOperation: 'edit_products',
-        candidateComercioId: comercioId,
-        conversationHint: text.trim().slice(0, 160),
-      },
+        comercioId,
+        profile: 'business',
+        extra: {
+          candidateComercioId: comercioId,
+          conversationHint: text.trim().slice(0, 160),
+        },
+      }),
     });
     const base =
       `Para subir productos de *${shop.publicName}* entra al panel de elmenuxfa.com, abre tu negocio y usa la gestión de productos del menú.\n\nPanel: ${config.businessManageUrl}`;

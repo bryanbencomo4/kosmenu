@@ -17,6 +17,7 @@ import {
 } from './memory';
 import type { WaHandoffStore } from '../../_lib/wa-handoff';
 import { createMemoryWaMasterQuotaStore, type WaMasterQuotaStore } from './quota';
+import { formatPublishedPricing } from './knowledge/platform';
 import { buildDeterministicReplies } from './replies';
 import {
   runAdminSpecialist,
@@ -128,11 +129,26 @@ export async function runWaMasterOrchestrator(
     intents = ['consumer.search'];
     specialist = 'consumer';
   }
-  // Only resume signup when explicitly naming / continuing — bare "restaurante"
-  // must not trap leftover signupDraft into commercial forever.
-  if (memory.summary.pendingQuestion === 'business_name') {
+  // Resume signup when pending business_name — allow clear intent escapes
+  // without trapping food words inside a business name ("Se llama Pizza Nova").
+  const namingAnswer = /\b(se llama|mi negocio|mi restaurante)\b/i.test(text);
+  const escapeSignup =
+    !namingAnswer &&
+    (/\b(mejor (quiero|pido)|olvidalo|cancelar (el )?registro|a domicilio|delivery|buscar restaurante|cerca de mi|humano|asesor|persona|soporte|reportar|cuanto cuesta|cuánto cuesta|precios? del (plan|servicio))\b/i.test(
+      text,
+    ) ||
+      intents.some(
+        (i) =>
+          i.startsWith('consumer') ||
+          i === 'support.human' ||
+          i === 'support.issue' ||
+          i === 'commercial.pricing',
+      ));
+  if (memory.summary.pendingQuestion === 'business_name' && !escapeSignup) {
     intents = ['commercial.register'];
     specialist = 'commercial';
+  } else if (memory.summary.pendingQuestion === 'business_name' && escapeSignup) {
+    memory = patchSummary(memory, { pendingQuestion: null }, nowMs);
   } else if (
     memory.summary.signupDraft &&
     !intents.some((i) => i.startsWith('commercial')) &&
@@ -273,6 +289,7 @@ export async function runWaMasterOrchestrator(
         fromDigits: input.fromDigits,
         handoffStore: deps.handoffStore,
         nowMs,
+        identity,
       });
       replies = out.replies;
       toolsUsed = out.toolsUsed;
@@ -308,6 +325,7 @@ export async function runWaMasterOrchestrator(
         fromDigits: input.fromDigits,
         handoffStore: deps.handoffStore,
         nowMs,
+        identity,
       });
       replies = out.replies;
       toolsUsed = out.toolsUsed;
@@ -445,6 +463,18 @@ export async function runWaMasterOrchestrator(
 
   void liveCompose;
   void geminiHttpCalls;
+
+  // Multi-intent: append secondary published pricing when user also asked cost
+  // but primary went to another specialist (e.g. search + precios).
+  if (
+    intents.includes('multi') &&
+    intents.includes('commercial.pricing') &&
+    !primary.startsWith('commercial') &&
+    replies.length > 0 &&
+    !/Kit Portamenú|\$10\/mes/i.test(replies.join('\n'))
+  ) {
+    replies = [...replies, formatPublishedPricing(config.businessLandingUrl)];
+  }
 
   replies = replies.filter(Boolean).slice(0, config.maxRepliesPerTurn);
   if (!replies.length) {

@@ -63,12 +63,16 @@ export function classifyWaMasterIntents(params: {
   }
 
   if (
-    /\b(planes|precios del servicio|cuanto cuesta|cuánto cuesta|tarifas|costo.*(menu|menú|plataforma|servicio))\b/.test(
+    /\b(planes|precios?( del servicio)?|prezio|cuanto (cuesta|vale)|cuánto (cuesta|vale)|tarifas|membres[ií]a|costo.*(menu|menú|plataforma|servicio))\b/.test(
       t,
     ) ||
-    /\bcuanto cuesta tener (un )?men[uú]\b/.test(t)
+    /\bcuanto cuesta tener (un )?men[uú]\b/.test(t) ||
+    /\b(kit portamenu|portamen[uú])\b/.test(t)
   ) {
-    intents.push('commercial.pricing');
+    // Avoid treating merchant product-price edits as platform pricing.
+    if (!/\b(cambia(?:r)?|pon(?:er)?|actualiza(?:r)?)\s+(el\s+)?precio\b/.test(t)) {
+      intents.push('commercial.pricing');
+    }
   }
 
   if (

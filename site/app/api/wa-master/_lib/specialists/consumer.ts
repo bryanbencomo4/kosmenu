@@ -4,8 +4,9 @@ import type {
   WaMasterDiscoveryExecute,
 } from '../discovery-bridge';
 import { issueMasterHandoff } from '../handoff';
+import { buildHandoffContextFromMemory } from '../knowledge/handoff-context';
 import type { WaHandoffStore } from '../../../_lib/wa-handoff';
-import type { WaMasterMemory, WaMasterRestaurantRef } from '../types';
+import type { WaMasterIdentity, WaMasterMemory, WaMasterRestaurantRef } from '../types';
 
 function fold(s: string) {
   return s
@@ -143,8 +144,17 @@ export async function runConsumerSpecialist(params: {
   fromDigits?: string;
   handoffStore?: WaHandoffStore;
   nowMs?: number;
+  identity?: WaMasterIdentity;
 }): Promise<ConsumerSpecialistResult> {
   const { text, memory, config, discoveryCtx, executeTool } = params;
+  const identity: WaMasterIdentity = params.identity || {
+    fromDigits: params.fromDigits || memory.profile.fromDigits,
+    role: 'unknown',
+    comercios: [],
+    possibleConsumer: true,
+    consumerOrderSignal: false,
+    provenanceNotes: [],
+  };
   const t = fold(text);
   const toolsUsed: string[] = [];
   // Only trust zone when the user said it in THIS message — never echo a
@@ -217,16 +227,25 @@ export async function runConsumerSpecialist(params: {
       destination: 'consumer_discovery',
       fromDigits: params.fromDigits || memory.profile.fromDigits,
       nowMs: params.nowMs,
-      payload: {
+      payload: buildHandoffContextFromMemory({
+        memory: {
+          ...memory,
+          summary: {
+            ...memory.summary,
+            zone: clearsZone ? null : zone || memory.summary.zone,
+          },
+        },
+        identity,
+        text,
         intent: 'consumer.search',
-        query,
-        zone: zone || null,
-        conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
-        summary: `Cliente busca ${query}${zone ? ` en ${zone}` : ''} desde WhatsApp`,
-        transcriptExcerpt: text.slice(0, 400),
-        source: 'wa_platform',
         profile: 'consumer_discovery',
-      },
+        extra: {
+          query,
+          zone: clearsZone ? null : zone || null,
+          conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
+          summary: `Cliente busca ${query}${zone ? ` en ${zone}` : ''} desde WhatsApp`,
+        },
+      }),
     });
     const guide = formatConsumerOrderGuide({
       assistantUrl: config.consumerAssistantUrl,

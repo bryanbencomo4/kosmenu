@@ -1,4 +1,5 @@
 import type { WaMasterConfig } from './config';
+import { formatPublishedPricing } from './knowledge/platform';
 import { greetingForIdentity } from './personality';
 import type {
   WaMasterIdentity,
@@ -123,9 +124,7 @@ export function buildDeterministicReplies(params: {
     }
     if (primary === 'commercial.pricing') {
       return {
-        replies: [
-          `¡Claro! 😊 Hoy elmenuxfa.com publica:\n• Kit Portamenú Inteligente de lanzamiento: *$10*\n• Plataforma: *$10/mes* o *$90/año*\n\nDetalle: ${config.businessLandingUrl}`,
-        ],
+        replies: [formatPublishedPricing(config.businessLandingUrl)],
         escalateHuman,
         toolsUsed,
         askedFields,

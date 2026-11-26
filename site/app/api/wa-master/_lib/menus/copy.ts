@@ -1,3 +1,9 @@
+import {
+  openWelcomeConsumer,
+  openWelcomeProspect,
+  openWelcomeRegistered,
+  openWelcomeUnknown,
+} from '../knowledge/platform';
 import type { WaMenuId, WaMenuProfile } from './types';
 
 export function rootMenuIdForProfile(profile: WaMenuProfile): WaMenuId {
@@ -20,65 +26,14 @@ export function buildMenuText(menuId: WaMenuId, opts?: { businessName?: string |
   const name = opts?.businessName?.trim();
   switch (menuId) {
     case 'root_unknown':
-      return formatMenu(
-        '¡Hola! 👋 Bienvenido a *elmenuxfa.com*.\n\n¿En qué podemos ayudarte hoy?',
-        [
-          '1️⃣ Buscar restaurantes o pedir comida',
-          '2️⃣ Crear un menú para mi negocio',
-          '3️⃣ Ya tengo un negocio registrado',
-          '4️⃣ Información sobre nuestros servicios',
-          '8️⃣ Reportar un problema',
-          '9️⃣ Hablar con un asesor',
-        ],
-        FOOTER_NUM,
-      );
+      // NL-first welcome; numbered digits still work via navigate.
+      return openWelcomeUnknown();
     case 'root_consumer':
-      return formatMenu(
-        '¿Qué te gustaría hacer? 🍽️',
-        [
-          '1️⃣ Buscar restaurantes',
-          '2️⃣ Pedir comida a domicilio',
-          '3️⃣ Restaurantes cerca de mí',
-          '4️⃣ Ayuda con un pedido',
-          '5️⃣ Buscar una comida específica',
-          '8️⃣ Reportar un problema',
-          '9️⃣ Hablar con un asesor',
-          '0️⃣ Menú principal',
-        ],
-        FOOTER_NUM,
-      );
+      return openWelcomeConsumer();
     case 'root_prospect':
-      return formatMenu(
-        '¡Perfecto! Te ayudo con tu negocio en *elmenuxfa.com* 🏪',
-        [
-          '1️⃣ ¿Cómo funciona elmenuxfa.com?',
-          '2️⃣ Conocer planes y precios',
-          '3️⃣ Registrar mi negocio',
-          '4️⃣ Comenzar a crear mi menú',
-          '5️⃣ Continuar mi registro',
-          '8️⃣ Reportar un problema',
-          '9️⃣ Hablar con un asesor',
-          '0️⃣ Menú principal',
-        ],
-        FOOTER_NUM,
-      );
+      return openWelcomeProspect();
     case 'root_registered':
-      return formatMenu(
-        name
-          ? `Hola 👋 Gestionemos *${name}*:`
-          : 'Hola 👋 ¿Qué necesitas para tu negocio?',
-        [
-          '1️⃣ Obtener enlaces de mi menú',
-          '2️⃣ Agregar o editar productos',
-          '3️⃣ Precios, tasas y pagos',
-          '4️⃣ Pedidos y delivery',
-          '5️⃣ Configuración de mi negocio',
-          '8️⃣ Reportar un problema',
-          '9️⃣ Hablar con un asesor',
-          '0️⃣ Menú principal',
-        ],
-        FOOTER_NUM,
-      );
+      return openWelcomeRegistered(name);
     case 'biz_links':
       return formatMenu('Enlaces de tu menú 🔗', [
         '1️⃣ Enlace para QR',

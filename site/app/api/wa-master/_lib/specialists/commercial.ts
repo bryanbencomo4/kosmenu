@@ -1,7 +1,9 @@
 import type { WaHandoffStore } from '../../../_lib/wa-handoff';
 import type { WaMasterConfig } from '../config';
 import { issueMasterHandoff } from '../handoff';
-import type { WaMasterMemory, WaMasterSignupDraft } from '../types';
+import { buildHandoffContextFromMemory } from '../knowledge/handoff-context';
+import { formatPublishedPricing, PLATFORM_WHAT_IS } from '../knowledge/platform';
+import type { WaMasterIdentity, WaMasterMemory, WaMasterSignupDraft } from '../types';
 
 /**
  * Commercial specialist — no invented plans/promos.
@@ -53,8 +55,17 @@ export async function runCommercialSpecialist(params: {
   fromDigits?: string;
   handoffStore?: WaHandoffStore;
   nowMs?: number;
+  identity?: WaMasterIdentity;
 }): Promise<CommercialSpecialistResult> {
   const { text, memory, config, intent } = params;
+  const identity = params.identity || {
+    fromDigits: params.fromDigits || memory.profile.fromDigits,
+    role: 'unknown' as const,
+    comercios: [],
+    possibleConsumer: false,
+    consumerOrderSignal: false,
+    provenanceNotes: [],
+  };
   const t = fold(text);
   const draft: WaMasterSignupDraft = memory.summary.signupDraft || {
     businessName: null,
@@ -92,41 +103,48 @@ export async function runCommercialSpecialist(params: {
     businessNameDraft?: string | null;
     conversationHint?: string;
   }) => {
+    const ctx = buildHandoffContextFromMemory({
+      memory: {
+        ...memory,
+        summary: { ...memory.summary, signupDraft: draft },
+      },
+      identity,
+      text: params.text,
+      intent: payload.intent,
+      pendingOperation: payload.pendingOperation ?? null,
+      profile: 'business',
+      extra: {
+        businessNameDraft: payload.businessNameDraft ?? draft.businessName,
+        conversationHint: payload.conversationHint ?? null,
+      },
+    });
     const handoff = await issueMasterHandoff({
       store: params.handoffStore,
       config,
       destination: 'business_assistant',
       fromDigits: params.fromDigits || memory.profile.fromDigits,
       nowMs: params.nowMs,
-      payload: {
-        intent: payload.intent,
-        pendingOperation: payload.pendingOperation ?? null,
-        businessNameDraft: payload.businessNameDraft ?? draft.businessName,
-        conversationHint: payload.conversationHint ?? null,
-        summary:
-          payload.conversationHint ||
-          payload.pendingOperation ||
-          `Solicitud comercial: ${payload.intent}`,
-        transcriptExcerpt: params.text.slice(0, 400),
-        source: 'wa_platform',
-        profile: 'business',
-      },
+      payload: ctx,
     });
     return handoff;
   };
 
   if (intent === 'commercial.pricing' || /\b(precio|plan|tarifa|cuanto cuesta|cuánto cuesta)\b/.test(t)) {
     draft.stage = 'pricing';
-    // Published business landing prices (business.elmenuxfa.com) — do not invent others.
-    const pricingCopy =
-      `¡Claro! 😊 Hoy elmenuxfa.com publica:\n` +
-      `• *Kit Portamenú Inteligente* de lanzamiento: *$10*\n` +
-      `• *Plataforma:* *$10/mes* o *$90/año*\n\n` +
-      `Detalle y condiciones: ${config.businessLandingUrl}\n` +
-      `Si quieres registrar tu menú, dímelo y te oriento.`;
     return {
-      replies: [pricingCopy],
+      replies: [formatPublishedPricing(config.businessLandingUrl)],
       toolsUsed: ['commercial_pricing_published'],
+      memoryPatch: { signupDraft: draft, activeService: 'commercial' },
+      skipGeminiPolish: true,
+    };
+  }
+
+  if (/\b(qu[eé] es elmenuxfa|como funciona|c[oó]mo funciona|que ofrecen|qu[eé] ofrecen)\b/.test(t)) {
+    return {
+      replies: [
+        `${PLATFORM_WHAT_IS}\n\n¿Quieres precios, registrar tu negocio o ver el asistente del panel?`,
+      ],
+      toolsUsed: ['commercial_platform_kb'],
       memoryPatch: { signupDraft: draft, activeService: 'commercial' },
       skipGeminiPolish: true,
     };
