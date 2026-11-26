@@ -30,9 +30,12 @@ import {
   isConcreteBusinessIntent,
   isWriteBusinessIntent,
   parseBusinessIntent,
+  inferFollowUpIntent,
   parseBusinessIntents,
   type BusinessIntent,
 } from './_lib/intents';
+import { describeFx, rateCurrencies } from './_lib/fx';
+import { loadShopFx } from './_lib/fx-load';
 import type { BusinessShop } from './_lib/auth';
 import { escalateBusinessAssistantToHuman } from './_lib/escalate';
 import { readMembership } from './_lib/membership';
@@ -119,7 +122,7 @@ async function executeBusinessIntent(params: {
       return readOrderDetail(shop, intent.hint || userText);
     case 'currency':
       if (intent.setValue != null) {
-        return proposeSetTasa(userId, shop, userText);
+        return proposeSetTasa(userId, shop, userText, { value: intent.setValue });
       }
       return {
         text: shop.tasa
@@ -357,6 +360,20 @@ function asChatHistory(
  * POST /api/asistente-negocio — merchant admin assistant.
  * Flag: BUSINESS_ASSISTANT_ENABLED=1 (also allowed in test/preview/local empty VERCEL_ENV).
  */
+async function buildShopContextForNlu(shop: { comercioId: string; moneda: string | null }): Promise<string | undefined> {
+  try {
+    const fx = await loadShopFx(shop.comercioId);
+    if (!fx) return undefined;
+    const rates = rateCurrencies(fx);
+    return [
+      `Moneda principal del menú: ${fx.primary}.`,
+      rates.length ? `Monedas con tasa: ${describeFx(fx).replace(/\*/g, '')}` : 'Sin otras monedas activas.',
+    ].join('\n');
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(req: Request) {
   const cfg = getBusinessAssistantRuntimeConfig();
   const vercelEnv = (process.env.VERCEL_ENV || '').trim().toLowerCase();
@@ -619,9 +636,21 @@ export async function POST(req: Request) {
   }
 
   const shop = selectedShop;
-  const pendingOp = payload?.pendingOperation;
+  // The handoff op only seeds the FIRST message; later turns follow what the owner actually says.
+  const userTurns = (body.messages || []).filter((m) => m.role === 'user').length;
+  const pendingOp = userTurns <= 1 ? payload?.pendingOperation : null;
   const multiIntents = parseBusinessIntents(lastUser!.text, { pendingOp });
   let intent = multiIntents[0]!;
+  if (multiIntents.length < 2 && (intent.kind === 'help' || (intent.kind === 'currency' && intent.setValue == null))) {
+    const msgs = body.messages || [];
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')?.text;
+    const priorUsers = msgs.filter((m) => m.role === 'user').slice(0, -1).map((m) => m.text);
+    const follow = inferFollowUpIntent(lastUser!.text, lastAssistant, priorUsers);
+    if (follow) {
+      intent = follow;
+      multiIntents[0] = follow;
+    }
+  }
   let geminiReply: string | undefined;
 
   // Attached image from chat → propose product photo (never auto-apply).
@@ -640,6 +669,7 @@ export async function POST(req: Request) {
       enLinea: shop.enLinea,
       userText: lastUser!.text,
       history: asChatHistory(body.messages).slice(-8),
+      shopContext: await buildShopContextForNlu(shop),
     });
     if (gemini) {
       intent = gemini.intent;

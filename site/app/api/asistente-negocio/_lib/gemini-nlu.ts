@@ -1,3 +1,4 @@
+import { CHATBOT_PRIMARY_MODEL } from '../../chat/_lib/models';
 import type { BusinessIntent } from './intents';
 
 export type BusinessGeminiTurn = {
@@ -21,6 +22,12 @@ type GeminiClassifyJson = {
   /** orders filter / metrics focus */
   filter?: string;
   focus?: string;
+  /** Generic numeric value (exchange rate, delivery fee…). */
+  value?: number;
+  /** ISO-ish currency code for rates (COP, VES, USD, EUR). */
+  currency?: string;
+  /** Enable/disable flag for toggles (delivery, promos). */
+  enabled?: boolean;
 };
 
 const ALLOWED = new Set([
@@ -36,6 +43,24 @@ const ALLOWED = new Set([
   'customers',
   'order_detail',
   'currency',
+  'delete_product',
+  'create_category',
+  'delete_category',
+  'list_payments',
+  'upsert_payment',
+  'delete_payment',
+  'read_delivery',
+  'set_delivery',
+  'create_promo',
+  'toggle_promo',
+  'delete_promo',
+  'set_order_status',
+  'list_staff',
+  'invite_staff',
+  'revoke_staff',
+  'set_product_options',
+  'set_featured',
+  'update_profile',
   'membership',
   'account',
   'share_menu',
@@ -73,7 +98,7 @@ function geminiModel(env: NodeJS.ProcessEnv = process.env): string {
   return (
     (env.BUSINESS_ASSISTANT_GEMINI_MODEL || '').trim() ||
     (env.CHATBOT_GEMINI_MODEL || '').trim() ||
-    'gemini-2.0-flash'
+    CHATBOT_PRIMARY_MODEL
   );
 }
 
@@ -100,7 +125,10 @@ function sanitizeReply(raw: string | undefined): string | undefined {
   return t;
 }
 
-export function mapGeminiClassifyToTurn(raw: GeminiClassifyJson): BusinessGeminiTurn | null {
+export function mapGeminiClassifyToTurn(
+  raw: GeminiClassifyJson,
+  userText?: string,
+): BusinessGeminiTurn | null {
   const kind = String(raw.intent || '').trim();
   if (!ALLOWED.has(kind)) return null;
 
@@ -205,8 +233,62 @@ export function mapGeminiClassifyToTurn(raw: GeminiClassifyJson): BusinessGemini
         },
         source: 'gemini',
       };
-    case 'currency':
-      return { intent: { kind: 'currency' }, source: 'gemini' };
+    case 'currency': {
+      const value =
+        typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value > 0
+          ? raw.value
+          : typeof raw.newPrice === 'number' && raw.newPrice > 0
+            ? raw.newPrice
+            : undefined;
+      return { intent: { kind: 'currency', setValue: value }, source: 'gemini' };
+    }
+    case 'delete_product':
+      return { intent: { kind: 'delete_product', productHint: userText || raw.productHint }, source: 'gemini' };
+    case 'create_category':
+    case 'delete_category':
+    case 'upsert_payment':
+    case 'delete_payment':
+    case 'create_promo':
+    case 'delete_promo':
+    case 'set_order_status':
+    case 'invite_staff':
+    case 'revoke_staff':
+    case 'set_product_options':
+      return {
+        intent: { kind, raw: userText || raw.productHint || raw.nameHint || '' } as BusinessIntent,
+        source: 'gemini',
+      };
+    case 'toggle_promo':
+      return {
+        intent: { kind: 'toggle_promo', raw: userText || '', enabled: raw.enabled !== false },
+        source: 'gemini',
+      };
+    case 'set_featured':
+      return {
+        intent: { kind: 'set_featured', raw: userText || '', clear: raw.enabled === false },
+        source: 'gemini',
+      };
+    case 'list_payments':
+      return { intent: { kind: 'list_payments' }, source: 'gemini' };
+    case 'read_delivery':
+      return { intent: { kind: 'read_delivery' }, source: 'gemini' };
+    case 'list_staff':
+      return { intent: { kind: 'list_staff' }, source: 'gemini' };
+    case 'update_profile':
+      return { intent: { kind: 'update_profile' }, source: 'gemini' };
+    case 'set_delivery': {
+      const fee =
+        typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value >= 0 ? raw.value : undefined;
+      return {
+        intent: {
+          kind: 'set_delivery',
+          enabled: raw.enabled !== false,
+          fixedPrice: fee,
+          pricingType: fee != null ? 'fixed' : undefined,
+        },
+        source: 'gemini',
+      };
+    }
     case 'membership':
       return { intent: { kind: 'membership' }, source: 'gemini' };
     case 'account': {
@@ -257,16 +339,25 @@ export function mapGeminiClassifyToTurn(raw: GeminiClassifyJson): BusinessGemini
   }
 }
 
-function buildSystemPrompt(shopName: string, enLinea: boolean | null): string {
+function buildSystemPrompt(
+  shopName: string,
+  enLinea: boolean | null,
+  shopContext?: string,
+): string {
   const status =
     enLinea === true ? 'en línea' : enLinea === false ? 'fuera de línea' : 'desconocido';
   return [
     'Eres el clasificador NLU del asistente de negocio de elmenuxfa.com (WhatsApp-style, español).',
     `Negocio actual: ${shopName} (${status}).`,
+    shopContext ? `Contexto del negocio:\n${shopContext}` : '',
     'Devuelve SOLO un JSON compacto (sin markdown) con:',
-    '{"intent":"...","productHint":"?","newPrice":?,"available":?,"enLinea":?,"hoursText":"?","nameHint":"?","mode":"?","reply":"?"}',
-    'intents válidos: list_menu, propose_price, propose_availability, change_image, read_hours, propose_hours, propose_en_linea, recent_orders, home_metrics, customers, order_detail, currency, membership, account, share_menu, refuse_sensitive, register, add_product, unsupported, select_comercio, escalate_human, chat, help',
-    '- pagos/Zelle/delivery/promos/empleados/crear categoría/cambiar estado de pedido → unsupported (mode=payments|delivery|promo|staff|category|order_status). NUNCA add_product.',
+    '{"intent":"...","productHint":"?","newPrice":?,"value":?,"currency":"?","enabled":?,"available":?,"enLinea":?,"hoursText":"?","nameHint":"?","mode":"?","reply":"?"}',
+    'intents válidos: list_menu, propose_price, propose_availability, change_image, read_hours, propose_hours, propose_en_linea, recent_orders, home_metrics, customers, order_detail, currency, delete_product, create_category, delete_category, list_payments, upsert_payment, delete_payment, read_delivery, set_delivery, create_promo, toggle_promo, delete_promo, set_order_status, list_staff, invite_staff, revoke_staff, set_product_options, set_featured, update_profile, membership, account, share_menu, refuse_sensitive, register, add_product, unsupported, select_comercio, escalate_human, chat, help',
+    'Eres capaz de hacer en este chat TODO lo que el panel permite: precios, disponibilidad, horarios, abrir/cerrar, productos y categorías, métodos de pago, delivery, promos, equipo, pedidos, tasas de cambio y perfil. Siempre pide confirmación antes de escribir (eso lo hace el sistema, tú solo clasificas).',
+    '- Tasa de cambio / "recibir el peso a 5000" / "el dólar a 45 bolívares" → currency con value=número normalizado (5000, 3200.5) y currency=COP|VES|USD|EUR si lo dicen ("peso"=COP, "bolívar"=VES). NUNCA lo trates como precio de producto.',
+    '- Si el usuario responde corto ("5000", "en pesos", "sí") a una pregunta del asistente, usa el HISTORIAL para continuar esa tarea, no cambies de tema.',
+    '- delivery: set_delivery (enabled true/false, value=tarifa fija) o read_delivery; métodos de pago: list_payments / upsert_payment / delete_payment; promos: create_promo / toggle_promo (enabled) / delete_promo; equipo: list_staff / invite_staff / revoke_staff; categorías: create_category / delete_category; estado de un pedido: set_order_status; destacar producto: set_featured (enabled=false para quitar); variantes/opciones: set_product_options.',
+    '- unsupported SOLO si de verdad no encaja en nada anterior (mode=promo|variations).',
     'Reglas CRÍTICAS:',
     '- Nunca inventes que ya aplicaste un cambio.',
     '- Nunca pidas salir al panel web; todo es en el chat.',
@@ -296,6 +387,7 @@ export async function classifyBusinessTurnWithGemini(input: {
   enLinea: boolean | null;
   userText: string;
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+  shopContext?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
 }): Promise<BusinessGeminiTurn | null> {
@@ -321,7 +413,7 @@ export async function classifyBusinessTurnWithGemini(input: {
 
   const body = {
     systemInstruction: {
-      parts: [{ text: buildSystemPrompt(input.shopName, input.enLinea) }],
+      parts: [{ text: buildSystemPrompt(input.shopName, input.enLinea, input.shopContext) }],
     },
     contents: [
       {
@@ -339,7 +431,7 @@ export async function classifyBusinessTurnWithGemini(input: {
     ],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 256,
+      maxOutputTokens: 400,
       responseMimeType: 'application/json',
     },
   };
@@ -365,7 +457,7 @@ export async function classifyBusinessTurnWithGemini(input: {
     if (!text) return null;
     const parsed = extractJsonObject(text);
     if (!parsed) return null;
-    return mapGeminiClassifyToTurn(parsed);
+    return mapGeminiClassifyToTurn(parsed, input.userText);
   } catch {
     return null;
   } finally {

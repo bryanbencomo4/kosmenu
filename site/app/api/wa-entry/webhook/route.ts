@@ -7,6 +7,8 @@ import { getWaEntryRuntime } from '../_lib/runtime';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Voice-note / photo understanding (decrypt + Gemini) can take a few seconds.
+export const maxDuration = 60;
 
 const ipHits = new Map<string, { count: number; resetAt: number }>();
 

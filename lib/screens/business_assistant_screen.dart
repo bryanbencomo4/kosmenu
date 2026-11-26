@@ -1,9 +1,11 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:kosmenu_app/screens/business_assistant_embed_stub.dart'
+    if (dart.library.html) 'package:kosmenu_app/screens/business_assistant_embed_web.dart';
 import 'package:kosmenu_app/screens/business_assistant_hash_stub.dart'
     if (dart.library.html) 'package:kosmenu_app/screens/business_assistant_hash_web.dart';
 import 'package:kosmenu_app/services/elmenuxfa_api_config.dart';
@@ -98,6 +100,10 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   var _handoffValid = false;
   var _recoveryHint = false;
   var _needsAuth = false;
+
+  /// Web: host the full Next chat (voice, photos, cards) in an iframe while signed in.
+  var _useEmbed = false;
+  var _embedFailed = false;
   final _chips = <_Chip>[];
   StreamSubscription<AuthState>? _authSub;
 
@@ -147,8 +153,16 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
       _handoffCode = readBusinessAssistantHandoffFromLocation() ??
           BusinessAssistantScreen.handoffCodeFromUri(Uri.base);
     }
+    _useEmbed = _canEmbed();
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((_) {
-      if (mounted && _booted) {
+      if (!mounted) return;
+      final shouldEmbed = _canEmbed();
+      if (shouldEmbed != _useEmbed) {
+        setState(() => _useEmbed = shouldEmbed);
+        if (!shouldEmbed) _boot(force: true);
+        return;
+      }
+      if (_booted && !_useEmbed) {
         _boot(force: true);
       }
     });
@@ -162,7 +176,30 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
         if (mounted) _boot(force: true);
       });
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _boot());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_useEmbed) {
+        // The embedded chat boots itself with the handoff code; just hide it from the URL.
+        if (kIsWeb && (_handoffCode ?? '').isNotEmpty) {
+          scrubBusinessAssistantHandoffFromUrl();
+        }
+        return;
+      }
+      _boot();
+    });
+  }
+
+  bool _canEmbed() =>
+      kIsWeb &&
+      businessAssistantEmbedSupported &&
+      !_embedFailed &&
+      Supabase.instance.client.auth.currentSession != null;
+
+  Uri _embedUri() {
+    final code = _handoffCode?.trim() ?? '';
+    return ElmenuxfaApiConfig.uri('/asistente-negocio').replace(
+      queryParameters: {'embed': '1'},
+      fragment: code.isEmpty ? null : 'h=${Uri.encodeComponent(code)}',
+    );
   }
 
   @override
@@ -508,6 +545,28 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   @override
   Widget build(BuildContext context) {
     final p = _palette(context);
+    if (_useEmbed) {
+      return Scaffold(
+        key: const Key('business_assistant_screen'),
+        backgroundColor: p.bg,
+        body: BusinessAssistantEmbed(
+          src: _embedUri(),
+          accessToken: () =>
+              Supabase.instance.client.auth.currentSession?.accessToken,
+          authChanges:
+              Supabase.instance.client.auth.onAuthStateChange.map((_) {}),
+          onHome: _goHome,
+          onNeedAuth: () {
+            if (!mounted) return;
+            setState(() {
+              _embedFailed = true;
+              _useEmbed = false;
+            });
+            _boot(force: true);
+          },
+        ),
+      );
+    }
     final session = Supabase.instance.client.auth.currentSession;
     final showChips =
         _messages.length <= 2 && !_busy && !_messages.any((m) => m.proposal != null);

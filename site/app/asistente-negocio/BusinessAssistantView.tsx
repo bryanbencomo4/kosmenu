@@ -30,7 +30,11 @@ import {
   saveChatTheme,
   type ChatThemeMode,
 } from '../v/[id]/_components/chat/chat-theme';
-import { ChatComposer } from '../v/[id]/_components/chat/ChatComposer';
+import {
+  ChatComposer,
+  type ChatVoicePayload,
+} from '../v/[id]/_components/chat/ChatComposer';
+import { ChatVoiceNote } from '../v/[id]/_components/chat/ChatVoiceNote';
 import { ChatHeader } from '../v/[id]/_components/chat/ChatHeader';
 import { ChatReceiptTicks } from '../v/[id]/_components/chat/ChatReceiptTicks';
 import {
@@ -83,7 +87,22 @@ type Msg = {
   ordersView?: OrdersListData | null;
   metricsView?: MetricsCardData | null;
   customersView?: CustomersCardData | null;
+  voiceUrl?: string | null;
+  voiceDurationMs?: number;
+  imageUrl?: string | null;
 };
+
+type MediaAnalysis = {
+  tipo: 'plato' | 'menu' | 'comprobante' | 'logo' | 'captura' | 'otro';
+  resumen: string;
+  texto: string;
+  busqueda: string;
+};
+
+type MediaResponse =
+  | { ok: true; kind: 'audio'; transcript: string }
+  | { ok: true; kind: 'image'; analysis: MediaAnalysis }
+  | { ok: false; error?: string };
 
 type ApiJson = {
   ok?: boolean;
@@ -107,6 +126,37 @@ type AssistantChip = ChatSuggestedChip & { comercioId?: string };
 
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Origins allowed to embed this view and hand it the merchant session. */
+const EMBED_PARENT_ORIGINS = [
+  'https://app.elmenuxfa.com',
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'http://localhost:8080',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5000',
+  'http://127.0.0.1:8080',
+];
+
+function isEmbedded(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self !== window.top && new URLSearchParams(window.location.search).get('embed') === '1';
+  } catch {
+    return true;
+  }
+}
+
+function postToParent(message: Record<string, unknown>) {
+  try {
+    for (const origin of EMBED_PARENT_ORIGINS) {
+      // Only the allowed app origin will actually receive it.
+      window.parent.postMessage(message, origin);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function readHashHandoff(): string | null {
@@ -171,6 +221,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   const [code, setCode] = useState<string | null>(props.initialHandoffCode);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [showAuthCard, setShowAuthCard] = useState(false);
   const [authModeHint, setAuthModeHint] = useState<'login' | 'register' | null>(null);
@@ -256,18 +307,56 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
 
     const sb = getBrowserSupabase();
     let cancelled = false;
-    void (async () => {
-      try {
-        const { data } = (await sb?.auth.getSession()) ?? { data: { session: null } };
-        const token = data.session?.access_token;
-        if (token) writeBearer(token);
-      } finally {
-        if (!cancelled) setSessionReady(true);
-      }
-    })();
+    const embedded = isEmbedded();
+    let embedTimer: ReturnType<typeof setTimeout> | null = null;
+    let onEmbedMessage: ((ev: MessageEvent) => void) | null = null;
+    if (embedded) {
+      // Hosted inside app.elmenuxfa.com: the Flutter shell owns the login and hands us the
+      // session, so the merchant never leaves the chat nor signs in twice.
+      let gotToken = false;
+      onEmbedMessage = (ev: MessageEvent) => {
+        if (!EMBED_PARENT_ORIGINS.includes(ev.origin)) return;
+        const msg = ev.data as { type?: string; accessToken?: string; comercioId?: string } | null;
+        if (!msg || msg.type !== 'elmenuxfa:auth') return;
+        const token = String(msg.accessToken || '').trim();
+        if (!token) return;
+        writeBearer(token);
+        if (msg.comercioId) {
+          selectedComercioIdRef.current = msg.comercioId;
+          setSelectedComercioId(msg.comercioId);
+          writeStoredShop(msg.comercioId);
+        }
+        if (!gotToken) {
+          gotToken = true;
+          if (embedTimer) clearTimeout(embedTimer);
+          setNeedsAuth(false);
+          setShowAuthCard(false);
+          setSessionReady(true);
+        }
+      };
+      window.addEventListener('message', onEmbedMessage);
+      postToParent({ type: 'elmenuxfa:ready' });
+      embedTimer = setTimeout(() => {
+        if (!gotToken && !cancelled) {
+          postToParent({ type: 'elmenuxfa:need-auth' });
+          setSessionReady(true);
+        }
+      }, 4000);
+    } else {
+      void (async () => {
+        try {
+          const { data } = (await sb?.auth.getSession()) ?? { data: { session: null } };
+          const token = data.session?.access_token;
+          if (token) writeBearer(token);
+        } finally {
+          if (!cancelled) setSessionReady(true);
+        }
+      })();
+    }
 
     // Never wipe the thread on TOKEN_REFRESHED / INITIAL_SESSION — that felt like a "reset".
     const { data: sub } = sb?.auth.onAuthStateChange((event, session) => {
+      if (embedded) return; // session comes from the Flutter shell via postMessage
       writeBearer(session?.access_token ?? null);
       if (event === 'SIGNED_OUT') {
         setNeedsAuth(true);
@@ -283,6 +372,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
     }) ?? { data: { subscription: null } };
     return () => {
       cancelled = true;
+      if (embedTimer) clearTimeout(embedTimer);
+      if (onEmbedMessage) window.removeEventListener('message', onEmbedMessage);
       sub.subscription?.unsubscribe();
     };
   }, []);
@@ -484,7 +575,13 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   const sendText = useCallback(
     async (
       text: string,
-      opts?: { comercioId?: string | null; imageUrl?: string | null },
+      opts?: {
+        comercioId?: string | null;
+        imageUrl?: string | null;
+        /** Local photo preview for the user bubble (no product-photo routing). */
+        previewImageUrl?: string | null;
+        voice?: { url: string; durationMs: number } | null;
+      },
     ) => {
       const trimmed = text.trim();
       if ((!trimmed && !opts?.imageUrl) || busy) return;
@@ -534,6 +631,9 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
         role: 'user',
         text: outbound,
         createdAt: Date.now(),
+        voiceUrl: opts?.voice?.url ?? null,
+        voiceDurationMs: opts?.voice?.durationMs,
+        imageUrl: opts?.imageUrl || opts?.previewImageUrl || null,
       };
       const nextMsgs = [...messages, userMsg];
       setMessages(nextMsgs);
@@ -542,7 +642,9 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       await consumeOnce();
       try {
         const { json } = await apiPost({
-          messages: nextMsgs.map((m) => ({ role: m.role, text: m.text })),
+          messages: nextMsgs
+            .filter((m) => m.text.trim())
+            .map((m) => ({ role: m.role, text: m.text.slice(0, 1900) })),
           handoffCode: code || undefined,
           handoffAction: 'peek',
           comercioId: selectedComercioIdRef.current || undefined,
@@ -621,6 +723,144 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
     void sendText(text);
   }, [draft, sendText]);
 
+  const postMedia = useCallback(async (file: Blob, name: string): Promise<MediaResponse | null> => {
+    try {
+      const fd = new FormData();
+      fd.append('audience', 'business');
+      fd.append('file', new File([file], name, { type: file.type || 'application/octet-stream' }));
+      const headers: Record<string, string> = {};
+      const token = readBearer();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/assistant-media', { method: 'POST', headers, body: fd });
+      return (await res.json()) as MediaResponse;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const pushLocalAssistant = useCallback((text: string) => {
+    setMessages((m) => [...m, { id: newId('a'), role: 'assistant', text, createdAt: Date.now() }]);
+  }, []);
+
+  const onSendVoice = useCallback(
+    async (payload: ChatVoicePayload) => {
+      if (busy || mediaBusy) return;
+      unlockAudio();
+      setMediaBusy(true);
+      try {
+        let transcript = (payload.transcript || '').trim();
+        if (!transcript) {
+          const media = await postMedia(payload.blob, 'voz.webm');
+          if (media && media.ok && media.kind === 'audio') transcript = media.transcript.trim();
+        }
+        if (!transcript) {
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId('u'),
+              role: 'user',
+              text: '',
+              createdAt: Date.now(),
+              voiceUrl: payload.url,
+              voiceDurationMs: payload.durationMs,
+            },
+          ]);
+          playChatSound('messageSent');
+          pushLocalAssistant(
+            'No alcancé a entender tu audio 🎧 ¿Me lo repites un poquito más cerca del micrófono o me lo escribes?',
+          );
+          return;
+        }
+        setMediaBusy(false);
+        await sendText(transcript, { voice: { url: payload.url, durationMs: payload.durationMs } });
+      } finally {
+        setMediaBusy(false);
+      }
+    },
+    [busy, mediaBusy, postMedia, pushLocalAssistant, sendText, unlockAudio],
+  );
+
+  const onSendImage = useCallback(
+    async (file: File, previewUrl: string) => {
+      if (busy || mediaBusy) return;
+      unlockAudio();
+      const shopId = selectedComercioIdRef.current;
+      setMediaBusy(true);
+      try {
+        const caption = draft.trim();
+        const analysisPromise = postMedia(file, file.name || 'foto.jpg');
+        let uploaded: string | null = null;
+        if (shopId) {
+          try {
+            const fd = new FormData();
+            fd.append('comercioId', shopId);
+            fd.append('file', file);
+            const headers: Record<string, string> = {};
+            const token = readBearer();
+            if (token) headers.Authorization = `Bearer ${token}`;
+            const res = await fetch('/api/asistente-negocio/upload', { method: 'POST', headers, body: fd });
+            const json = (await res.json()) as { imageUrl?: string };
+            uploaded = json.imageUrl || null;
+          } catch {
+            uploaded = null;
+          }
+        }
+        const media = await analysisPromise;
+        const analysis = media && media.ok && media.kind === 'image' ? media.analysis : null;
+        setDraft('');
+        setMediaBusy(false);
+
+        const isProductPhoto = !analysis || analysis.tipo === 'plato' || analysis.tipo === 'logo' || analysis.tipo === 'otro';
+        if (isProductPhoto) {
+          if (!shopId || !uploaded) {
+            setMessages((m) => [
+              ...m,
+              { id: newId('u'), role: 'user', text: caption, createdAt: Date.now(), imageUrl: previewUrl },
+            ]);
+            pushLocalAssistant(
+              !shopId
+                ? 'Primero elige el negocio 🏪 y luego mándame la foto.'
+                : 'No pude subir la foto 😅 Intenta de nuevo.',
+            );
+            return;
+          }
+          const hint = analysis?.resumen ? ` (${analysis.resumen.slice(0, 90)})` : '';
+          await sendText(caption || `Esta foto es para el producto${hint}`, { imageUrl: uploaded });
+          return;
+        }
+
+        // Cards / receipts / screenshots: read them and answer in the chat.
+        setMessages((m) => [
+          ...m,
+          { id: newId('u'), role: 'user', text: caption, createdAt: Date.now(), imageUrl: previewUrl },
+        ]);
+        playChatSound('messageSent');
+        const lines = analysis.texto
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+          .join('\n');
+        if (analysis.tipo === 'menu') {
+          pushLocalAssistant(
+            `Leí tu carta 📋 ${analysis.resumen}\n\n${lines}\n\nDime qué quieres hacer con esto, por ejemplo: “agrega pizza margarita a 12” o “cambia el precio de la hawaiana a 14”, y lo preparo para que confirmes.`,
+          );
+        } else if (analysis.tipo === 'comprobante') {
+          pushLocalAssistant(
+            `Veo un comprobante 🧾 ${analysis.resumen}${lines ? `\n\n${lines}` : ''}\n\nSi es de un pedido, dime el número y lo marco como pagado.`,
+          );
+        } else {
+          pushLocalAssistant(
+            `Vi esto 👀 ${analysis.resumen}${lines ? `\n\n${lines}` : ''}\n\n¿Qué quieres que haga con esta imagen?`,
+          );
+        }
+      } finally {
+        setMediaBusy(false);
+      }
+    },
+    [busy, draft, mediaBusy, postMedia, pushLocalAssistant, sendText, unlockAudio],
+  );
+
   const vars = chatThemeVars(theme) as CSSProperties;
   const showChips =
     !needsAuth &&
@@ -657,6 +897,10 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           theme={theme}
           onToggleTheme={toggleTheme}
           onBack={() => {
+            if (isEmbedded()) {
+              postToParent({ type: 'elmenuxfa:navigate', target: 'home' });
+              return;
+            }
             window.location.href = BUSINESS_ASSISTANT_APP_HOME;
           }}
           onOpenMenu={() => undefined}
@@ -723,9 +967,35 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
                       ].join(' ')}
                       data-chat-bubble="1"
                     >
-                      <div className="whitespace-pre-wrap break-words">
-                        {formatChatText(m.text)}
-                      </div>
+                      {m.voiceUrl ? (
+                        <div className="mb-1">
+                          <ChatVoiceNote
+                            src={m.voiceUrl}
+                            durationMs={m.voiceDurationMs}
+                            incoming={!isUser}
+                            avatarUrl={isUser ? undefined : BRAND_AVATAR}
+                            avatarLetter={isUser ? undefined : 'e'}
+                          />
+                        </div>
+                      ) : null}
+                      {m.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.imageUrl}
+                          alt="Imagen enviada"
+                          className="mb-1 max-h-56 w-full rounded-lg object-cover"
+                          data-chat-media-image="1"
+                        />
+                      ) : null}
+                      {m.text ? (
+                        <div
+                          className={`whitespace-pre-wrap break-words ${
+                            m.voiceUrl ? 'text-[12.5px] italic text-[var(--chat-text-muted)]' : ''
+                          }`}
+                        >
+                          {formatChatText(m.voiceUrl ? `“${m.text}”` : m.text)}
+                        </div>
+                      ) : null}
                       <span className="mt-0.5 flex items-center justify-end gap-0.5 self-end pl-2 text-[10.5px] tabular-nums leading-none text-[var(--chat-text-muted)]">
                         {timeLabel ? <span>{timeLabel}</span> : null}
                         {isUser ? <ChatReceiptTicks status="read" /> : null}
@@ -821,7 +1091,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
                 );
               })}
 
-              {busy ? (
+              {busy || mediaBusy ? (
                 <div className="mt-1.5 flex justify-start px-3" data-chat-typing="1">
                   <div className="rounded-2xl rounded-bl-md bg-[var(--chat-bubble-in)] px-3.5 py-2.5 shadow-sm">
                     <span className="inline-flex items-center gap-1.5">
@@ -862,63 +1132,15 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           />
           <ChatComposer
             value={draft}
-            disabled={busy}
+            disabled={busy || mediaBusy}
             onChange={setDraft}
             onSend={onSend}
+            onSendVoice={(payload) => {
+              void onSendVoice(payload);
+            }}
             onSendFile={(payload) => {
               if (payload.kind !== 'image') return;
-              void (async () => {
-                const shopId = selectedComercioIdRef.current;
-                if (!shopId) {
-                  setMessages((m) => [
-                    ...m,
-                    {
-                      id: newId('a'),
-                      role: 'assistant',
-                      text: 'Primero elige el negocio 🏪 y luego mándame la foto.',
-                      createdAt: Date.now(),
-                    },
-                  ]);
-                  return;
-                }
-                setBusy(true);
-                try {
-                  const fd = new FormData();
-                  fd.append('comercioId', shopId);
-                  fd.append('file', payload.file);
-                  const headers: Record<string, string> = {};
-                  const token = readBearer();
-                  if (token) headers.Authorization = `Bearer ${token}`;
-                  const res = await fetch('/api/asistente-negocio/upload', {
-                    method: 'POST',
-                    headers,
-                    body: fd,
-                  });
-                  const json = (await res.json()) as {
-                    ok?: boolean;
-                    imageUrl?: string;
-                    error?: string;
-                  };
-                  if (!res.ok || !json.imageUrl) {
-                    throw new Error(json.error || 'upload_failed');
-                  }
-                  const caption = draft.trim() || 'Esta foto es para el producto';
-                  setDraft('');
-                  await sendText(caption, { imageUrl: json.imageUrl });
-                } catch {
-                  setMessages((m) => [
-                    ...m,
-                    {
-                      id: newId('a'),
-                      role: 'assistant',
-                      text: 'No pude subir la foto 😅 Intenta de nuevo.',
-                      createdAt: Date.now(),
-                    },
-                  ]);
-                } finally {
-                  setBusy(false);
-                }
-              })();
+              void onSendImage(payload.file, payload.url);
             }}
             placeholder="Escríbeme como en WhatsApp…"
             inputTestId="business-composer-input"

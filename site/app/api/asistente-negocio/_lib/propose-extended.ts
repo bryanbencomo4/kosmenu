@@ -1,6 +1,18 @@
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import type { BusinessShop } from './auth';
 import { getBusinessAssistantRuntimeConfig, type BusinessAllowedOp } from './config';
+import {
+  currencyLabel,
+  describeFx,
+  detectFxCurrency,
+  extractFxValue,
+  formatRate,
+  normalizeCurrency,
+  rateCurrencies,
+  rateSentence,
+  resolveFxTarget,
+} from './fx';
+import { loadShopFx } from './fx-load';
 import { issueConfirmToken } from './confirm';
 import {
   canManageCatalog,
@@ -224,23 +236,63 @@ export async function proposeSetTasa(
   userId: string,
   shop: BusinessShop,
   userText: string,
+  hint?: { value?: number | null; currency?: string | null },
 ): Promise<BusinessToolResult> {
   if (!canManageSettings(shop)) return { text: denied('cambiar la tasa', shop) };
-  const value = parsePriceFromText(userText);
-  if (value == null || value <= 0) {
+  const fx = await loadShopFx(shop.comercioId);
+  if (!fx) return { text: 'No pude leer la configuración de tasas de tu negocio. Intenta de nuevo en un momento 🙏' };
+
+  const value = hint?.value ?? extractFxValue(userText);
+  const requested = normalizeCurrency(hint?.currency) || detectFxCurrency(userText, fx.primary);
+
+  if (value == null) {
+    const options = rateCurrencies(fx);
+    if (!options.length) {
+      return {
+        text: `Tu menú solo muestra precios en *${fx.primary}*, así que no hay una tasa que cambiar.\n\nSi quieres mostrar también otra moneda (pesos, bolívares…), dime cuál y te explico cómo activarla.`,
+      };
+    }
     return {
-      text: `💱 La tasa actual es *${shop.tasa ?? '—'}*.\n\nDime el nuevo valor (ej. “tasa 42.5”).`,
+      text: `💱 Estas son tus tasas ahora:\n${describeFx(fx)}\n\nDime el nuevo valor, por ejemplo: “${options[0] === 'COP' ? 'pesos a 4.000' : `${options[0]!.toLowerCase()} a 40`}”.`,
     };
   }
+
+  const target = resolveFxTarget(fx, requested);
+  if (target.ok === false) {
+    if (target.reason === 'ambiguous') {
+      return {
+        text: `¿La tasa de cuál moneda cambiamos a *${formatRate(value)}*? Tienes: ${target.options.map(currencyLabel).join(' y ')}.`,
+      };
+    }
+    if (target.reason === 'not_enabled') {
+      return {
+        text: `Tu menú no cobra en ${requested ? currencyLabel(requested) : 'esa moneda'} todavía, así que primero hay que activarla en *Configuración → Tasas y cobros*. Monedas activas: ${fx.currencies.map(currencyLabel).join(', ')}.`,
+      };
+    }
+    return {
+      text: `Tu menú solo muestra precios en *${fx.primary}*, así que no hay una tasa que cambiar. Si quieres mostrar otra moneda, dime cuál.`,
+    };
+  }
+
+  const currency = target.currency;
+  const previous = fx.rates[currency] ?? null;
+  if (previous != null && Math.abs(previous - value) < 1e-9) {
+    return { text: `La tasa de ${currencyLabel(currency)} ya está en *${rateSentence(fx.primary, currency, value)}* ✅ No hay nada que cambiar.` };
+  }
+  const ratio = previous != null ? value / previous : 1;
+  const warn =
+    ratio > 3 || ratio < 1 / 3
+      ? `\n\n⚠️ Ojo: es un cambio muy grande (antes *${formatRate(previous!)}*). Confírmalo solo si es correcto.`
+      : '';
   const proposal = makeProposal(
     userId,
     shop,
     'set_tasa',
-    { value, previous: shop.tasa },
-    `Cambiar tasa a ${value}`,
+    { value, currency, primary: fx.primary, previous },
+    `Tasa ${currency}: ${previous != null ? formatRate(previous) : '—'} → ${formatRate(value)}`,
   );
   return {
-    text: `¿Actualizamos la tasa de *${shop.tasa ?? '—'}* → *${value}* (modo manual)? 💱\n\nConfirma y la guardo.`,
+    text: `¿Cambiamos la tasa de ${currencyLabel(currency)}?\n\n• Antes: ${previous != null ? `*${rateSentence(fx.primary, currency, previous)}*` : 'sin tasa'}\n• Nueva: *${rateSentence(fx.primary, currency, value)}* (manual)${warn}\n\nConfirma abajo y la aplico en tu menú y checkout 💱`,
     proposal,
   };
 }

@@ -1,3 +1,5 @@
+import { extractFxValue, parseLocaleNumber } from './fx';
+
 export type BusinessIntent =
   | { kind: 'list_menu' }
   | { kind: 'propose_price'; productHint?: string; newPrice?: number }
@@ -99,16 +101,11 @@ export function foldText(s: string) {
 
 function parsePrice(text: string): number | undefined {
   const m = text.match(
-    /(?:a|por|precio(?:\s+a)?|dejar(?:lo)?(?:\s+en)?|poner(?:lo)?(?:\s+en)?|cuesta|vale|=)\s*\$?\s*(\d+(?:[.,]\d{1,2})?)/i,
+    /(?:a|por|precio(?:\s+a)?|dejar(?:lo)?(?:\s+en)?|poner(?:lo)?(?:\s+en)?|cuesta|vale|=)\s*\$?\s*(\d[\d.,]*\d|\d)/i,
   );
-  if (!m?.[1]) {
-    const bare = text.match(/\b(\d+(?:[.,]\d{1,2})?)\s*(?:usd|\$)?\b/i);
-    if (!bare?.[1]) return undefined;
-    const n = Number(bare[1].replace(',', '.'));
-    return Number.isFinite(n) && n > 0 ? n : undefined;
-  }
-  const n = Number(m[1].replace(',', '.'));
-  return Number.isFinite(n) && n > 0 ? n : undefined;
+  const raw = m?.[1] ?? text.match(/\b(\d[\d.,]*\d|\d)\s*(?:usd|\$)?/i)?.[1];
+  if (!raw) return undefined;
+  return parseLocaleNumber(raw) ?? undefined;
 }
 
 /**
@@ -130,6 +127,7 @@ export function parseBusinessIntent(
   opts?: { pendingOp?: string | null },
 ): BusinessIntent {
   const t = foldText(raw);
+  const pendingOp = /^(hola|buenas|buenos dias|hey|gracias|listo|ok)\b/.test(t) ? null : opts?.pendingOp;
 
   // Only whole-message confirms — "sí pero…" must not apply a write.
   if (/^(si|sí|confirmar|confirma|aplicar|dale|ok|okay|acepto)[!?.]*$/.test(t)) {
@@ -364,8 +362,14 @@ export function parseBusinessIntent(
   ) {
     return { kind: 'add_product' };
   }
-  if (/\b(tasa|moneda|dolar|dólar|bolivares|bolívares)\b/.test(t) || /\btasa de cambio\b/.test(t)) {
-    const setValue = parsePrice(raw);
+  const mentionsRateWord =
+    /\b(tasa|moneda|dolar|dolares|bolivares|bcv|divisa|cambio de moneda|tasa de cambio)\b/.test(t);
+  const mentionsPesoOnly =
+    /\b(pesos?|cop)\b/.test(t) &&
+    /\b(tasa|recib|cobr|cambi|convert|equival|cotiz|vale el|a cuanto|cuanto (esta|vale)|actualiz|pon|deja|establec)/.test(t) &&
+    !/\b(precio|producto|plato|combo|pizza|hamburguesa|arepa|bebida|categoria|costo|cuesta|delivery|domicilio|envio|pedido)\b/.test(t);
+  if (mentionsRateWord || mentionsPesoOnly) {
+    const setValue = extractFxValue(raw) ?? undefined;
     return { kind: 'currency', setValue };
   }
   if (
@@ -469,7 +473,7 @@ export function parseBusinessIntent(
   const availLocal =
     /\b(local|negocio|comercio|tienda|menu|menú|caja|en linea|en línea)\b/.test(t);
   if (
-    opts?.pendingOp === 'edit_availability' ||
+    pendingOp === 'edit_availability' ||
     ((availOn || availOff) && !availLocal) ||
     (/\b(agotado|agotar|agotada|ocultar producto)\b/.test(t) && availLocal === false)
   ) {
@@ -500,8 +504,11 @@ export function parseBusinessIntent(
   }
 
   // Price: explicit price language OR "cuánto cuesta X".
+  if (pendingOp === 'set_fx' && /\d/.test(t)) {
+    return { kind: 'currency', setValue: extractFxValue(raw) ?? undefined };
+  }
   if (
-    opts?.pendingOp === 'edit_price' ||
+    (pendingOp === 'edit_price' && /\d/.test(t)) ||
     /\bprecio\b/.test(t) ||
     /\b(cuanto cuesta|cuánto cuesta|cuanto vale|cuánto vale)\b/.test(t) ||
     (/\b(cambiar|actualizar|modificar|subir|bajar|dejar|pon|coloca|aumenta|baja)\b/.test(t) &&
@@ -552,4 +559,34 @@ export function parseBusinessIntents(
 
   if (intents.length >= 2) return intents.slice(0, 2);
   return [parseBusinessIntent(raw, opts)];
+}
+
+
+/**
+ * Short answers to a question the assistant just asked ("5000", "en pesos", "sí en COP")
+ * must continue the previous task instead of falling to a generic help.
+ */
+export function inferFollowUpIntent(
+  raw: string,
+  lastAssistantText: string | null | undefined,
+  priorUserTexts: string[] = [],
+): BusinessIntent | null {
+  const prev = foldText(lastAssistantText || '');
+  if (!prev) return null;
+  const t = foldText(raw);
+  const bareNumber = /^\$?\s*\d[\d.,]*\s*(pesos?|cop|bs|bolivares|ves|usd|dolares?|euros?)?\s*[.!]*$/.test(t);
+  const askedFx = /nuevo valor|tasa|de cual moneda|cambiamos la tasa/.test(prev);
+  if (askedFx && (bareNumber || /^(en |a )?(pesos?|cop|bolivares|bs|ves|dolares?|usd)\b/.test(t))) {
+    let value = extractFxValue(raw);
+    if (value == null) {
+      for (const prevUser of [...priorUserTexts].reverse()) {
+        if (/(tasa|peso|dolar|bolivar|cambio|recib|cobr)/.test(foldText(prevUser))) {
+          value = extractFxValue(prevUser);
+          if (value != null) break;
+        }
+      }
+    }
+    return { kind: 'currency', setValue: value ?? undefined };
+  }
+  return null;
 }

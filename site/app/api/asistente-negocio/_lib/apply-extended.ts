@@ -11,6 +11,7 @@ import {
 import { parseProductMenuOptions } from '../../../_lib/menu-product-options';
 import type { BusinessShop } from './auth';
 import type { BusinessAllowedOp } from './config';
+import { normalizeCurrency, rateSentence } from './fx';
 import {
   canTransitionOrderStatus,
   normalizeOrderStatus,
@@ -379,23 +380,61 @@ export async function applyExtendedOp(params: {
   if (op === 'set_tasa') {
     const value = Number(data.value);
     if (!Number.isFinite(value) || value <= 0) throw new Error('tasa_invalida');
+    const { data: row, error: readErr } = await sb
+      .from('comercios')
+      .select('moneda,exchange_rate_quote_currency,branding_ia')
+      .eq('id', cid)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!row) throw new Error('comercio_not_found');
+    const primary = normalizeCurrency(row.moneda) || 'USD';
+    const currency =
+      normalizeCurrency(data.currency ?? data.quoteCurrency) ||
+      normalizeCurrency(row.exchange_rate_quote_currency) ||
+      'COP';
+    if (currency === primary) throw new Error('tasa_moneda_invalida');
+    const quoteNow = normalizeCurrency(row.exchange_rate_quote_currency);
+
+    const branding =
+      row.branding_ia && typeof row.branding_ia === 'object'
+        ? (JSON.parse(JSON.stringify(row.branding_ia)) as Record<string, unknown>)
+        : {};
+    const cfgNegocio =
+      branding.config_negocio && typeof branding.config_negocio === 'object'
+        ? ({ ...(branding.config_negocio as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const rates = { ...((cfgNegocio.exchange_rates as Record<string, unknown>) || {}) };
+    const modes = { ...((cfgNegocio.exchange_rate_modes as Record<string, unknown>) || {}) };
+    rates[currency] = value;
+    modes[currency] = 'manual';
+    cfgNegocio.exchange_rates = rates;
+    cfgNegocio.exchange_rate_modes = modes;
+    branding.config_negocio = cfgNegocio;
+
     const patch: Record<string, unknown> = {
-      exchange_rate_value: value,
-      tasa_cambio_pesos: value,
-      exchange_rate_mode: 'manual',
+      branding_ia: branding,
       last_rate_update: new Date().toISOString(),
     };
-    if (data.quoteCurrency) patch.exchange_rate_quote_currency = String(data.quoteCurrency);
+    // Row-level rate follows the quoted currency (or becomes it when none is set).
+    if (!quoteNow || quoteNow === currency) {
+      patch.exchange_rate_value = value;
+      patch.exchange_rate_mode = 'manual';
+      patch.exchange_rate_quote_currency = currency;
+    }
+    // Legacy COP rate (used by admin tooling and old menus).
+    if (currency === 'COP') patch.tasa_cambio_pesos = value;
+
     const { data: updated, error } = await sb
       .from('comercios')
       .update(patch)
       .eq('id', cid)
-      .select('id,nombre,exchange_rate_value,tasa_cambio_pesos')
+      .select('id,nombre')
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!updated) throw new Error('comercio_not_found');
     return {
-      text: `Tasa actualizada 💱 *${updated.exchange_rate_value ?? updated.tasa_cambio_pesos}* (manual)`,
+      text: `Tasa actualizada 💱 *${rateSentence(primary, currency, value)}* (manual). Ya se ve en tu menú y checkout ✅`,
+      data: { currency, value },
     };
   }
 

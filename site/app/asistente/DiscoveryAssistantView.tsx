@@ -176,6 +176,30 @@ function buildVisibleCategoryCards(
   };
 }
 
+type DiscoveryMediaResponse =
+  | { ok: true; kind: 'audio'; transcript: string }
+  | {
+      ok: true;
+      kind: 'image';
+      analysis: { tipo: string; resumen: string; texto: string; busqueda: string };
+    }
+  | { ok: false; error?: string };
+
+async function postDiscoveryMedia(
+  file: Blob,
+  name: string,
+): Promise<DiscoveryMediaResponse | null> {
+  try {
+    const fd = new FormData();
+    fd.append('audience', 'discovery');
+    fd.append('file', new File([file], name, { type: file.type || 'application/octet-stream' }));
+    const res = await fetch('/api/assistant-media', { method: 'POST', body: fd });
+    return (await res.json()) as DiscoveryMediaResponse;
+  } catch {
+    return null;
+  }
+}
+
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1138,7 +1162,7 @@ export function DiscoveryAssistantView({
       if (busy) return;
       unlockChatSounds();
       playChatSound('messageSent');
-      const transcript = (payload.transcript || '').trim();
+      let transcript = (payload.transcript || '').trim();
       // Bubble = audio player only (like restaurant chatbot). Transcript feeds the agent.
       setMessages((prev) => [
         ...prev,
@@ -1152,13 +1176,19 @@ export function DiscoveryAssistantView({
         },
       ]);
       if (!transcript) {
+        // Browser had no speech recognition → transcribe on the server.
         setBusy(true);
-        await sleep(humanTypingMinMs(80));
-        pushAssistant({
-          text: 'Recibí tu nota de voz 🎤\n¿Me la puedes escribir o dictar un poco más claro? Así te busco restaurantes al instante 🔍',
-        });
+        const media = await postDiscoveryMedia(payload.blob, 'voz.webm');
+        if (media && media.ok && media.kind === 'audio') transcript = media.transcript.trim();
+        if (!transcript) {
+          await sleep(humanTypingMinMs(60));
+          pushAssistant({
+            text: 'No alcancé a escucharte bien 🎧 ¿Me repites la nota de voz o me escribes qué se te antoja? 🔍',
+          });
+          setBusy(false);
+          return;
+        }
         setBusy(false);
-        return;
       }
       await runAgent(transcript);
     },
@@ -1183,13 +1213,35 @@ export function DiscoveryAssistantView({
         },
       ]);
       setBusy(true);
+      if (isImage) {
+        const media = await postDiscoveryMedia(payload.file, payload.file.name || 'foto.jpg');
+        const analysis = media && media.ok && media.kind === 'image' ? media.analysis : null;
+        const term = analysis?.busqueda?.trim();
+        if (analysis && term) {
+          await sleep(humanTypingMinMs(60));
+          pushAssistant({
+            text: `Se ve delicioso 😋 ${analysis.resumen}\nTe busco *${term}* en el directorio 🔍`,
+          });
+          setBusy(false);
+          await runDirectorySearch({ q: term, userLabel: term });
+          return;
+        }
+        await sleep(humanTypingMinMs(60));
+        pushAssistant({
+          text: analysis?.resumen
+            ? `Vi tu imagen 👀 ${analysis.resumen}\nDime qué se te antoja y te busco dónde pedirlo 🍽️`
+            : 'No pude ver bien esa imagen 😅 Cuéntame qué se te antoja (texto o voz 🎤) y te busco dónde pedirlo.',
+        });
+        setBusy(false);
+        return;
+      }
       await sleep(humanTypingMinMs(70));
       pushAssistant({
-        text: 'Gracias por el archivo 📎 Por ahora busco mejor con texto, voz 🎤 o ubicación 📍\n¿Qué se te antoja?',
+        text: 'Gracias por el archivo 📎 Para buscar mejor, mándame texto, voz 🎤, una foto del plato 📷 o tu ubicación 📍\n¿Qué se te antoja?',
       });
       setBusy(false);
     },
-    [busy, pushAssistant],
+    [busy, pushAssistant, runDirectorySearch],
   );
 
   const onLoadMore = useCallback(async () => {

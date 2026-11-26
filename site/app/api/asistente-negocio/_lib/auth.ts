@@ -18,7 +18,7 @@ export async function resolveMembership(
   const sb = getServiceSupabaseClient();
   const { data: owned } = await sb
     .from('comercios')
-    .select('id,nombre,slug,moneda,tasa_cambio_pesos,en_linea,horarios')
+    .select('id,nombre,slug,moneda,tasa_cambio_pesos,exchange_rate_value,en_linea,horarios')
     .eq('owner_id', userId)
     .limit(20);
   const { data: memberRows } = await sb
@@ -36,7 +36,12 @@ export async function resolveMembership(
       slug: row.slug ? String(row.slug) : null,
       role: 'owner',
       moneda: row.moneda ? String(row.moneda) : null,
-      tasa: row.tasa_cambio_pesos != null ? String(row.tasa_cambio_pesos) : null,
+      tasa:
+        row.exchange_rate_value != null
+          ? String(row.exchange_rate_value)
+          : row.tasa_cambio_pesos != null
+            ? String(row.tasa_cambio_pesos)
+            : null,
       enLinea: typeof row.en_linea === 'boolean' ? row.en_linea : null,
       horarios: row.horarios ?? null,
     });
@@ -46,7 +51,7 @@ export async function resolveMembership(
     if (byId.has(id)) continue;
     const { data: c } = await sb
       .from('comercios')
-      .select('id,nombre,slug,moneda,tasa_cambio_pesos,en_linea,horarios')
+      .select('id,nombre,slug,moneda,tasa_cambio_pesos,exchange_rate_value,en_linea,horarios')
       .eq('id', id)
       .maybeSingle();
     if (!c) continue;
@@ -56,7 +61,12 @@ export async function resolveMembership(
       slug: c.slug ? String(c.slug) : null,
       role: String(m.role || 'member'),
       moneda: c.moneda ? String(c.moneda) : null,
-      tasa: c.tasa_cambio_pesos != null ? String(c.tasa_cambio_pesos) : null,
+      tasa:
+        c.exchange_rate_value != null
+          ? String(c.exchange_rate_value)
+          : c.tasa_cambio_pesos != null
+            ? String(c.tasa_cambio_pesos)
+            : null,
       enLinea: typeof c.en_linea === 'boolean' ? c.en_linea : null,
       horarios: c.horarios ?? null,
     });

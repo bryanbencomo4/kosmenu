@@ -78,6 +78,10 @@ const nextConfig = {
         headers: buildSecurityHeaders({ allowAppFrame: true }),
       },
       {
+        source: '/asistente-negocio',
+        headers: buildSecurityHeaders({ allowAppFrame: true }),
+      },
+      {
         source: '/:path*',
         headers: buildSecurityHeaders({ allowAppFrame: false }),
       },

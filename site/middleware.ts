@@ -65,6 +65,11 @@ function isOwnerMenuPreviewPath(pathname?: string) {
   return Boolean(pathname && pathname.startsWith('/preview/'));
 }
 
+/** Merchant assistant chat can be embedded by the Flutter shell (app.elmenuxfa.com). */
+function isAssistantEmbedPath(pathname?: string) {
+  return pathname === '/asistente-negocio' || pathname === '/asistente-negocio/';
+}
+
 function applySecurityHeaders(response: NextResponse, pathname?: string) {
   if (process.env.NODE_ENV === 'production') {
     response.headers.set(
@@ -81,7 +86,7 @@ function applySecurityHeaders(response: NextResponse, pathname?: string) {
     'Referrer-Policy',
     pathname && isOrderTrackingPath(pathname) ? 'no-referrer' : 'strict-origin-when-cross-origin',
   );
-  if (isOwnerMenuPreviewPath(pathname)) {
+  if (isOwnerMenuPreviewPath(pathname) || isAssistantEmbedPath(pathname)) {
     // Override catch-all next.config headers so the Flutter app can iframe preview.
     const localPreviewDev = process.env.NODE_ENV !== 'production';
     response.headers.delete('X-Frame-Options');

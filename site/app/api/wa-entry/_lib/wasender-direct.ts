@@ -87,6 +87,35 @@ export async function uploadWasenderMedia(input: {
   return { publicUrl };
 }
 
+/**
+ * Decrypt an inbound WhatsApp media message (voice note / photo) into a temporary
+ * public URL. Returns null on any failure (never throws).
+ */
+export async function decryptWasenderMedia(input: {
+  key: unknown;
+  message: unknown;
+}): Promise<{ publicUrl: string } | null> {
+  try {
+    const call = wasenderFetch('/api/decrypt-media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { messages: { key: input.key, message: input.message } } }),
+    });
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000));
+    const res = await Promise.race([call, timeout]);
+    if (!res || !res.ok) return null;
+    const direct = String(res.json.publicUrl || '').trim();
+    const nested =
+      res.json.data && typeof res.json.data === 'object'
+        ? String((res.json.data as Record<string, unknown>).publicUrl || '').trim()
+        : '';
+    const publicUrl = direct || nested;
+    return publicUrl ? { publicUrl } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function sendWasenderDirect(input: {
   toDigits: string;
   text?: string;

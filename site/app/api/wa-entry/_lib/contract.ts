@@ -19,6 +19,14 @@
  * Local fixtures may still use a simplified shape; the normalizer accepts both.
  */
 
+/** Voice note / photo attached to an inbound message (needs decrypting via Wasender). */
+export type WaInboundMedia = {
+  kind: 'audio' | 'image';
+  mimetype: string;
+  key: unknown;
+  message: unknown;
+};
+
 export type WaNormalizedEvent = {
   provider: 'wasender';
   /** Stable id for dedupe — required for processing. */
@@ -34,6 +42,8 @@ export type WaNormalizedEvent = {
   isStatus: boolean;
   /** Raw event type string from provider. */
   eventType: string;
+  /** Present for voice notes / photos (text may be empty or a caption). */
+  media?: WaInboundMedia | null;
   /** WhatsApp message key — needed for reactions / native quotes. */
   waKey?: {
     id: string;
@@ -227,6 +237,7 @@ export function normalizeWaInboundPayload(raw: unknown): WaNormalizedEvent | nul
     isGroup,
     isStatus,
     eventType,
+    media: extractMedia(messageNode),
     waKey: messageId
       ? {
           id: messageId,
@@ -390,6 +401,30 @@ function extractText(
       const t = (ext as { text?: unknown }).text;
       if (typeof t === 'string') return t.trim();
     }
+    const img = msgContent.imageMessage;
+    if (img && typeof img === 'object') {
+      const caption = (img as { caption?: unknown }).caption;
+      if (typeof caption === 'string') return caption.trim();
+    }
   }
   return '';
+}
+
+function extractMedia(message: Record<string, unknown>): WaInboundMedia | null {
+  const content =
+    message.message && typeof message.message === 'object'
+      ? (message.message as Record<string, unknown>)
+      : null;
+  if (!content) return null;
+  const audio = content.audioMessage;
+  const image = content.imageMessage;
+  const node = audio && typeof audio === 'object' ? audio : image && typeof image === 'object' ? image : null;
+  if (!node) return null;
+  const mimetype = String((node as { mimetype?: unknown }).mimetype ?? '').trim();
+  return {
+    kind: audio ? 'audio' : 'image',
+    mimetype,
+    key: message.key ?? null,
+    message: content,
+  };
 }

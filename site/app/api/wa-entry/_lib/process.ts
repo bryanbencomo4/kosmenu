@@ -28,6 +28,7 @@ import {
 import type { WaMasterDiscoveryCtx, WaMasterDiscoveryExecute } from '../../wa-master/_lib/discovery-bridge';
 import type { AdminMenuLoader } from '../../wa-master/_lib/specialists/admin';
 import { isPlatformWaAutoReplyAllowed } from './auto-reply-policy';
+import { understandInboundWaMedia } from './inbound-media';
 import {
   appendInboxMessage,
   upsertInboxConversationOnInbound,
@@ -316,6 +317,26 @@ export async function processWaEntryEvent(
 
   const threadBefore = await store.getThread(event.fromDigits);
   storeOps += 1;
+
+  // Voice notes / photos from the authorized sender → understand them as text.
+  if (event.media) {
+    const understood = await understandInboundWaMedia(event.media, (event.text || '').trim());
+    if (understood.ok === true) {
+      event.text = understood.text;
+    } else {
+      return dispatchReplies({
+        sender,
+        store,
+        event,
+        nextState: threadBefore?.state ?? 'initial',
+        repliesText: [understood.reply],
+        dedupeKey: `media_fallback:${event.fromDigits}:${event.messageId}`,
+        nowMs,
+        storeOps,
+        forceSendFail: params.forceSendFail,
+      });
+    }
+  }
 
   // Master Assistant pilot gate (fail-closed allowlist). Non-pilot → classic router.
   if (config.masterAssistantEnabled && isMasterPilotAllowlisted(config, event.fromDigits)) {
