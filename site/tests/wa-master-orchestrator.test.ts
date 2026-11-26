@@ -141,7 +141,7 @@ describe('wa-master Package 1', () => {
       },
       masterCfg(),
     );
-    expect(out.replies[0]).toMatch(/menú digital|pedir comida/i);
+    expect(out.replies[0]).toMatch(/comida|menú|negocio|explic/i);
     expect(out.memory.summary.askedFields).toContain('role_clarify');
     void store;
   });

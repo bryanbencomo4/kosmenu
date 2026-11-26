@@ -78,7 +78,7 @@ export function buildDeterministicReplies(params: {
     askedFields.push('role_clarify');
     return {
       replies: [
-        '¡Claro! 😊 ¿Quieres saber cómo crear tu menú digital o estás buscando restaurantes para pedir comida?',
+        'Disculpa, no te entendí del todo. ¿Buscas comida para pedir o quieres gestionar el menú de tu negocio? Explícame un poquito más, porfa.',
       ],
       escalateHuman,
       toolsUsed,
@@ -193,7 +193,7 @@ export function buildDeterministicReplies(params: {
 
   return {
     replies: [
-      'Ya entendí que necesitas ayuda. ¿Buscas comida en elmenuxfa.com o quieres gestionar / crear el menú de un negocio?',
+      'Disculpa, no te entendí. Explícame mejor qué necesitas, porfa. ¿Buscas comida o quieres gestionar tu negocio?',
     ],
     escalateHuman,
     toolsUsed,

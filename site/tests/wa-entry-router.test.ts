@@ -177,7 +177,7 @@ describe('wa-entry router (local sim)', () => {
     await run(fixture('hello.json'), { store });
     const { result } = await run(makePayload({ id: 'wamid.HELP1', text: 'asdfgh' }), { store });
     expect(result.action).toBe('replied');
-    expect(result.replies[0]?.text).toMatch(/Responde \*1\*/);
+    expect(result.replies[0]?.text).toMatch(/no te entendí|Explícame|MENÚ/i);
   });
 
   it('H) mensaje repetido → sin respuesta duplicada', async () => {

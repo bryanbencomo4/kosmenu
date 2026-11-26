@@ -106,7 +106,9 @@ function buildSystemPrompt(
     'Si te dan HECHOS verificados, responde solo con esos hechos. No agregues locales inventados.',
     'Resuelve en WhatsApp primero. Los asistentes web son ayudantes, no el camino por defecto.',
     'Nunca pidas usuario/contraseña. Panel admin: app.elmenuxfa.com.',
-    'Si hay comercios_señal, reconócelos al hablar de tasa/precios/productos.',
+    'Si hay comercios_señal y piden tasa/precios/productos: triaje + escala al asistente del negocio.',
+    'Si el mensaje es confuso/typo: “Disculpa, no te entendí. Explícame mejor qué necesitas, porfa.”',
+    'Prohibido: “error al escribir”, “ortografía”, “mensaje mal escrito”.',
     'Responde en español breve, natural, sin markdown pesado.',
   ];
   if (!opts?.omitMemoryPrompt) {

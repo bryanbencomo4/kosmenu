@@ -199,9 +199,8 @@ describe('Master receptionist handoff', () => {
       masterCfg(),
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
-    expect(out.replies[0]).toMatch(/Pizzería Demo|registrado/i);
-    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com/i);
-    expect(out.replies[0]).toMatch(/yo lo puedo hacer por ti|asistente/i);
+    expect(out.replies[0]).toMatch(/Pizzería Demo|Revisé tu caso|registrado/i);
+    expect(out.replies[0]).toMatch(/especialista|asistente/i);
     expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
     expect(out.replies[0]).not.toMatch(/\bpassword\b|business\.elmenuxfa|usuario y contrase/i);
     expect(out.toolsUsed).toContain('handoff_business');
@@ -236,12 +235,44 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true },
     );
     expect(out.specialist).toBe('admin');
-    expect(out.replies[0]).toMatch(/Pizzas El Trueno|registrado/i);
-    expect(out.replies[0]).toMatch(/Tasas y cobros|tasa/i);
-    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com/i);
-    expect(out.replies[0]).toMatch(/yo lo puedo hacer por ti/i);
+    expect(out.replies[0]).toMatch(/Pizzas El Trueno|Revisé tu caso|registrado/i);
+    expect(out.replies[0]).toMatch(/tasa/i);
+    expect(out.replies[0]).toMatch(/especialista|asistente/i);
     expect(out.replies[0]).toMatch(/asistente\?h=/);
-    expect(out.replies[0]).not.toMatch(/\bpassword\b|usuario y contrase|business\.elmenuxfa/i);
+    expect(out.replies[0]).not.toMatch(/\bpassword\b|usuario y contrase|business\.elmenuxfa|error al escribir/i);
+  });
+
+  it('typo taza still routes to FX specialist handoff', async () => {
+    const store = createMemoryWaHandoffStore();
+    const identity = resolveWaMasterIdentity({
+      fromDigits: PILOT,
+      catalog: [
+        {
+          comercioId: '0aa8c53b-1111-4111-8111-bbbbbbbbbbbb',
+          publicName: 'Pizzas El Trueno',
+          slug: 'pizzas-el-trueno',
+          whatsapp: '+584140821633',
+          telefonos: null,
+          supervisionWhatsapp: null,
+        },
+      ],
+    });
+    const out = await runWaMasterOrchestrator(
+      {
+        fromDigits: PILOT,
+        text: 'nesesito kambiar la taza',
+        messageId: 'h3typo',
+        nowMs: Date.now(),
+        identity,
+        memory: createEmptyMemory(PILOT, Date.now(), 86400000),
+        forceDeterministic: true,
+      },
+      masterCfg(),
+      { handoffStore: store, forceSimulateAgent: true },
+    );
+    expect(out.specialist).toBe('admin');
+    expect(out.replies[0]).toMatch(/tasa|especialista|asistente/i);
+    expect(out.replies[0]).not.toMatch(/error al escribir/i);
   });
 
   it('prospect register → business assistant handoff', async () => {

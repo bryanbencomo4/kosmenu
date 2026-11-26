@@ -98,18 +98,18 @@ export function classifyWaMasterIntents(params: {
 
   // "6 dólares" is a price unit — not an FX change request.
   const fxRequest =
-    /\b(tasa|bcv|cambio del dolar|tasa del dolar)\b/.test(t) ||
+    /\b(tasa|tasas|taza|bcv|cambio del dolar|tasa del dolar)\b/.test(t) ||
     (/\bdolar\b/.test(t) &&
-      /\b(tasa|cambio|bcv|actualiza|consulta|cual)\b/.test(t) &&
+      /\b(tasa|taza|cambio|bcv|actualiza|consulta|cual)\b/.test(t) &&
       !/\b\d+[.,]?\d*\s*dolares?\b/.test(t));
   if (
     fxRequest &&
-    /\b(actualiza(?:r)?|cambia(?:r)?|pon(?:er)?|modifica(?:r)?|consulta(?:r)?|cual|configurad|necesito)\b/.test(
+    /\b(actualiza(?:r)?|cambia(?:r)?|kambiar|pon(?:er)?|modifica(?:r)?|consulta(?:r)?|cual|configurad|necesito|nesesito)\b/.test(
       t,
     )
   ) {
     intents.push('admin.fx');
-  } else if (/\b(cambiar|cambia|actualizar|actualiza)\s+la\s+tasa\b/.test(t)) {
+  } else if (/\b(cambiar|cambia|kambiar|actualizar|actualiza)\s+la\s+(tasa|taza)\b/.test(t)) {
     intents.push('admin.fx');
   }
 

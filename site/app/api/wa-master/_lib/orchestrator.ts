@@ -440,6 +440,8 @@ export async function runWaMasterOrchestrator(
         'Escribe UNA respuesta breve y natural en español para WhatsApp basada SOLO en esos hechos.',
         'Prohibido inventar: ciudad/zona, productos, precios, estado del menú, restaurantes o acciones completadas.',
         'Si el hecho no menciona una ciudad, no asumas ninguna.',
+        'Prohibido: “error al escribir”, corregir ortografía del usuario, pedir contraseñas.',
+        'Si no hay hechos claros: “Disculpa, no te entendí. Explícame mejor qué necesitas, porfa.”',
       ].join('\n'),
       identity,
       memory,
@@ -501,7 +503,7 @@ export async function runWaMasterOrchestrator(
 
   replies = replies.filter(Boolean).slice(0, config.maxRepliesPerTurn);
   if (!replies.length) {
-    replies = ['¡Claro! Cuéntame un poco más para ayudarte mejor.'];
+    replies = ['Disculpa, no te entendí. Explícame mejor qué necesitas, porfa.'];
   }
 
   for (const field of askedFields) {

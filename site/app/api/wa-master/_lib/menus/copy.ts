@@ -106,7 +106,7 @@ export function buildMenuText(menuId: WaMenuId, opts?: { businessName?: string |
 }
 
 export function invalidChoiceReply(menuId: WaMenuId, opts?: { businessName?: string | null }): string {
-  return `Esa opción no está disponible ahora. 😊\n\n${buildMenuText(menuId, opts)}`;
+  return `Disculpa, no te entendí. Explícame mejor qué necesitas, porfa.\n\n${buildMenuText(menuId, opts)}`;
 }
 
 export function humanEscalateSuccessReply(params: { fastCoverage: boolean }): string {

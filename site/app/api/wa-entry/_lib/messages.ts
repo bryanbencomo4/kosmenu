@@ -66,7 +66,7 @@ export function businessManageMessage(config: WaEntryConfig): string {
 }
 
 export function unexpectedAudienceMessage(): string {
-  return 'No te entendí del todo 🙂 Responde *1* para pedir comida o *2* si tienes un negocio. También puedes escribir *MENÚ*.';
+  return 'Disculpa, no te entendí. Explícame mejor qué necesitas, porfa. También puedes escribir *MENÚ*.';
 }
 
 export function unexpectedBusinessMessage(): string {
