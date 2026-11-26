@@ -5,11 +5,28 @@ import type { WaMasterConfig } from '../config';
 import { issueMasterHandoff } from '../handoff';
 import { buildHandoffContextFromMemory } from '../knowledge/handoff-context';
 import { buildPublicMenuLinks, formatMenuLinksReply } from '../menu-links';
+import {
+  buildMerchantHelpReply,
+  detectMerchantHelpTopic,
+  type MerchantHelpTopic,
+} from '../merchant-guide';
 import type {
   WaMasterAdminProposal,
   WaMasterIdentity,
   WaMasterMemory,
 } from '../types';
+
+function topicFromIntent(intent: string, text: string): MerchantHelpTopic {
+  if (intent === 'admin.fx') return 'fx';
+  if (intent === 'admin.edit_price') return 'price';
+  if (intent === 'admin.edit_product') return 'product';
+  if (intent === 'admin.availability') return 'availability';
+  if (intent === 'admin.delivery') return 'delivery';
+  if (intent === 'admin.menu_links') return 'links';
+  if (intent === 'admin.hours') return 'hours';
+  if (intent === 'admin.settings') return 'settings';
+  return detectMerchantHelpTopic(text) || 'generic';
+}
 
 export type WaMasterMenuSnapshot = {
   comercioId: string;
@@ -80,58 +97,104 @@ export async function runAdminSpecialist(params: {
     /\b(pasame|pásame|envia|envía|manda|necesito).*(enlace|link|menu|menú|qr|delivery)\b/.test(t) ||
     /\blos dos enlaces\b/.test(t);
 
-  // Receptionist: never run admin writes in WhatsApp — hand off with context.
-  // Exception: public menu/QR/delivery link requests (read-only URLs).
+  // Merchant help: acknowledge shop → panel steps → optional assistant handoff.
+  // Never ask for passwords. Exception: public menu/QR link reads stay below.
+  const merchantTopic =
+    detectMerchantHelpTopic(text) ||
+    (intent.startsWith('admin') && intent !== 'admin.view_menu' && intent !== 'admin.menu_links'
+      ? topicFromIntent(intent, text)
+      : null);
   if (
     config.receptionistMode &&
     !linkIntentEarly &&
-    (intent.startsWith('admin') ||
-      /\b(precio|tasa|producto|horarios|disponib|agregar|cambiar)\b/.test(t))
+    merchantTopic &&
+    (identity.comercios.length > 0 || intent.startsWith('admin'))
   ) {
-    const candidate =
-      memory.summary.selectedComercioId ||
-      (identity.comercios.length === 1 ? identity.comercios[0].comercioId : null);
-    const shopName =
-      identity.comercios.find((c) => c.comercioId === candidate)?.publicName || null;
-    const handoff = await issueMasterHandoff({
-      store: params.handoffStore,
-      config,
-      destination: 'business_assistant',
-      fromDigits: identity.fromDigits,
-      nowMs,
-      payload: buildHandoffContextFromMemory({
-        memory,
-        identity,
-        text,
-        intent: intent.startsWith('admin') ? intent : 'admin.edit_price',
-        pendingOperation:
-          intent === 'admin.edit_price' || /\bprecio\b/.test(t) ? 'edit_price' : 'admin_help',
-        comercioId: candidate,
-        profile: 'business',
-        extra: {
-          candidateComercioId: candidate,
-          conversationHint: text.trim().slice(0, 160),
-        },
-      }),
-    });
-    if (handoff) {
-      const known = shopName
-        ? `Te ayudo con tu menú${shopName ? ` (*${shopName}*)` : ''}. 😊\n\n`
-        : '¡Claro! 😊 ';
+    if (!identity.comercios.length) {
       return {
         replies: [
-          `${known}Nuestro asistente para negocios puede continuar contigo. Al abrirlo verificaremos tu cuenta de forma segura:\n${handoff.url}`,
+          `Para ${merchantTopic === 'fx' ? 'cambiar la tasa' : 'gestionar el menú'} necesito un negocio ligado a este WhatsApp.\n\nSi ya tienes cuenta, entra en ${config.businessManageUrl} (no me pases contraseñas aquí).`,
         ],
-        toolsUsed: ['handoff_business'],
-        memoryPatch: {
-          selectedComercioId: candidate,
-          activeService: 'admin',
-          lastHandoffUrl: handoff.url,
-          lastHandoffAtMs: nowMs,
-        },
+        toolsUsed: ['admin_identity_gate'],
+        memoryPatch: {},
         skipGeminiPolish: true,
       };
     }
+    if (identity.comercios.length > 1 && !memory.summary.selectedComercioId) {
+      const list = identity.comercios.map((c) => `• ${c.publicName}`).join('\n');
+      return {
+        replies: [
+          `Vale, veo varios negocios ligados a este número:\n${list}\n\n¿Cuál quieres gestionar?`,
+        ],
+        toolsUsed: ['admin_select_comercio'],
+        memoryPatch: { pendingQuestion: 'comercio_select' },
+        skipGeminiPolish: true,
+      };
+    }
+
+    const candidate =
+      memory.summary.selectedComercioId ||
+      (identity.comercios.length === 1 ? identity.comercios[0].comercioId : null);
+    const shops = candidate
+      ? identity.comercios.filter((c) => c.comercioId === candidate)
+      : identity.comercios;
+    const topic = topicFromIntent(intent, text);
+    const guideMeta = buildMerchantHelpReply({
+      topic,
+      shops,
+      panelUrl: config.businessManageUrl || 'https://app.elmenuxfa.com/',
+      handoffUrl: null,
+      offerAssistant: false,
+    });
+
+    let handoffUrl: string | null = null;
+    if (config.receptionistMode) {
+      const handoff = await issueMasterHandoff({
+        store: params.handoffStore,
+        config,
+        destination: 'business_assistant',
+        fromDigits: identity.fromDigits,
+        nowMs,
+        payload: buildHandoffContextFromMemory({
+          memory,
+          identity,
+          text,
+          intent: guideMeta.intent,
+          pendingOperation: guideMeta.pendingOperation,
+          comercioId: candidate,
+          profile: 'business',
+          extra: {
+            candidateComercioId: candidate,
+            conversationHint: text.trim().slice(0, 160),
+            summary: `${guideMeta.pendingOperation} · ${shops[0]?.publicName || ''}`.slice(0, 200),
+          },
+        }),
+      });
+      handoffUrl = handoff?.url ?? null;
+    }
+
+    const guided = buildMerchantHelpReply({
+      topic,
+      shops,
+      panelUrl: config.businessManageUrl || 'https://app.elmenuxfa.com/',
+      handoffUrl,
+      offerAssistant: Boolean(config.receptionistMode),
+    });
+
+    return {
+      replies: [guided.reply],
+      toolsUsed: [
+        'merchant_help_guide',
+        ...(handoffUrl ? (['handoff_business'] as const) : []),
+      ],
+      memoryPatch: {
+        selectedComercioId: candidate,
+        activeService: 'admin',
+        lastHandoffUrl: handoffUrl ?? memory.summary.lastHandoffUrl ?? null,
+        lastHandoffAtMs: handoffUrl ? nowMs : memory.summary.lastHandoffAtMs,
+      },
+      skipGeminiPolish: true,
+    };
   }
 
   if (!identity.comercios.length) {
@@ -355,7 +418,7 @@ export async function runAdminSpecialist(params: {
     (/\b(tasa|bcv|cambio)\b/.test(t) && !/\b\d+[.,]?\d*\s*dolares?\b/.test(t)) ||
     (/\bdolar\b/.test(t) && /\b(tasa|cambio|bcv)\b/.test(t))
   ) {
-    const wantsChange = /\b(actualiza|cambia|pon|modifica)\b/.test(t);
+    const wantsChange = /\b(actualiza(?:r)?|cambia(?:r)?|pon(?:er)?|modifica(?:r)?|necesito)\b/.test(t);
     if (wantsChange) {
       const proposal: WaMasterAdminProposal = {
         comercioId,

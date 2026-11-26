@@ -18,6 +18,7 @@ import {
 import type { WaHandoffStore } from '../../_lib/wa-handoff';
 import { createMemoryWaMasterQuotaStore, type WaMasterQuotaStore } from './quota';
 import { formatPublishedPricing } from './knowledge/platform';
+import { detectMerchantHelpTopic } from './merchant-guide';
 import { buildDeterministicReplies } from './replies';
 import { shouldOfferVoiceNote } from './voice';
 import {
@@ -110,6 +111,29 @@ export async function runWaMasterOrchestrator(
   if (menuHit.delegate) {
     intents = [menuHit.delegate.intent];
     specialist = menuHit.delegate.specialist;
+  }
+
+  // Phone-linked shops + merchant ops (tasa/precios/…) → admin guide, even if NLU missed.
+  const merchantTopic = detectMerchantHelpTopic(text);
+  if (
+    merchantTopic &&
+    identity.comercios.length > 0 &&
+    !intents.some((i) => i.startsWith('consumer') || i === 'support.human')
+  ) {
+    const mapped =
+      merchantTopic === 'fx'
+        ? ('admin.fx' as const)
+        : merchantTopic === 'price'
+          ? ('admin.edit_price' as const)
+          : merchantTopic === 'product'
+            ? ('admin.edit_product' as const)
+            : merchantTopic === 'delivery'
+              ? ('admin.delivery' as const)
+              : merchantTopic === 'links'
+                ? ('admin.menu_links' as const)
+                : ('admin.settings' as const);
+    if (!intents.includes(mapped)) intents = [...intents.filter((i) => i !== 'multi'), mapped];
+    specialist = 'admin';
   }
 
   const looksCommercial =

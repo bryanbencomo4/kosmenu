@@ -276,6 +276,8 @@ export async function tryHandleSmartMenu(params: {
 
   // Greeting-only / "menú" / empty → re-open profile root (even if menuId set).
   // Keep this STRICT: "hola, quiero delivery" must reach consumer CTAs, not root.
+  // Bare hi: prefer registered welcome when a shop is phone-linked (don't stick on
+  // a previous consumer search greeting).
   if (
     digit === null &&
     (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|hi|hello)([!?.\s]*)$/.test(t) ||
@@ -283,7 +285,9 @@ export async function tryHandleSmartMenu(params: {
       t === 'menú' ||
       !t)
   ) {
-    return showRoot(profile);
+    const greetProfile =
+      (identity.comercios?.length || 0) > 0 && profile === 'consumer' ? 'registered' : profile;
+    return showRoot(greetProfile);
   }
 
   // Stale digit: do not apply old menu meaning — show current root.

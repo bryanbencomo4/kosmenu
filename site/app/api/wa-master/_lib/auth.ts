@@ -38,11 +38,11 @@ export function createMemoryWaMasterAuthGate(): WaMasterAuthGate {
 }
 
 export function unauthorizedAdminMessage(manageUrl: string): string {
+  const panel = manageUrl || 'https://app.elmenuxfa.com/';
   return [
-    'Puedo ayudarte a *consultar* tu menú, pero para *cambiar* precios, productos o tasas necesito una verificación segura (no basta con el número de WhatsApp).',
+    'Para aplicar el cambio con seguridad entra al panel (no me pases contraseñas por WhatsApp):',
+    panel,
     '',
-    `Abre tu panel: ${manageUrl}`,
-    '',
-    'Cuando tengamos el enlace mágico de verificación por WhatsApp, te lo enviaré aquí.',
+    'O pide que te pase al asistente del negocio y lo hacemos ahí con tu sesión.',
   ].join('\n');
 }

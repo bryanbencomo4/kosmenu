@@ -171,13 +171,13 @@ describe('Master receptionist handoff', () => {
     expect(out.replies[0]).not.toMatch(/https:\/\//);
   });
 
-  it('merchant price change → business handoff, not write', async () => {
+  it('merchant price change → acknowledge shop + panel + assistant handoff', async () => {
     const store = createMemoryWaHandoffStore();
     const identity = resolveWaMasterIdentity({
       fromDigits: PILOT,
       catalog: [
         {
-          comercioId: 'c1',
+          comercioId: '0aa8c53b-1111-4111-8111-bbbbbbbbbbbb',
           publicName: 'Pizzería Demo',
           slug: 'demo',
           whatsapp: '+584140821633',
@@ -199,9 +199,49 @@ describe('Master receptionist handoff', () => {
       masterCfg(),
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
-    expect(out.replies[0]).toMatch(/asistente para negocios|acceso seguro/i);
+    expect(out.replies[0]).toMatch(/Pizzería Demo|registrado/i);
+    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com/i);
+    expect(out.replies[0]).toMatch(/yo lo puedo hacer por ti|asistente/i);
     expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
+    expect(out.replies[0]).not.toMatch(/\bpassword\b|business\.elmenuxfa|usuario y contrase/i);
     expect(out.toolsUsed).toContain('handoff_business');
+  });
+
+  it('merchant FX change → tasa guide with context handoff', async () => {
+    const store = createMemoryWaHandoffStore();
+    const identity = resolveWaMasterIdentity({
+      fromDigits: PILOT,
+      catalog: [
+        {
+          comercioId: '0aa8c53b-1111-4111-8111-bbbbbbbbbbbb',
+          publicName: 'Pizzas El Trueno',
+          slug: 'pizzas-el-trueno',
+          whatsapp: '+584140821633',
+          telefonos: null,
+          supervisionWhatsapp: null,
+        },
+      ],
+    });
+    const out = await runWaMasterOrchestrator(
+      {
+        fromDigits: PILOT,
+        text: 'necesito cambiar la tasa',
+        messageId: 'h3fx',
+        nowMs: Date.now(),
+        identity,
+        memory: createEmptyMemory(PILOT, Date.now(), 86400000),
+        forceDeterministic: true,
+      },
+      masterCfg(),
+      { handoffStore: store, forceSimulateAgent: true },
+    );
+    expect(out.specialist).toBe('admin');
+    expect(out.replies[0]).toMatch(/Pizzas El Trueno|registrado/i);
+    expect(out.replies[0]).toMatch(/Tasas y cobros|tasa/i);
+    expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com/i);
+    expect(out.replies[0]).toMatch(/yo lo puedo hacer por ti/i);
+    expect(out.replies[0]).toMatch(/asistente\?h=/);
+    expect(out.replies[0]).not.toMatch(/\bpassword\b|usuario y contrase|business\.elmenuxfa/i);
   });
 
   it('prospect register → business assistant handoff', async () => {
