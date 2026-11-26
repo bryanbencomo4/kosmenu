@@ -1,6 +1,6 @@
 /**
- * Central WA acts as L1 tech support: triage the case → escalate to business assistant.
- * Panel steps are a backup, never the main path. Never ask for passwords.
+ * Central WA = L1 tech support: triage → offer specialist (asistente) + panel backup.
+ * Always present TWO options when assistant is available. Never ask for passwords.
  */
 
 import type { WaMasterComercioRef } from './types';
@@ -22,7 +22,6 @@ export function detectMerchantHelpTopic(text: string): MerchantHelpTopic | null 
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
   if (!t.trim()) return null;
-  // Tolerate common typos: taza/tasaa/tasas, kambiar, nesesito…
   if (/\b(tasa|tasas|taza|bcv|cambio del dolar|tasa del dolar)\b/.test(t)) return 'fx';
   if (/\b(enlace|link|qr|url).*(menu|menú|pedido|delivery)?|\benlaces?\b/.test(t)) return 'links';
   if (/\b(delivery|domicilio)\b/.test(t) && /\b(activa|desactiva|configura|cambiar|cambia|kambiar)\b/.test(t)) {
@@ -49,84 +48,88 @@ export function detectMerchantHelpTopic(text: string): MerchantHelpTopic | null 
 
 function topicCopy(topic: MerchantHelpTopic): {
   need: string;
-  backupSteps: string;
+  panelHow: string;
   pendingOp: string;
 } {
   switch (topic) {
     case 'fx':
       return {
         need: 'cambiar la tasa de cambio',
-        backupSteps:
-          'Si prefieres hacerlo tú: *app.elmenuxfa.com* → *Configuración* → *Tasas y cobros*.',
+        panelHow: 'Entra a *app.elmenuxfa.com* → *Configuración* → *Tasas y cobros*.',
         pendingOp: 'set_fx',
       };
     case 'price':
       return {
         need: 'cambiar precios del menú',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → abre el producto y edita el precio.',
+        panelHow: 'Entra a *app.elmenuxfa.com*, abre el producto y edita el precio.',
         pendingOp: 'edit_price',
       };
     case 'product':
       return {
         need: 'gestionar productos del menú',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → productos del menú.',
+        panelHow: 'Entra a *app.elmenuxfa.com* → productos del menú.',
         pendingOp: 'edit_products',
       };
     case 'availability':
       return {
         need: 'cambiar disponibilidad de productos',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → marca el producto disponible o agotado.',
+        panelHow: 'Entra a *app.elmenuxfa.com* y marca el producto disponible o agotado.',
         pendingOp: 'set_availability',
       };
     case 'delivery':
       return {
         need: 'configurar delivery',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → configuración de pedidos / delivery.',
+        panelHow: 'Entra a *app.elmenuxfa.com* → configuración de pedidos / delivery.',
         pendingOp: 'set_delivery',
       };
     case 'links':
       return {
         need: 'obtener los enlaces del menú',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → copia el enlace del menú / QR.',
+        panelHow: 'Entra a *app.elmenuxfa.com* y copia el enlace del menú / QR.',
         pendingOp: 'menu_links',
       };
     case 'hours':
       return {
         need: 'ajustar horarios',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → configuración → horarios.',
+        panelHow: 'Entra a *app.elmenuxfa.com* → configuración → horarios.',
         pendingOp: 'set_hours',
       };
     case 'settings':
       return {
         need: 'revisar la configuración del negocio',
-        backupSteps: 'Si prefieres hacerlo tú: *app.elmenuxfa.com* → configuración.',
+        panelHow: 'Entra a *app.elmenuxfa.com* → configuración.',
         pendingOp: 'admin_settings',
       };
     default:
       return {
         need: 'gestionar el menú del negocio',
-        backupSteps: 'Si prefieres hacerlo tú: entra a *app.elmenuxfa.com* y abre tu negocio.',
+        panelHow: 'Entra a *app.elmenuxfa.com* y abre tu negocio.',
         pendingOp: 'admin_help',
       };
   }
 }
 
 /**
- * L1 support tone: acknowledge shop + need → escalate to business specialist.
+ * L1 support: acknowledge case → TWO options (specialist + panel).
  */
 export function buildMerchantHelpReply(params: {
   topic: MerchantHelpTopic;
   shops: WaMasterComercioRef[];
   panelUrl: string;
   handoffUrl?: string | null;
+  /** When true, show option 1 = asistente (required for dual options). */
   offerAssistant?: boolean;
 }): { reply: string; pendingOperation: string; intent: string } {
   const copy = topicCopy(params.topic);
   const offerAssistant = params.offerAssistant !== false;
   const shops = params.shops;
-  const panelHost = (params.panelUrl || 'https://app.elmenuxfa.com/')
-    .replace(/^https?:\/\//, '')
-    .replace(/\/$/, '') || 'app.elmenuxfa.com';
+  const panelHost =
+    (params.panelUrl || 'https://app.elmenuxfa.com/')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '') || 'app.elmenuxfa.com';
+  const panelHow = copy.panelHow.replace(/app\.elmenuxfa\.com/g, panelHost);
+  const assistantUrl =
+    (params.handoffUrl || '').trim() || `https://${panelHost}/asistente`;
 
   let caseLine: string;
   if (shops.length === 1) {
@@ -141,17 +144,23 @@ export function buildMerchantHelpReply(params: {
   const parts = [
     caseLine,
     '',
-    `Entendí que quieres *${copy.need}*.`,
-    'Te paso con el especialista del negocio para que lo resuelva con tu sesión (no me pases claves por aquí).',
+    `Entendí que quieres *${copy.need}*. Elige cómo seguimos:`,
+    '',
   ];
 
-  if (offerAssistant && params.handoffUrl) {
-    parts.push('', 'Continúa aquí:', params.handoffUrl);
-  } else if (offerAssistant) {
-    parts.push('', `Continúa con el asistente del negocio: https://${panelHost}/asistente`);
+  if (offerAssistant) {
+    parts.push(
+      '1️⃣ *Asistente del negocio* (te llevo con el contexto listo; inicia sesión ahí):',
+      assistantUrl,
+      '',
+      '2️⃣ *Panel* (lo haces tú):',
+      panelHow,
+    );
+  } else {
+    parts.push('Puedes hacerlo en el panel:', panelHow);
   }
 
-  parts.push('', copy.backupSteps.replace(/app\.elmenuxfa\.com/g, panelHost));
+  parts.push('', 'No me pases claves ni datos de acceso por WhatsApp.');
 
   return {
     reply: parts.join('\n'),

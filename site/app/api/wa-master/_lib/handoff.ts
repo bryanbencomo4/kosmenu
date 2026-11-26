@@ -24,7 +24,14 @@ export async function issueMasterHandoff(params: {
   fromDigits: string;
   nowMs?: number;
 }): Promise<{ url: string; code: string; expiresAtMs: number } | null> {
-  if (!params.config.receptionistMode) return null;
+  // Merchant specialist handoffs must work whenever Master is on.
+  // Other destinations still require receptionist mode (pilot safety).
+  if (
+    !params.config.enabled ||
+    (!params.config.receptionistMode && params.destination !== 'business_assistant')
+  ) {
+    return null;
+  }
   const store = params.store ?? getDefaultWaHandoffStore();
   try {
     const record = await store.issue({

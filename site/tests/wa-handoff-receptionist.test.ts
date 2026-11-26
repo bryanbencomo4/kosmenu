@@ -200,7 +200,8 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(out.replies[0]).toMatch(/Pizzería Demo|Revisé tu caso|registrado/i);
-    expect(out.replies[0]).toMatch(/especialista|asistente/i);
+    expect(out.replies[0]).toMatch(/1️⃣|Asistente del negocio/i);
+    expect(out.replies[0]).toMatch(/2️⃣|Panel/i);
     expect(out.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
     expect(out.replies[0]).not.toMatch(/\bpassword\b|business\.elmenuxfa|usuario y contrase/i);
     expect(out.toolsUsed).toContain('handoff_business');
@@ -237,7 +238,8 @@ describe('Master receptionist handoff', () => {
     expect(out.specialist).toBe('admin');
     expect(out.replies[0]).toMatch(/Pizzas El Trueno|Revisé tu caso|registrado/i);
     expect(out.replies[0]).toMatch(/tasa/i);
-    expect(out.replies[0]).toMatch(/especialista|asistente/i);
+    expect(out.replies[0]).toMatch(/1️⃣|Asistente del negocio/i);
+    expect(out.replies[0]).toMatch(/2️⃣|Tasas y cobros|Panel/i);
     expect(out.replies[0]).toMatch(/asistente\?h=/);
     expect(out.replies[0]).not.toMatch(/\bpassword\b|usuario y contrase|business\.elmenuxfa|error al escribir/i);
   });

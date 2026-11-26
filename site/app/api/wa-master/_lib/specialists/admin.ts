@@ -105,7 +105,6 @@ export async function runAdminSpecialist(params: {
       ? topicFromIntent(intent, text)
       : null);
   if (
-    config.receptionistMode &&
     !linkIntentEarly &&
     merchantTopic &&
     (identity.comercios.length > 0 || intent.startsWith('admin'))
@@ -147,38 +146,36 @@ export async function runAdminSpecialist(params: {
       offerAssistant: false,
     });
 
-    let handoffUrl: string | null = null;
-    if (config.receptionistMode) {
-      const handoff = await issueMasterHandoff({
-        store: params.handoffStore,
-        config,
-        destination: 'business_assistant',
-        fromDigits: identity.fromDigits,
-        nowMs,
-        payload: buildHandoffContextFromMemory({
-          memory,
-          identity,
-          text,
-          intent: guideMeta.intent,
-          pendingOperation: guideMeta.pendingOperation,
-          comercioId: candidate,
-          profile: 'business',
-          extra: {
-            candidateComercioId: candidate,
-            conversationHint: text.trim().slice(0, 160),
-            summary: `${guideMeta.pendingOperation} · ${shops[0]?.publicName || ''}`.slice(0, 200),
-          },
-        }),
-      });
-      handoffUrl = handoff?.url ?? null;
-    }
+    const handoff = await issueMasterHandoff({
+      store: params.handoffStore,
+      config,
+      destination: 'business_assistant',
+      fromDigits: identity.fromDigits,
+      nowMs,
+      payload: buildHandoffContextFromMemory({
+        memory,
+        identity,
+        text,
+        intent: guideMeta.intent,
+        pendingOperation: guideMeta.pendingOperation,
+        comercioId: candidate,
+        profile: 'business',
+        extra: {
+          candidateComercioId: candidate,
+          conversationHint: text.trim().slice(0, 160),
+          summary: `${guideMeta.pendingOperation} · ${shops[0]?.publicName || ''}`.slice(0, 200),
+        },
+      }),
+    });
+    const handoffUrl = handoff?.url ?? null;
 
     const guided = buildMerchantHelpReply({
       topic,
       shops,
       panelUrl: config.businessManageUrl || 'https://app.elmenuxfa.com/',
       handoffUrl,
-      offerAssistant: Boolean(config.receptionistMode),
+      // Always offer both options for merchant ops (asistente + panel).
+      offerAssistant: true,
     });
 
     return {
