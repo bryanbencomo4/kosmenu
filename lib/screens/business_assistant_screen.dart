@@ -105,7 +105,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
   static const _bubbleIn = Color(0xFFFFFFFF);
   static const _bubbleOut = Color(0xFFD9FDD3);
   static const _composerBg = Color(0xFFF0F2F5);
-  static const _send = Color(0xFF00A884);
+  static const _sendColor = Color(0xFF00A884);
   String? _pendingHandoffHint;
 
   @override
@@ -702,7 +702,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
                   FilledButton(
                     onPressed: _busy ? null : _send,
                     style: FilledButton.styleFrom(
-                      backgroundColor: _send,
+                      backgroundColor: _sendColor,
                       foregroundColor: Colors.white,
                       shape: const CircleBorder(),
                       padding: const EdgeInsets.all(12),
