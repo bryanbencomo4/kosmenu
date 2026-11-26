@@ -127,10 +127,37 @@ export type WaMasterSummary = {
   supportIssueText: string | null;
   /** Central brain: one open follow-up (zone / restaurant name / offered assistant link). */
   brainPending?: WaMasterBrainPending | null;
+  /** Last point the person shared (WhatsApp location or a geocoded address). Ephemeral. */
+  geo?: { lat: number; lng: number; label?: string | null; atMs: number; approx?: 'city' | 'place' } | null;
+  /**
+   * The restaurant the person is working with (picked from a list or named). It survives topic
+   * changes so "¿cuáles son las más baratas?" is answered about THAT menu, not from scratch.
+   */
+  activeRestaurant?: WaMasterRestaurantRef | null;
+  /** Products of the active menu we last showed (ids): lets "el total" / "la segunda" resolve. */
+  lastMenuView?: WaMasterMenuView | null;
+  /** What they were looking for ("hamburguesas"): the default category once a restaurant is picked. */
+  foodHint?: string | null;
+  /** The place the person described in words ("Los Palos Grandes, Caracas"), to verify coverage. */
+  placeText?: string | null;
+};
+
+export type WaMasterMenuView = {
+  slug: string;
+  category: string | null;
+  /** Product ids in the order they were shown. */
+  productIds: string[];
+  /** Quantities chosen so far (default 1 per shown product). */
+  qty?: Record<string, number>;
+  atMs: number;
 };
 
 export type WaMasterBrainPending = {
-  kind: 'zone' | 'name' | 'offer';
+  /** `delivery`: waiting for the person's location to quote `comercioId`'s delivery fee. */
+  kind: 'zone' | 'name' | 'offer' | 'delivery';
+  comercioId?: string | null;
+  /** The person asked for places "near me": answer with a location or an address. */
+  near?: boolean;
   topic: string;
   query?: string | null;
   category?: string | null;

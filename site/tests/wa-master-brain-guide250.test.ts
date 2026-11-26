@@ -191,7 +191,11 @@ describe('Central brain — guide of 250 messages', () => {
     expect(out.replies.join('\n')).toMatch(/Pizzas El Trueno/);
     expect(out.replies.join('\n')).toMatch(/elmenuxfa\.com\/v\/pizzas-el-trueno/);
     expect(out.replies.join('\n')).not.toMatch(/La Esquina/);
-    const hamb = await turn(STRANGER, 'Busco hamburguesas');
+    // Without a place, it asks where they are BEFORE listing anything.
+    const noCity = await turn(STRANGER, 'Busco hamburguesas');
+    expect(noCity.out.replies.join('\n')).toMatch(/dónde estás|ubicaci[oó]n/i);
+    expect(noCity.out.replies.join('\n')).not.toMatch(/La Esquina/);
+    const hamb = await turn(STRANGER, 'Busco hamburguesas en Caracas');
     expect(hamb.out.replies.join('\n')).toMatch(/La Esquina/);
   });
 

@@ -17,7 +17,7 @@ export function simulateBusinessAssistant(input: {
   if (t.includes('confirmar')) {
     return {
       authenticated: true,
-      text: 'Simulado: cambio aplicado (ref ba_sim_1).',
+      text: 'Simulado: cambio aplicado.',
       auditId: 'ba_sim_1',
     };
   }

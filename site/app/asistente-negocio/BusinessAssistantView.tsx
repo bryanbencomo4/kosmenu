@@ -62,6 +62,19 @@ import {
   BusinessOrdersListCard,
   type OrdersListData,
 } from './BusinessOrdersListCard';
+import { BusinessPhotoPickerCard, type PhotoTarget } from './BusinessPhotoPickerCard';
+import { BusinessThreadsSheet } from './BusinessThreadsSheet';
+import {
+  deleteThread,
+  getActiveThreadId,
+  listThreads,
+  loadThread,
+  newThreadId,
+  saveThread,
+  setActiveThreadId,
+  threadScopeFromToken,
+  type ThreadMeta,
+} from './_lib/thread-store';
 
 const CHAT_DOODLE_URL = '/chat/doodle-pattern.png';
 const BRAND_AVATAR = '/branding/elmenuxfa-avatar.png';
@@ -87,6 +100,7 @@ type Msg = {
   ordersView?: OrdersListData | null;
   metricsView?: MetricsCardData | null;
   customersView?: CustomersCardData | null;
+  awaitPhoto?: PhotoTarget | null;
   voiceUrl?: string | null;
   voiceDurationMs?: number;
   imageUrl?: string | null;
@@ -117,8 +131,12 @@ type ApiJson = {
   ordersView?: OrdersListData | null;
   metricsView?: MetricsCardData | null;
   customersView?: CustomersCardData | null;
+  awaitPhoto?: PhotoTarget | null;
+  pendingImageUrl?: string | null;
   selectedComercioId?: string | null;
   needsComercioSelect?: boolean;
+  handoffValid?: boolean;
+  membership?: Array<{ comercioId?: string; nombre?: string }>;
   chips?: Array<{ id: string; label: string; text?: string; comercioId?: string }>;
 };
 
@@ -242,6 +260,20 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   const playedReceiveIdsRef = useRef(new Set<string>());
   const bootedOnceRef = useRef(false);
   const messagesRef = useRef<Msg[]>([]);
+  const threadIdRef = useRef<string | null>(null);
+  const threadScopeRef = useRef<string>('anon');
+  const skipRestoreRef = useRef(false);
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  const [threadList, setThreadList] = useState<ThreadMeta[]>([]);
+  const [shopNames, setShopNames] = useState<Record<string, string>>({});
+  /** Product whose photo we are waiting for (set by the assistant, cleared on the next answer). */
+  const photoTargetRef = useRef<PhotoTarget | null>(null);
+  /** Uploaded photo waiting for the owner to say which product it is. */
+  const pendingImageRef = useRef<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
+  const lastAutoScrollRef = useRef(0);
 
   const unlockAudio = useCallback(() => {
     unlockChatSounds();
@@ -415,8 +447,28 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    stickRef.current = true;
+    lastAutoScrollRef.current = Date.now();
+    // Scroll only the message list (scrollIntoView can also shift the outer frame on mobile).
+    const list = listRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+    else bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, busy, showAuthCard]);
+
+  // Cards, images and sheets grow after the message renders: keep the newest content in view
+  // unless the owner deliberately scrolled up.
+  useEffect(() => {
+    const list = listRef.current;
+    const content = contentRef.current;
+    if (!list || !content || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (!stickRef.current) return;
+      lastAutoScrollRef.current = Date.now();
+      list.scrollTop = list.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [mounted]);
 
   useEffect(() => {
     const last = messages[messages.length - 1];
@@ -469,11 +521,62 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           bootedOnceRef.current &&
           messagesRef.current.length > 1 &&
           !wantAuth;
-        if (!preserve) {
+        if (Array.isArray(json.membership)) {
+          const names: Record<string, string> = {};
+          for (const m of json.membership) if (m?.comercioId) names[m.comercioId] = m.nombre || '';
+          setShopNames(names);
+        }
+        // Reopening the app (or a used / expired WhatsApp link) must feel like WhatsApp:
+        // the last conversation is simply still there. Restored per user on this device.
+        const scope = threadScopeFromToken(readBearer());
+        threadScopeRef.current = scope;
+        let restored: ReturnType<typeof loadThread> = null;
+        if (!preserve && !wantAuth && !skipRestoreRef.current && scope !== 'anon') {
+          const activeId = getActiveThreadId(scope);
+          const candidate = activeId ? loadThread(scope, activeId) : null;
+          const shopNow = json.selectedComercioId || selectedComercioIdRef.current || null;
+          if (candidate && (!candidate.meta.comercioId || !shopNow || candidate.meta.comercioId === shopNow)) {
+            restored = candidate;
+          }
+        }
+        skipRestoreRef.current = false;
+        if (restored) {
+          threadIdRef.current = restored.meta.id;
+          const back: Msg[] = restored.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            text: m.text,
+            createdAt: m.createdAt,
+            imageUrl: m.imageUrl || undefined,
+          }));
+          // Only a fresh WhatsApp context adds a new bubble on top of the restored chat.
+          const fresh =
+            Boolean(json.handoffValid) &&
+            Boolean(json.text) &&
+            !restored.messages.some((m) => m.text === json.text);
+          setMessages(
+            fresh
+              ? [
+                  ...back,
+                  {
+                    id,
+                    role: 'assistant',
+                    text: json.text || '¡Hola de nuevo! 👋',
+                    createdAt: Date.now(),
+                    proposal: json.proposal ?? null,
+                    menuView: json.menuView ?? null,
+                  },
+                ]
+              : back,
+          );
+        } else if (!preserve) {
+          if (!threadIdRef.current || bootedOnceRef.current === false) {
+            threadIdRef.current = newThreadId();
+          }
           // The server text already says "Seguimos con …" / "Retomamos …"; never repeat it.
           const alreadyContinues = /\b(seguimos con|retomamos)\b/i.test(json.text || '');
           const continuity =
-            !wantAuth && hint && !alreadyContinues
+            !wantAuth && Boolean(json.handoffValid) && hint && !alreadyContinues
               ? `\n\nSigo con tu solicitud: *${hint}*. ¿La aplicamos?`
               : '';
           setMessages([
@@ -487,10 +590,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
               menuView: json.menuView ?? null,
             },
           ]);
-          const draftHint = (json as { handoffDraft?: string | null }).handoffDraft;
-          if (!wantAuth && (draftHint || hint) && !json.proposal) {
-            setDraft((d) => d || String(draftHint || hint));
-          }
+          // The WhatsApp context lives in the first message; the input always starts empty
+          // so the owner can simply continue the conversation.
         }
         bootedOnceRef.current = true;
         setNeedsAuth(wantAuth);
@@ -519,6 +620,85 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       cancelled = true;
     };
   }, [apiPost, applySelectedShop, code, bootKey, mapChips, sessionReady]);
+
+  // Debounced autosave of the conversation (text only; tiny writes, never blocks typing).
+  useEffect(() => {
+    if (!sessionReady || needsAuth || !threadIdRef.current) return;
+    const scope = threadScopeRef.current;
+    if (scope === 'anon' || messages.length < 2) return;
+    const t = window.setTimeout(() => {
+      const id = threadIdRef.current;
+      if (!id) return;
+      saveThread(scope, id, selectedComercioIdRef.current, messagesRef.current);
+      setActiveThreadId(scope, id);
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [messages, needsAuth, sessionReady]);
+
+  const startNewConversation = useCallback(() => {
+    const scope = threadScopeRef.current;
+    if (threadIdRef.current && scope !== 'anon') {
+      saveThread(scope, threadIdRef.current, selectedComercioIdRef.current, messagesRef.current);
+    }
+    threadIdRef.current = newThreadId();
+    setActiveThreadId(scope, null);
+    skipRestoreRef.current = true;
+    bootedOnceRef.current = false;
+    photoTargetRef.current = null;
+    pendingImageRef.current = null;
+    setThreadsOpen(false);
+    setMessages([]);
+    setBootKey((k) => k + 1);
+  }, []);
+
+  const openThreads = useCallback(() => {
+    const scope = threadScopeRef.current;
+    if (threadIdRef.current && scope !== 'anon') {
+      saveThread(scope, threadIdRef.current, selectedComercioIdRef.current, messagesRef.current);
+    }
+    setThreadList(listThreads(scope));
+    setThreadsOpen(true);
+  }, []);
+
+  const openThread = useCallback(
+    (id: string) => {
+      const scope = threadScopeRef.current;
+      if (threadIdRef.current && threadIdRef.current !== id) {
+        saveThread(scope, threadIdRef.current, selectedComercioIdRef.current, messagesRef.current);
+      }
+      const found = loadThread(scope, id);
+      if (!found) {
+        setThreadList(listThreads(scope));
+        return;
+      }
+      threadIdRef.current = id;
+      setActiveThreadId(scope, id);
+      if (found.meta.comercioId) applySelectedShop(found.meta.comercioId);
+      photoTargetRef.current = null;
+      pendingImageRef.current = null;
+      setMessages(
+        found.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.text,
+          createdAt: m.createdAt,
+          imageUrl: m.imageUrl || undefined,
+        })),
+      );
+      setThreadsOpen(false);
+    },
+    [applySelectedShop],
+  );
+
+  const removeThread = useCallback((id: string) => {
+    const scope = threadScopeRef.current;
+    deleteThread(scope, id);
+    setThreadList(listThreads(scope));
+    if (threadIdRef.current === id) {
+      threadIdRef.current = newThreadId();
+      setActiveThreadId(scope, null);
+    }
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -554,6 +734,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
     if (json.chips?.length) {
       setChips(mapChips(json.chips));
     }
+    photoTargetRef.current = json.awaitPhoto ?? null;
+    pendingImageRef.current = json.pendingImageUrl ?? null;
     setMessages((m) => [
       ...m,
       {
@@ -561,6 +743,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
         role: 'assistant',
         text: json.text || 'Sin respuesta.',
         createdAt: Date.now(),
+        awaitPhoto: json.awaitPhoto ?? null,
         proposal: json.proposal ?? null,
         showAuthCard: wantAuth,
         showAccountCard: json.showAccountCard ?? null,
@@ -578,6 +761,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       opts?: {
         comercioId?: string | null;
         imageUrl?: string | null;
+        /** Product the uploaded photo belongs to (photo picker card). */
+        imageProductId?: string | null;
         /** Local photo preview for the user bubble (no product-photo routing). */
         previewImageUrl?: string | null;
         voice?: { url: string; durationMs: number } | null;
@@ -586,6 +771,14 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       const trimmed = text.trim();
       if ((!trimmed && !opts?.imageUrl) || busy) return;
       if (opts?.comercioId) applySelectedShop(opts.comercioId);
+      // A photo is waiting for its product: the next answer ("Agua 1L", a chip) completes it.
+      const carriedImage =
+        !opts?.imageUrl &&
+        pendingImageRef.current &&
+        !/^(no\b|cancel|nada|olvid|ya no|dejalo|déjalo|ver |menu|menú|pedido|ayuda|venta|hola|gracias)/i.test(trimmed)
+          ? pendingImageRef.current
+          : null;
+      const sendImageUrl = opts?.imageUrl || carriedImage || undefined;
       const outbound =
         trimmed ||
         (opts?.imageUrl ? 'Cambiar foto de producto' : '');
@@ -648,7 +841,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           handoffCode: code || undefined,
           handoffAction: 'peek',
           comercioId: selectedComercioIdRef.current || undefined,
-          imageUrl: opts?.imageUrl || undefined,
+          imageUrl: sendImageUrl,
+          imageProductId: opts?.imageUrl ? opts?.imageProductId || undefined : undefined,
         });
         pushAssistant(json);
       } catch {
@@ -703,14 +897,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
     writeBearer(accessToken);
     setNeedsAuth(false);
     setShowAuthCard(false);
-    const ctx = loadBusinessHandoffContext();
-    if (ctx?.pendingOperation || ctx?.summary || ctx?.conversationHint) {
-      setDraft(
-        (d) =>
-          d ||
-          String(ctx.pendingOperation || ctx.summary || ctx.conversationHint || ''),
-      );
-    }
+    // The input always stays empty; the WhatsApp context is shown as a message on reboot.
     // One intentional reboot → home greeting with metrics (don't also append a duplicate bubble).
     bootedOnceRef.current = false;
     setBootKey((k) => k + 1);
@@ -781,14 +968,18 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
   );
 
   const onSendImage = useCallback(
-    async (file: File, previewUrl: string) => {
+    async (file: File, previewUrl: string, explicitTarget?: PhotoTarget | null) => {
       if (busy || mediaBusy) return;
       unlockAudio();
       const shopId = selectedComercioIdRef.current;
+      const target = explicitTarget ?? photoTargetRef.current;
       setMediaBusy(true);
       try {
         const caption = draft.trim();
-        const analysisPromise = postMedia(file, file.name || 'foto.jpg');
+        // When we already know the product there is nothing to analyse: upload and propose.
+        const analysisPromise = target
+          ? Promise.resolve(null)
+          : postMedia(file, file.name || 'foto.jpg');
         let uploaded: string | null = null;
         if (shopId) {
           try {
@@ -824,8 +1015,14 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
             );
             return;
           }
-          const hint = analysis?.resumen ? ` (${analysis.resumen.slice(0, 90)})` : '';
-          await sendText(caption || `Esta foto es para el producto${hint}`, { imageUrl: uploaded });
+          if (target) {
+            await sendText(caption || `Foto para ${target.productName}`, {
+              imageUrl: uploaded,
+              imageProductId: target.productId,
+            });
+            return;
+          }
+          await sendText(caption || 'Foto del producto', { imageUrl: uploaded });
           return;
         }
 
@@ -905,9 +1102,11 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           }}
           onOpenMenu={() => undefined}
           onOpenCart={() => undefined}
-          onNewConversation={() => undefined}
+          onNewConversation={startNewConversation}
           hideCommerceActions
-          hideNewConversation
+          extraMenuActions={[
+            { id: 'threads', label: 'Conversaciones', onSelect: openThreads, testId: 'business-threads-open' },
+          ]}
           isTyping={busy}
           subtitle={busy ? undefined : 'Asistente del negocio'}
           soundsEnabled={soundsEnabled}
@@ -935,12 +1134,18 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
 
           <div
             id={listId}
-            className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-0 py-2"
+            ref={listRef}
+            onScroll={(e) => {
+              if (Date.now() - lastAutoScrollRef.current < 700) return;
+              const el = e.currentTarget;
+              stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+            }}
+            className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-0 py-2 [touch-action:pan-y]"
             role="log"
             aria-live="polite"
             data-testid="business-thread"
           >
-            <div className="mx-auto flex w-full max-w-5xl flex-col pb-1">
+            <div ref={contentRef} className="mx-auto flex w-full max-w-5xl flex-col pb-1">
               {messages.map((m, index) => {
                 const prev = messages[index - 1];
                 const isUser = m.role === 'user';
@@ -1027,6 +1232,14 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
                       <BusinessCustomersCard
                         data={m.customersView}
                         onAction={(text) => void sendText(text)}
+                      />
+                    ) : null}
+
+                    {isLast && m.awaitPhoto ? (
+                      <BusinessPhotoPickerCard
+                        target={m.awaitPhoto}
+                        disabled={busy || mediaBusy}
+                        onPick={(file, url, target) => void onSendImage(file, url, target)}
                       />
                     ) : null}
 
@@ -1142,7 +1355,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
               if (payload.kind !== 'image') return;
               void onSendImage(payload.file, payload.url);
             }}
-            placeholder="Escríbeme como en WhatsApp…"
+            placeholder="Mensaje"
             inputTestId="business-composer-input"
             sendTestId="business-composer-send"
             onComposerFocus={() => {
@@ -1152,6 +1365,17 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           />
         </div>
       </div>
+      {threadsOpen ? (
+        <BusinessThreadsSheet
+          threads={threadList}
+          activeId={threadIdRef.current}
+          shopNames={shopNames}
+          onOpen={openThread}
+          onDelete={removeThread}
+          onNew={startNewConversation}
+          onClose={() => setThreadsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

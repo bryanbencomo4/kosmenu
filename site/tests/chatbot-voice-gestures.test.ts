@@ -4,6 +4,9 @@ import {
   REPLY_SWIPE_THRESHOLD_PX,
   VOICE_CANCEL_THRESHOLD_PX,
   VOICE_LOCK_THRESHOLD_PX,
+  VOICE_MIN_SEND_MS,
+  resampleVoiceLevels,
+  resolveVoiceRelease,
   buildChatReplyRef,
   buildReplyContextLine,
   prefixTextWithReplyContext,
@@ -48,6 +51,37 @@ describe('voice hold gesture thresholds', () => {
     expect(isVoiceTap(120, 2)).toBe(true);
     expect(isVoiceTap(250, 2)).toBe(false);
     expect(isVoiceTap(120, 30)).toBe(false);
+  });
+});
+
+describe('voice release (WhatsApp: letting go sends)', () => {
+  it('sends when held at least one second, whatever the pointer', () => {
+    for (const pointerType of ['touch', 'pen', 'mouse']) {
+      expect(resolveVoiceRelease({ recordedMs: VOICE_MIN_SEND_MS, movedPx: 4, pointerType })).toBe('send');
+    }
+    expect(resolveVoiceRelease({ recordedMs: 8000, movedPx: 30, pointerType: 'touch' })).toBe('send');
+  });
+
+  it('too short on a touch screen shows the "hold to record" hint', () => {
+    expect(resolveVoiceRelease({ recordedMs: 300, movedPx: 2, pointerType: 'touch' })).toBe('hint');
+    expect(resolveVoiceRelease({ recordedMs: VOICE_MIN_SEND_MS - 1, movedPx: 0, pointerType: 'pen' })).toBe('hint');
+  });
+
+  it('a quick mouse click toggles hands-free like WhatsApp Web', () => {
+    expect(resolveVoiceRelease({ recordedMs: 200, movedPx: 2, pointerType: 'mouse' })).toBe('lock');
+    expect(resolveVoiceRelease({ recordedMs: 200, movedPx: 40, pointerType: 'mouse' })).toBe('hint');
+  });
+});
+
+describe('live waveform levels', () => {
+  it('resamples to a fixed number of bars within 0..1', () => {
+    const bars = resampleVoiceLevels([0, 0.5, 1, 2, -1], 10);
+    expect(bars).toHaveLength(10);
+    expect(Math.min(...bars)).toBeGreaterThanOrEqual(0.08);
+    expect(Math.max(...bars)).toBeLessThanOrEqual(1);
+  });
+  it('shows a flat idle line before any sample', () => {
+    expect(resampleVoiceLevels([], 4)).toEqual([0.08, 0.08, 0.08, 0.08]);
   });
 });
 

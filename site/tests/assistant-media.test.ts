@@ -45,7 +45,15 @@ describe('assistant media', () => {
       '```json\n{"tipo":"Plato","resumen":"Una pizza margarita","texto":"","busqueda":"pizza"}\n```',
     );
     const out = await analyzeImage({ bytes: Buffer.alloc(500), mime: 'image/jpeg', audience: 'discovery', env });
-    expect(out).toEqual({ tipo: 'plato', resumen: 'Una pizza margarita', texto: '', busqueda: 'pizza' });
+    expect(out).toMatchObject({ tipo: 'plato', resumen: 'Una pizza margarita', texto: '', busqueda: 'pizza' });
+  });
+
+  it('reads payment-receipt fields', async () => {
+    mockGemini(
+      '{"tipo":"comprobante","resumen":"Pago móvil","texto":"Bs 1.500","busqueda":"","monto":"1.500 Bs","referencia":"123456","banco":"Banesco","fecha":"26/11/2026"}',
+    );
+    const out = await analyzeImage({ bytes: Buffer.alloc(500), mime: 'image/jpeg', audience: 'whatsapp', env });
+    expect(out).toMatchObject({ tipo: 'comprobante', monto: '1.500 Bs', referencia: '123456', banco: 'Banesco' });
   });
 
   it('fails soft when Gemini errors', async () => {
@@ -70,6 +78,20 @@ describe('wasender inbound media', () => {
     });
     expect(ev?.text).toBe('');
     expect(ev?.media?.kind).toBe('audio');
+  });
+
+  it('exposes PDF documents and videos (with caption) as media', () => {
+    const wrap = (message: Record<string, unknown>) =>
+      normalizeWaInboundPayload({
+        event: 'messages.received',
+        sessionId: 's1',
+        data: { messages: { key: { id: 'DOC1', remoteJid: '584140821633@s.whatsapp.net', fromMe: false }, message } },
+      });
+    const doc = wrap({ documentMessage: { url: 'https://mmg.whatsapp.net/d', mimetype: 'application/pdf', mediaKey: 'k', caption: 'mi pago' } });
+    expect(doc?.media?.kind).toBe('document');
+    expect(doc?.text).toBe('mi pago');
+    const vid = wrap({ videoMessage: { url: 'https://mmg.whatsapp.net/v', mimetype: 'video/mp4', mediaKey: 'k' } });
+    expect(vid?.media?.kind).toBe('video');
   });
 
   it('keeps the caption of a photo as text', () => {

@@ -2,15 +2,17 @@
 
 import {
   Camera,
+  ChevronLeft,
+  ChevronUp,
   FileText,
   ImagePlus,
   Lock,
   MapPin,
   Mic,
   Paperclip,
+  Pause,
   SendHorizontal,
   Smile,
-  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -25,11 +27,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import { ChatVoiceNote } from './ChatVoiceNote';
 import {
   VOICE_CANCEL_THRESHOLD_PX,
   VOICE_LOCK_THRESHOLD_PX,
-  isVoiceTap,
+  resampleVoiceLevels,
   resolveVoiceHoldSlide,
+  resolveVoiceRelease,
 } from './chat-gestures';
 import type { ChatReplyRef, ChatSharedLocation } from './chat-types';
 import {
@@ -98,6 +102,8 @@ type ChatComposerProps = {
 /** Live state of a mic press, kept in a ref so pointer handlers never go stale. */
 type VoiceGesture = {
   pointerId: number;
+  /** 'mouse' | 'touch' | 'pen': a mouse click toggles hands-free (WhatsApp Web), touch shows the hint. */
+  pointerType: string;
   startX: number;
   startY: number;
   startedAt: number;
@@ -198,6 +204,14 @@ export function ChatComposer({
     dx: 0,
     dy: 0,
   });
+  // WhatsApp-style feedback: "hold to record" tooltip, mic→trash animation, live input level.
+  const [voiceHint, setVoiceHint] = useState(false);
+  const [trashing, setTrashing] = useState(false);
+  const [levels, setLevels] = useState<number[]>([]);
+  const levelsRef = useRef<number[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const levelTimerRef = useRef<number | null>(null);
+  const hintTimerRef = useRef<number | null>(null);
   const gestureRef = useRef<VoiceGesture | null>(null);
   const micButtonRef = useRef<HTMLButtonElement | null>(null);
   /** Bumped on every start/cancel so stale async startRecording() calls bail out. */
@@ -236,8 +250,13 @@ export function ChatComposer({
   useEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
-    node.style.height = '0px';
-    node.style.height = `${Math.min(node.scrollHeight, 120)}px`;
+    // Empty → back to the CSS one-line height (never carry a previous multi-line height over).
+    if (!value) {
+      node.style.height = '';
+      return;
+    }
+    node.style.height = 'auto';
+    node.style.height = `${Math.max(36, Math.min(node.scrollHeight, 120))}px`;
   }, [value]);
 
   // Focus the input when a reply target is picked (keeps keyboard flow natural).
@@ -261,6 +280,13 @@ export function ChatComposer({
       cancelRecordRef.current = true;
       gestureRef.current = null;
       if (timerRef.current) window.clearInterval(timerRef.current);
+      if (hintTimerRef.current) window.clearTimeout(hintTimerRef.current);
+      if (levelTimerRef.current) window.clearInterval(levelTimerRef.current);
+      try {
+        void audioCtxRef.current?.close();
+      } catch {
+        /* ignore */
+      }
       try {
         recognitionRef.current?.stop();
       } catch {
@@ -308,7 +334,72 @@ export function ChatComposer({
     });
   }
 
+  function vibrate(pattern: number | number[]) {
+    try {
+      navigator.vibrate?.(pattern);
+    } catch {
+      /* not supported (iOS) */
+    }
+  }
+
+  /** WhatsApp's tooltip after a too-short press: you must HOLD, and releasing sends. */
+  function showVoiceHint() {
+    setVoiceHint(true);
+    if (hintTimerRef.current) window.clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = window.setTimeout(() => setVoiceHint(false), 3000);
+  }
+
+  function stopLevelMeter() {
+    if (levelTimerRef.current) {
+      window.clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
+    }
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx) {
+      try {
+        void ctx.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** Samples the mic level ~11×/s for the live waveform shown once the recording is locked. */
+  function startLevelMeter(stream: MediaStream) {
+    stopLevelMeter();
+    levelsRef.current = [];
+    setLevels([]);
+    try {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return;
+      const ctx = new Ctor();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      audioCtxRef.current = ctx;
+      levelTimerRef.current = window.setInterval(() => {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i += 1) {
+          const d = (buf[i] - 128) / 128;
+          sum += d * d;
+        }
+        const level = Math.min(1, Math.sqrt(sum / buf.length) * 4.5);
+        const next = [...levelsRef.current, level].slice(-60);
+        levelsRef.current = next;
+        if (voiceLockedRef.current) setLevels(next);
+      }, 90);
+    } catch {
+      stopLevelMeter();
+    }
+  }
+
   function clearTimersAndRecognition() {
+    stopLevelMeter();
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -367,6 +458,7 @@ export function ChatComposer({
     unlockChatSounds();
     // Request mic first (same user-gesture turn) so the browser can show the prompt.
     let stream: MediaStream;
+    const gumStartedAt = Date.now();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -384,6 +476,26 @@ export function ChatComposer({
     if (token !== startTokenRef.current) {
       // Cancelled (slide-left / unmount / newer start) while awaiting permission.
       stream.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+    // A touch press that ended before we were even ready (mic already allowed, so no
+    // permission prompt ate the gesture) is a plain tap: WhatsApp shows the hint, no recording.
+    const promptedForPermission = Date.now() - gumStartedAt > 600;
+    const wasQuickTouchTap = () => {
+      const g = gestureRef.current;
+      return Boolean(
+        g &&
+          g.released &&
+          !g.lockIntent &&
+          !startLocked &&
+          g.pointerType !== 'mouse' &&
+          !promptedForPermission,
+      );
+    };
+    if (wasQuickTouchTap()) {
+      stream.getTracks().forEach((t) => t.stop());
+      gestureRef.current = null;
+      showVoiceHint();
       return false;
     }
     streamRef.current = stream;
@@ -404,6 +516,13 @@ export function ChatComposer({
         // Cancelled during the start cue: release the mic and bail quietly.
         stream.getTracks().forEach((t) => t.stop());
         if (streamRef.current === stream) streamRef.current = null;
+        return false;
+      }
+      if (wasQuickTouchTap()) {
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        gestureRef.current = null;
+        showVoiceHint();
         return false;
       }
 
@@ -542,8 +661,11 @@ export function ChatComposer({
         if (g) g.done = true;
       }
       setRecording(true);
+      setVoiceHint(false);
       setEmojiOpen(false);
       setAttachOpen(false);
+      vibrate(14);
+      startLevelMeter(stream);
       timerRef.current = window.setInterval(() => {
         setRecordMs(Date.now() - startedAtRef.current);
       }, 200);
@@ -597,7 +719,7 @@ export function ChatComposer({
   }
 
   /** Discards the recording (or an in-flight start) and plays the cancel cue. */
-  function cancelRecording() {
+  function cancelRecording(opts?: { quiet?: boolean }) {
     // Invalidate a pending startRecording() still awaiting mic permission / start cue.
     startTokenRef.current += 1;
     cancelRecordRef.current = true;
@@ -605,6 +727,13 @@ export function ChatComposer({
     gestureRef.current = null;
     clearTimersAndRecognition();
     const recorder = mediaRef.current;
+    const wasRecording = Boolean(recorder && recorder.state === 'recording');
+    if (wasRecording && !opts?.quiet) {
+      // The red mic drops into the trash can, like WhatsApp.
+      vibrate([8, 30, 8]);
+      setTrashing(true);
+      window.setTimeout(() => setTrashing(false), 800);
+    }
     setRecording(false);
     resetVoiceGestureUi();
     if (recorder && recorder.state !== 'inactive') {
@@ -618,7 +747,7 @@ export function ChatComposer({
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     chunksRef.current = [];
-    playChatSound('recordingCancel');
+    if (!opts?.quiet) playChatSound('recordingCancel');
   }
 
   function discardVoiceDraft() {
@@ -659,6 +788,7 @@ export function ChatComposer({
   }
 
   function lockActiveRecording() {
+    vibrate(20);
     voiceLockedRef.current = true;
     setVoiceLocked(true);
     setSlide({ cancelProgress: 0, lockProgress: 0, dx: 0, dy: 0 });
@@ -678,6 +808,7 @@ export function ChatComposer({
     }
     const gesture: VoiceGesture = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType || 'touch',
       startX: event.clientX,
       startY: event.clientY,
       startedAt: Date.now(),
@@ -742,11 +873,23 @@ export function ChatComposer({
       return;
     }
     gestureRef.current = null;
-    if (isVoiceTap(Date.now() - g.startedAt, g.maxMovePx)) {
-      lockActiveRecording(); // tap-to-toggle: keep recording, user presses Stop
+    // WhatsApp: letting go SENDS the note. Too short on touch → "hold to record" hint;
+    // a quick mouse click toggles hands-free mode (WhatsApp Web).
+    const action = resolveVoiceRelease({
+      recordedMs: Date.now() - startedAtRef.current,
+      movedPx: g.maxMovePx,
+      pointerType: g.pointerType,
+    });
+    if (action === 'lock') {
+      lockActiveRecording();
       return;
     }
-    stopRecording(); // normal hold-release → preview
+    if (action === 'hint') {
+      cancelRecording({ quiet: true });
+      showVoiceHint();
+      return;
+    }
+    stopRecording({ sendNow: true });
   }
 
   function handleMicClick(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -903,18 +1046,13 @@ export function ChatComposer({
           className="mx-auto mb-2 flex max-w-5xl items-center gap-2 rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-3 py-2"
           data-chat-voice-draft="1"
         >
-          <audio
-            controls
-            preload="metadata"
-            src={voiceDraft.url}
-            className="h-9 min-w-0 flex-1"
-          />
-          <span className="shrink-0 text-[12px] tabular-nums text-[var(--chat-text-muted)]">
-            {formatDuration(voiceDraft.durationMs)}
-          </span>
+          {/* Same bubble player the chat uses, so the preview already looks like WhatsApp. */}
+          <div className="min-w-0 flex-1">
+            <ChatVoiceNote src={voiceDraft.url} durationMs={voiceDraft.durationMs} />
+          </div>
           <button
             type="button"
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-rose-600 hover:bg-rose-500/10"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-rose-500/10 hover:text-rose-600"
             aria-label="Descartar nota de voz"
             onClick={discardVoiceDraft}
             data-chat-voice-discard="1"
@@ -1023,39 +1161,58 @@ export function ChatComposer({
 
       <div className="relative mx-auto flex w-full max-w-5xl items-center gap-1.5">
         {lockedRecording ? (
-          // Locked (hands-free): Cancel → discard, Stop → voiceDraft preview, Send → send now.
+          // Locked (hands-free), like WhatsApp: trash → discard, live waveform + timer,
+          // pause → preview, send → send now.
           <>
             <button
               type="button"
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-rose-600 hover:bg-rose-500/10"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--chat-text-muted)] hover:bg-rose-500/10 hover:text-rose-600"
               aria-label="Cancelar grabación"
-              onClick={cancelRecording}
+              onClick={() => cancelRecording()}
               data-chat-voice-cancel="1"
             >
-              <X className="h-5 w-5" aria-hidden />
+              <Trash2 className="h-5 w-5" aria-hidden />
             </button>
             <div
-              className="flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[24px] px-3 text-[14px] text-rose-600 shadow-sm"
+              className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 rounded-[24px] px-3.5 text-[14px] shadow-sm"
               style={{ backgroundColor: 'var(--chat-input)' }}
               data-chat-voice-recording="1"
               data-chat-voice-mode="locked"
               role="status"
             >
-              <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-600" />
-              <span className="tabular-nums">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-600"
+                style={{ animation: 'wa-voice-dot 1s ease-in-out infinite' }}
+              />
+              <span className="shrink-0 tabular-nums text-[var(--chat-text)]">
                 <span className="sr-only">Grabando </span>
                 {formatDuration(recordMs)}
               </span>
-              <Lock className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+              <div
+                className="flex h-6 min-w-0 flex-1 items-center justify-end gap-[2px] overflow-hidden"
+                data-chat-voice-live-wave="1"
+                aria-hidden
+              >
+                {resampleVoiceLevels(levels.slice(-40), 40).map((level, i) => (
+                  <span
+                    key={i}
+                    className="w-[3px] shrink-0 rounded-full"
+                    style={{
+                      height: `${Math.round(14 + level * 86)}%`,
+                      backgroundColor: 'color-mix(in srgb, var(--chat-text-muted) 85%, transparent)',
+                    }}
+                  />
+                ))}
+              </div>
             </div>
             <button
               type="button"
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm"
-              aria-label="Detener grabación y revisar"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-rose-600 text-rose-600 hover:bg-rose-500/10"
+              aria-label="Pausar grabación y revisar"
               onClick={() => stopRecording()}
               data-chat-voice-stop="1"
             >
-              <Square className="h-3.5 w-3.5 fill-current" aria-hidden />
+              <Pause className="h-4 w-4 fill-current" strokeWidth={0} aria-hidden />
             </button>
             <button
               type="button"
@@ -1083,26 +1240,51 @@ export function ChatComposer({
                 data-chat-voice-cancel-progress={slide.cancelProgress.toFixed(2)}
                 role="status"
               >
-                <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-600" />
-                <span className="shrink-0 tabular-nums">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-600"
+                  style={{ animation: 'wa-voice-dot 1s ease-in-out infinite' }}
+                />
+                <span className="shrink-0 tabular-nums text-[var(--chat-text)]">
                   <span className="sr-only">Grabando </span>
                   {formatDuration(recordMs)}
                 </span>
+                {/* "‹ Desliza para cancelar" follows the finger and fades as you near the trash. */}
                 <span
-                  className="flex min-w-0 flex-1 flex-col items-end text-[11.5px] leading-tight"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-0.5 whitespace-nowrap text-[14px]"
                   style={{
-                    // Hint follows the finger toward the cancel zone.
-                    transform: `translateX(${Math.round(-slide.cancelProgress * 20)}px)`,
-                    color:
-                      slide.cancelProgress > 0.5
-                        ? 'rgb(225 29 72)'
-                        : 'var(--chat-text-muted)',
+                    transform: `translateX(${Math.round(micOffsetX * 0.6)}px)`,
+                    opacity: 1 - slide.cancelProgress * 0.85,
+                    color: 'var(--chat-text-muted)',
                   }}
                   data-chat-voice-hints="1"
                 >
-                  <span className="truncate">← Desliza para cancelar</span>
-                  <span className="truncate">↑ Desliza para bloquear</span>
+                  <ChevronLeft
+                    className="h-4 w-4 shrink-0"
+                    aria-hidden
+                    style={{ animation: 'wa-voice-shimmer 1.4s ease-in-out infinite' }}
+                  />
+                  <span className="truncate">Desliza para cancelar</span>
                 </span>
+              </div>
+            ) : trashing ? (
+              <div
+                key="pane-trash"
+                className="flex min-h-[44px] min-w-0 flex-1 select-none items-center gap-3 rounded-[24px] px-3 shadow-sm"
+                style={{ backgroundColor: 'var(--chat-input)' }}
+                data-chat-voice-trash="1"
+                aria-hidden
+              >
+                <span className="relative grid h-7 w-7 place-items-center text-rose-600">
+                  <Mic
+                    className="absolute h-5 w-5"
+                    style={{ animation: 'wa-voice-mic-drop 0.7s ease-in forwards' }}
+                  />
+                  <Trash2
+                    className="h-6 w-6"
+                    style={{ animation: 'wa-voice-trash-open 0.7s ease-in-out' }}
+                  />
+                </span>
+                <span className="tabular-nums text-[14px] text-[var(--chat-text-muted)]">0:00</span>
               </div>
             ) : (
             <div
@@ -1149,7 +1331,7 @@ export function ChatComposer({
                   onComposerFocus?.();
                 }}
                 placeholder={placeholder}
-                className="max-h-[7.5rem] min-h-[36px] w-full resize-none bg-transparent py-1.5 text-[15px] leading-5 text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
+                className="max-h-[7.5rem] min-h-[36px] w-full resize-none bg-transparent py-1.5 text-[16px] leading-5 text-[var(--chat-text)] caret-[var(--chat-send)] outline-none ring-0 placeholder:text-[var(--chat-text-muted)] read-only:opacity-60 focus:outline-none focus:ring-0 focus-visible:outline-none"
                 style={{ outline: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                 enterKeyHint="send"
                 autoComplete="off"
@@ -1182,17 +1364,32 @@ export function ChatComposer({
                   // Lock target: the mic slides up into this chip while holding.
                   <span
                     aria-hidden
-                    className="pointer-events-none absolute bottom-full right-0 mb-1 grid h-14 w-11 place-items-start justify-items-center rounded-full pt-2 shadow-md"
+                    className="pointer-events-none absolute bottom-full right-0 mb-5 flex h-[4.25rem] w-11 flex-col items-center justify-start gap-1 rounded-full pt-2.5 shadow-md"
                     style={{
                       backgroundColor: 'var(--chat-card)',
-                      opacity: 0.7 + 0.3 * slide.lockProgress,
+                      opacity: 0.75 + 0.25 * slide.lockProgress,
                       color:
                         slide.lockProgress > 0.6 ? 'var(--chat-send)' : 'var(--chat-text-muted)',
                     }}
                     data-chat-voice-lock-chip="1"
                   >
                     <Lock className="h-4 w-4" strokeWidth={2.2} />
+                    <ChevronUp
+                      className="h-4 w-4"
+                      strokeWidth={2.4}
+                      style={{ animation: 'wa-voice-lock-nudge 1.1s ease-in-out infinite' }}
+                    />
                   </span>
+                ) : null}
+                {voiceHint ? (
+                  <div
+                    role="status"
+                    className="pointer-events-none absolute bottom-full right-0 mb-2 max-w-[17rem] rounded-2xl px-3.5 py-2.5 text-[13px] leading-snug text-white shadow-lg"
+                    style={{ backgroundColor: 'rgba(32, 44, 51, 0.96)', animation: 'chat-sheet-in 0.18s ease-out' }}
+                    data-chat-voice-tip="1"
+                  >
+                    Mantén presionado para grabar un mensaje de voz, suelta para enviar
+                  </div>
                 ) : null}
                 <button
                   key="mic"
@@ -1200,14 +1397,15 @@ export function ChatComposer({
                   type="button"
                   disabled={disabled}
                   className={[
-                    'relative z-10 inline-flex h-10 w-10 shrink-0 select-none items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition-colors enabled:hover:brightness-110 disabled:opacity-40',
+                    'relative z-10 inline-flex h-10 w-10 shrink-0 select-none items-center justify-center rounded-full text-[var(--chat-send-fg)] shadow-sm transition-transform enabled:hover:brightness-110 disabled:opacity-40',
                     // Only the mic opts out of browser panning, so chat scroll stays native elsewhere.
                     'touch-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]',
                   ].join(' ')}
                   style={{
-                    backgroundColor: holdRecording ? 'rgb(225 29 72)' : 'var(--chat-send)',
+                    // Like WhatsApp: the mic keeps its colour, grows and pulses while held.
+                    backgroundColor: 'var(--chat-send)',
                     transform: holdRecording
-                      ? `translate(${micOffsetX}px, ${micOffsetY}px) scale(1.25)`
+                      ? `translate(${micOffsetX}px, ${micOffsetY}px) scale(1.5)`
                       : undefined,
                   }}
                   aria-label={holdRecording ? 'Grabando nota de voz' : 'Grabar nota de voz'}
@@ -1220,12 +1418,22 @@ export function ChatComposer({
                   onClick={handleMicClick}
                   data-chat-voice-start="1"
                 >
-                  <Mic className="h-[20px] w-[20px]" strokeWidth={2.1} aria-hidden />
+                  {holdRecording ? (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-full"
+                      style={{
+                        backgroundColor: 'var(--chat-send)',
+                        animation: 'wa-voice-halo 1.2s ease-out infinite',
+                      }}
+                    />
+                  ) : null}
+                  <Mic className="relative h-[20px] w-[20px]" strokeWidth={2.1} aria-hidden />
                 </button>
                 <span id={`${emojiPanelId}-mic-hint`} className="sr-only">
-                  Mantén presionado para grabar y suelta para revisar. Desliza a la izquierda
+                  Mantén presionado para grabar y suelta para enviar. Desliza a la izquierda
                   para cancelar o hacia arriba para bloquear. Con teclado, actívalo para grabar
-                  y usa los botones Detener, Cancelar o Enviar.
+                  y usa los botones Cancelar, Pausar o Enviar.
                 </span>
               </>
             ) : (

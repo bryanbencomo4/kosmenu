@@ -684,7 +684,7 @@ class _BusinessAssistantScreenState extends State<BusinessAssistantScreen> {
             palette: p,
             controller: _input,
             busy: _busy,
-            placeholder: 'Escríbeme como en WhatsApp…',
+            placeholder: 'Mensaje',
             onSend: _send,
           ),
         ],

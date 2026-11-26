@@ -1,6 +1,7 @@
 'use client';
 
 import { LayoutGrid } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import {
   useCallback,
   useEffect,
@@ -150,12 +151,12 @@ function ProductRail({
             key={p.id}
             type="button"
             onClick={() => onPick(p)}
-            className={`flex w-[156px] shrink-0 snap-start flex-col overflow-hidden rounded-xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-left shadow-sm transition active:scale-[0.98] ${
-              p.available ? '' : 'opacity-70'
+            className={`flex w-[172px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-left shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition active:opacity-90 ${
+              p.available ? '' : 'opacity-75'
             }`}
             data-business-menu-product={p.id}
           >
-            <span className="relative h-[96px] w-full bg-[var(--chat-input)]">
+            <span className="relative block aspect-square w-full bg-[var(--chat-input)]">
               <ChatThumbImage
                 src={p.imageUrl}
                 sourceUrl={p.imageUrl}
@@ -163,21 +164,21 @@ function ProductRail({
                 fallbackLetter={p.name}
               />
               {!p.available ? (
-                <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white">
+                <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10.5px] font-semibold text-white">
                   Agotado
                 </span>
               ) : null}
             </span>
-            <span className="flex flex-1 flex-col p-2">
-              <span className="line-clamp-1 text-[12.5px] font-semibold text-[var(--chat-text)]">
+            <span className="flex flex-1 flex-col px-3 pb-2.5 pt-2.5">
+              <span className="line-clamp-2 min-h-[2.5em] text-[14px] font-semibold leading-[1.25] text-[var(--chat-text)]">
                 {p.name}
               </span>
-              <span className="mt-1 text-[12.5px] font-semibold tabular-nums text-[var(--chat-text)]">
-                {priceLabel(p) || '—'}
+              <span className="mt-1 text-[13px] tabular-nums text-[var(--chat-text-muted)]">
+                {priceLabel(p) || 'Sin precio'}
               </span>
-              <span className="mt-1.5 text-[11px] font-medium text-[var(--chat-send)]">
-                Gestionar
-              </span>
+            </span>
+            <span className="flex h-11 items-center justify-center border-t border-[var(--chat-card-border)] text-[14px] font-medium text-[var(--chat-send)]">
+              Gestionar
             </span>
           </button>
         ))}
@@ -194,7 +195,7 @@ function ProductRail({
           <button
             type="button"
             onClick={onSeeAll}
-            className="flex w-[112px] shrink-0 snap-start flex-col items-center justify-center gap-2 self-stretch rounded-xl border border-[var(--chat-card-border)] bg-[color-mix(in_srgb,var(--chat-send)_12%,var(--chat-card))] px-2 text-center shadow-sm"
+            className="flex w-[120px] shrink-0 snap-start flex-col items-center justify-center gap-2 self-stretch rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] px-2 text-center shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
           >
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--chat-send)] text-[var(--chat-send-fg)]">
               <LayoutGrid className="h-5 w-5" strokeWidth={2.1} />
@@ -216,6 +217,14 @@ export function BusinessMenuView({ menu, onAction }: BusinessMenuViewProps) {
   const [focusCategoryId, setFocusCategoryId] = useState<string | null>(null);
   const [managing, setManaging] = useState<BusinessManageProduct | null>(null);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  // Host for the manage sheet: the assistant root (carries the theme variables).
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
+  const hostProbeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setPortalHost(
+      (hostProbeRef.current?.closest('[data-business-assistant="1"]') as HTMLElement | null) ?? document.body,
+    );
+  }, []);
 
   const categories = menu.categories;
 
@@ -250,7 +259,7 @@ export function BusinessMenuView({ menu, onAction }: BusinessMenuViewProps) {
   }
 
   return (
-    <div className="mt-1.5 w-full max-w-[min(100%,28rem)]" data-business-menu-view="1">
+    <div ref={hostProbeRef} className="mt-1.5 w-full max-w-[min(100%,28rem)]" data-business-menu-view="1">
       {/* Category jump rail */}
       <ChatHorizontalScroller ariaLabel="Categorías del menú" snap={false} className="py-1">
         {categories.map((c, index) => (
@@ -258,10 +267,10 @@ export function BusinessMenuView({ menu, onAction }: BusinessMenuViewProps) {
             key={c.id}
             type="button"
             onClick={() => scrollToCategory(c.id)}
-            className="relative aspect-[3/4] w-[108px] shrink-0 overflow-hidden rounded-2xl bg-[var(--chat-input)] text-left shadow-md active:scale-[0.97]"
+            className="flex w-[148px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[var(--chat-card-border)] bg-[var(--chat-card)] text-left shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition active:opacity-90"
             aria-label={`${c.name}, ${c.productCount} productos`}
           >
-            <span className="absolute inset-0">
+            <span className="relative block aspect-[4/3] w-full bg-[var(--chat-input)]">
               <ChatThumbImage
                 src={c.imageUrl}
                 sourceUrl={c.imageUrl}
@@ -270,12 +279,16 @@ export function BusinessMenuView({ menu, onAction }: BusinessMenuViewProps) {
                 className="h-full w-full object-cover"
               />
             </span>
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/75 via-black/35 to-transparent" />
-            <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-              {c.productCount}
+            <span className="flex flex-1 flex-col px-3 pb-2.5 pt-2.5">
+              <span className="line-clamp-2 min-h-[2.5em] text-[14px] font-semibold leading-[1.25] text-[var(--chat-text)]">
+                {c.name}
+              </span>
+              <span className="mt-1 text-[12.5px] text-[var(--chat-text-muted)]">
+                {c.productCount} {c.productCount === 1 ? 'producto' : 'productos'}
+              </span>
             </span>
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 px-2 pb-2 pt-5">
-              <span className="line-clamp-2 text-[12px] font-semibold text-white">{c.name}</span>
+            <span className="flex h-10 items-center justify-center border-t border-[var(--chat-card-border)] text-[14px] font-medium text-[var(--chat-send)]">
+              Ver productos
             </span>
           </button>
         ))}
@@ -338,16 +351,38 @@ export function BusinessMenuView({ menu, onAction }: BusinessMenuViewProps) {
         </div>
       )}
 
-      {managing ? (
-        <BusinessProductManageCard
-          product={managing}
-          onClose={() => setManaging(null)}
-          onAction={(text) => {
-            setManaging(null);
-            onAction(text);
-          }}
-        />
-      ) : null}
+      {managing && portalHost
+        ? createPortal(
+            // Rendered at the assistant root (not inside the chat bubble): bubbles have transforms /
+            // overflow that would trap a `fixed` sheet and leave it under the composer.
+            <div
+              className="fixed inset-0 z-[95] flex items-end justify-center"
+              role="dialog"
+              aria-modal="true"
+              aria-label={managing.name}
+              data-business-manage-sheet="1"
+            >
+              <button
+                type="button"
+                aria-label="Cerrar"
+                className="absolute inset-0 bg-black/45"
+                onClick={() => setManaging(null)}
+              />
+              <div className="relative z-10 w-full max-w-md pb-[env(safe-area-inset-bottom)] [animation:chat-sheet-in_180ms_ease-out]">
+                <BusinessProductManageCard
+                  sheet
+                  product={managing}
+                  onClose={() => setManaging(null)}
+                  onAction={(text) => {
+                    setManaging(null);
+                    onAction(text);
+                  }}
+                />
+              </div>
+            </div>,
+            portalHost,
+          )
+        : null}
     </div>
   );
 }

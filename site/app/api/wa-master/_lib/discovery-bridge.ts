@@ -16,6 +16,10 @@ export type WaMasterDiscoveryCard = {
   currencies?: string[];
   paymentChannels?: string[];
   acceptsVesBcv?: boolean;
+  distanceKm?: number | null;
+  /** Present when the search asked for dish evidence (`includeDishes`). */
+  matchedDish?: string | null;
+  productNames?: string[];
 };
 
 export type WaMasterDiscoveryToolResult = {
@@ -71,6 +75,9 @@ export async function loadDefaultDiscoveryExecute(): Promise<WaMasterDiscoveryEx
         currencies: r.currencies,
         paymentChannels: r.paymentChannels,
         acceptsVesBcv: r.acceptsVesBcv,
+        distanceKm: r.distanceKm ?? null,
+        matchedDish: r.matchedDish ?? null,
+        productNames: r.productNames,
       })),
       restaurant: result.restaurant
         ? {

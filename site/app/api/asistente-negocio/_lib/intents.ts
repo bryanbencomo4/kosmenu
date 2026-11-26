@@ -43,7 +43,7 @@ export type BusinessIntent =
   | { kind: 'revoke_staff'; raw?: string }
   | { kind: 'set_product_options'; raw?: string }
   | { kind: 'set_featured'; raw?: string; clear?: boolean }
-  | { kind: 'set_product_image'; productHint?: string; imageUrl?: string }
+  | { kind: 'set_product_image'; productHint?: string; imageUrl?: string; productId?: string }
   | { kind: 'update_profile'; nombre?: string; descripcionVisual?: string; whatsapp?: string }
   | {
       kind: 'unsupported';
@@ -587,6 +587,28 @@ export function inferFollowUpIntent(
       }
     }
     return { kind: 'currency', setValue: value ?? undefined };
+  }
+
+  // "¿A cuánto lo dejamos?" → bare number applies to the product the assistant just named.
+  const askedPrice = /a cuanto lo dejamos/.test(prev);
+  if (askedPrice && bareNumber) {
+    const name = /\*([^*]{2,80})\*/.exec(lastAssistantText || '')?.[1]?.trim();
+    const price = parsePrice(raw);
+    if (name && price != null) return { kind: 'propose_price', productHint: name, newPrice: price };
+  }
+
+  // The assistant asked "which product?" → the answer is the product; replay the earlier request.
+  const askedWhich =
+    /de cual producto|encontre varios parecidos|no encontre ese producto|para que producto|para cual es|cual de esos es/.test(
+      prev,
+    );
+  if (askedWhich && t.length >= 2 && t.length <= 80 && !/^(no|cancel|ver menu|menu|ayuda)\b/.test(t)) {
+    for (const prior of [...priorUserTexts].reverse()) {
+      const pi = parseBusinessIntent(prior);
+      if (pi.kind === 'propose_price') return { ...pi, productHint: raw };
+      if (pi.kind === 'propose_availability') return { ...pi, productHint: raw };
+      if (pi.kind === 'change_image') return { kind: 'change_image', productHint: raw };
+    }
   }
   return null;
 }

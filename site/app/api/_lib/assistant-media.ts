@@ -11,7 +11,7 @@ import { CHATBOT_PRIMARY_MODEL } from '../chat/_lib/models';
 export const ASSISTANT_MEDIA_MAX_AUDIO_BYTES = 3_500_000;
 export const ASSISTANT_MEDIA_MAX_IMAGE_BYTES = 6_000_000;
 
-export type AssistantMediaAudience = 'business' | 'discovery';
+export type AssistantMediaAudience = 'business' | 'discovery' | 'whatsapp';
 
 export type ImageAnalysis = {
   tipo: 'plato' | 'menu' | 'comprobante' | 'logo' | 'captura' | 'otro';
@@ -19,6 +19,11 @@ export type ImageAnalysis = {
   texto: string;
   /** Food/search term for discovery ("pizza", "sushi"). */
   busqueda: string;
+  /** Payment receipts only: amount / reference / bank / date as printed (empty when unreadable). */
+  monto?: string;
+  referencia?: string;
+  banco?: string;
+  fecha?: string;
 };
 
 export type AssistantMediaResult =
@@ -166,6 +171,10 @@ function parseAnalysis(raw: string): ImageAnalysis | null {
       resumen: String(j.resumen ?? '').trim().slice(0, 400),
       texto: String(j.texto ?? '').trim().slice(0, 1500),
       busqueda: String(j.busqueda ?? '').trim().slice(0, 60),
+      monto: String(j.monto ?? '').trim().slice(0, 40),
+      referencia: String(j.referencia ?? '').trim().slice(0, 40),
+      banco: String(j.banco ?? '').trim().slice(0, 40),
+      fecha: String(j.fecha ?? '').trim().slice(0, 30),
     };
   } catch {
     return null;
@@ -181,7 +190,9 @@ export async function analyzeImage(input: {
   const audienceHint =
     input.audience === 'business'
       ? 'La envía el dueño de un restaurante: puede ser la foto de un plato/producto, su carta o lista de precios, un comprobante de pago, un logo o una captura.'
-      : 'La envía un cliente hambriento: normalmente es un plato o comida que se le antoja (quiere encontrar dónde pedirlo).';
+      : input.audience === 'whatsapp'
+        ? 'La envía una persona por WhatsApp (cliente o dueño de restaurante): puede ser un plato que se le antoja, una carta, un COMPROBANTE de pago (transferencia, pago móvil, Zelle, captura del banco), un logo, una captura de pantalla de un error o cualquier otra imagen. Clasifícala con cuidado.'
+        : 'La envía un cliente hambriento: normalmente es un plato o comida que se le antoja (quiere encontrar dónde pedirlo).';
   const raw = await callGemini({
     env: input.env,
     mime: baseMime(input.mime) === 'image/jpg' ? 'image/jpeg' : baseMime(input.mime),
@@ -190,7 +201,7 @@ export async function analyzeImage(input: {
     json: true,
     prompt: [
       'Analiza la imagen y responde SOLO un JSON con estas claves (en español):',
-      '{"tipo":"plato|menu|comprobante|logo|captura|otro","resumen":"1-2 frases de lo que ves","texto":"todo texto legible (nombres, precios, montos) o vacío","busqueda":"término de comida para buscar restaurantes (ej: pizza, sushi, hamburguesa) o vacío"}',
+      '{"tipo":"plato|menu|comprobante|logo|captura|otro","resumen":"1-2 frases de lo que ves","texto":"todo texto legible (nombres, precios, montos) o vacío","busqueda":"término de comida para buscar restaurantes (ej: pizza, sushi, hamburguesa, tequeños) o vacío","monto":"solo comprobantes: monto con su moneda tal como aparece, o vacío","referencia":"solo comprobantes: número de referencia/operación, o vacío","banco":"solo comprobantes: banco o medio (Banesco, Pago Móvil, Zelle…), o vacío","fecha":"solo comprobantes: fecha tal como aparece, o vacío"}',
       audienceHint,
       'Si es una carta/lista de precios, transcribe en "texto" cada producto con su precio, uno por línea.',
       'Si hay personas o datos sensibles (tarjetas, documentos), no los transcribas: indícalo en el resumen.',

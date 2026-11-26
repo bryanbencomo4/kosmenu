@@ -1,0 +1,1572 @@
+{
+ "source": "https://elmenuxfa.com/api/menu/hamburgueseria-bladi-jaiper",
+ "capturedAt": "2026-11-26T21:49:07.921Z",
+ "comercio": {
+  "id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+  "slug": "hamburgueseria-bladi-jaiper",
+  "nombre": "Hamburgueseria Bladi Jaiper",
+  "logo_url": null,
+  "whatsapp": "+584247000078",
+  "direccion": "Táriba, Táchira\nReferencia: 50 metros más abajo de la capilla de la laguna",
+  "latitud": 7.8509407,
+  "longitud": -72.2155215,
+  "permite_delivery": true,
+  "recibe_pedidos_whatsapp": true,
+  "negocio_virtual": false,
+  "estados_operacion": [],
+  "en_linea": true,
+  "menu_palette": "logo-smart",
+  "menu_palette_primary": -2587648,
+  "menu_palette_accent": -10470388,
+  "menu_palette_surface": -15201280,
+  "menu_palette_text": -461313,
+  "menu_theme_mode": "dark",
+  "color_principal": "#D88400",
+  "menu_layout": "cards",
+  "menu_footer": "Simple",
+  "moneda": "COP",
+  "tasa_cambio_pesos": 1,
+  "exchange_rate_value": 1,
+  "exchange_rate_mode": "manual",
+  "exchange_rate_source": "bcv_eur",
+  "exchange_rate_quote_currency": null,
+  "horarios": {
+   "days": {
+    "friday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "monday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "sunday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "tuesday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "saturday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "thursday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    },
+    "wednesday": {
+     "open": true,
+     "ranges": [
+      {
+       "end": "23:30",
+       "start": "17:00"
+      }
+     ]
+    }
+   },
+   "timezone": "America/Caracas"
+  },
+  "social_links": {},
+  "inicio_menu": {
+   "verMenu": false,
+   "comerAqui": true,
+   "paraLlevar": true,
+   "delivery": true,
+   "catalogo": false,
+   "calificacion": true,
+   "ubicacion": true,
+   "redes": true,
+   "verMetodosPago": false
+  },
+  "delivery_tarifas": {
+   "enabled": true,
+   "pricing_type": "zones",
+   "currency": "COP",
+   "fixed_price": 0,
+   "distance_config": {
+    "base_price": 0,
+    "included_km": 0,
+    "extra_price_per_km": 0
+   },
+   "zones": [
+    {
+     "name": "Zona 1",
+     "min_distance": 0,
+     "max_distance": 1,
+     "price": 5000
+    },
+    {
+     "name": "Zona 2",
+     "min_distance": 1,
+     "max_distance": 2,
+     "price": 6000
+    },
+    {
+     "name": "Zona 3",
+     "min_distance": 2,
+     "max_distance": 3,
+     "price": 7000
+    },
+    {
+     "name": "Zona 4",
+     "min_distance": 3,
+     "max_distance": 4,
+     "price": 8000
+    },
+    {
+     "name": "Zona 5",
+     "min_distance": 4,
+     "max_distance": 5,
+     "price": 9000
+    },
+    {
+     "name": "Zona 6",
+     "min_distance": 5,
+     "max_distance": 6,
+     "price": 10000
+    },
+    {
+     "name": "Zona 7",
+     "min_distance": 6,
+     "max_distance": 7,
+     "price": 11000
+    },
+    {
+     "name": "Zona 8",
+     "min_distance": 7,
+     "max_distance": 8,
+     "price": 12000
+    },
+    {
+     "name": "Zona 9",
+     "min_distance": 8,
+     "max_distance": 9,
+     "price": 13000
+    },
+    {
+     "name": "Zona 10",
+     "min_distance": 9,
+     "max_distance": 10,
+     "price": 14000
+    }
+   ],
+   "area_zones": [],
+   "area_zones_fallback": {
+    "enabled": false,
+    "price": 0
+   },
+   "free_delivery": {
+    "enabled": false,
+    "minimum_order": 0
+   },
+   "min_order": 0,
+   "estimated_times": {
+    "preparation_minutes": 20,
+    "delivery_minutes": 30
+   },
+   "custom_message": "",
+   "version": 1
+  },
+  "rating_average": 5,
+  "rating_count": 3
+ },
+ "categorias": [
+  {
+   "id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "nombre": "HAMBURGUESAS",
+   "orden": 0,
+   "icono": null,
+   "imagen_url": null,
+   "opciones_menu": null,
+   "rol": null
+  },
+  {
+   "id": "9980ec66-2d61-4f4a-8f21-74c9b4c33186",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "nombre": "SALCHI PAPAS",
+   "orden": 0,
+   "icono": "🍝",
+   "imagen_url": null,
+   "opciones_menu": null,
+   "rol": null
+  },
+  {
+   "id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "nombre": "PERROS CALIENTES",
+   "orden": 0,
+   "icono": "🌭",
+   "imagen_url": null,
+   "opciones_menu": null,
+   "rol": null
+  },
+  {
+   "id": "69ee1782-8087-4668-936f-135425d7e593",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "nombre": "BEBIDAS",
+   "orden": 1,
+   "icono": null,
+   "imagen_url": null,
+   "opciones_menu": null,
+   "rol": "drink"
+  },
+  {
+   "id": "cf2929a8-9fad-4e1f-b2e9-8f80587942db",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "nombre": "PAPAS FRANCESAS",
+   "orden": 2,
+   "icono": "🍟",
+   "imagen_url": null,
+   "opciones_menu": null,
+   "rol": "side"
+  }
+ ],
+ "productos": [
+  {
+   "id": "18a3ef16-3387-438a-968d-09964861ea45",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "AGUA MINERAL",
+   "descripcion": "",
+   "precio": 3000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "62f6bd0d-a82b-4c5c-ab7c-c29b64c25270",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "CROQ. DE CARNE",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesa",
+   "precio": 21000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_efczz620",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_o50i6xju",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_34x7ms13",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_07o902be",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_w3dss4mz",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_q8ch4ym0",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_gk4oath4",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_9ftl1nu4",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "d3307958-578b-4669-ab76-ba6d97bf4e52",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "ESPECIAL MIXTO GDE.",
+   "descripcion": "salchicha de pollo, pollo y carne, cebolla en cuadritos, zanahoria, papas palito, salsas, queso amarillo.",
+   "precio": 18000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_0p47ub4i",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_rhfcwxcy",
+        "nombre": "Pollo"
+       },
+       {
+        "id": "r_j45kl5zk",
+        "nombre": "Carne"
+       },
+       {
+        "id": "r_odbzyiql",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_tvmqftf9",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_38lc4m3v",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_fs07xu0j",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_gyyioikj",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "89248970-aad4-47e1-a6b9-feaed490b40d",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "ESPECIAL MIXTO PEQ.",
+   "descripcion": "salchicha de pollo, pollo y carne, cebolla en cuadritos, zanahoria, papas palito, salsas, queso amarillo.",
+   "precio": 14000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_rluuuuld",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_3rrbtbgo",
+        "nombre": "Pollo"
+       },
+       {
+        "id": "r_74m34i8d",
+        "nombre": "Carne"
+       },
+       {
+        "id": "r_paeusm42",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_fnpuowwp",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_jew1dyyd",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_2p42k9rn",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_v3ozc83g",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "6a5617c1-1d8b-4073-93a3-87b1cf292e6c",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "JUGO DE CARTON",
+   "descripcion": "",
+   "precio": 2000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "9d25c824-d7e2-4ba9-b002-a786e95b2103",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "LOMITO",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesa",
+   "precio": 21000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_c47yoqeu",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_zrlo2pef",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_lhb759cw",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_i11tsiyc",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_ncrhod2q",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_48av2gqo",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_n3enj906",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_zup8lprw",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "98373290-ab1c-43d9-8ccc-50dcac325579",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "MALTA",
+   "descripcion": "",
+   "precio": 3000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "bee4270d-1c45-4456-97aa-848d6a4121df",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "MECHADO POLLO",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesa",
+   "precio": 23000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_ue7u4uua",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_n1k9hof2",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_dp5590ig",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_f5m6zkcw",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_qxzx2c6m",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_e6nsjsox",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_4ptz4yal",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_st9a7wm3",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "32acd112-8192-4d30-a33e-7466978afc60",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "MECHADO-CARNE",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesa",
+   "precio": 21000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_5nqg5u3u",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_uckd5dlb",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_pshwm3k9",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_rlvzytq5",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_6yo7bnu6",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_uvzxu37l",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_ybg1136c",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_9q299fot",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "10b65ab4-72eb-43d5-8562-b819a4bd11c3",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "MILANESA",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesa",
+   "precio": 23000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_0uxo8y0f",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_9pqlx3on",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_ewln7vhw",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_zylw47ju",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_j35wrttb",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_2emkq2nl",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_5nfsnsgz",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_u9a31uxx",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "081a4d21-ffed-465a-8b00-4babda5fea54",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "NORMAL GRANDE",
+   "descripcion": "salchicha de pollo, papas palito, cebolla en cuadritos, zanahoria, salsas, queso amarillo.",
+   "precio": 9000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_n20p4533",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_ddpcdtv7",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_2sdyxici",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_u70kl2qv",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_8dcr03jr",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_uoo4f2z1",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "9bd4a9ae-a059-476f-b102-61ad1aa81efd",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "NORMAL PEQUEÑO",
+   "descripcion": "salchicha de pollo, papas palito, cebolla en cuadritos, zanahoria, salsas, queso amarillo.",
+   "precio": 5000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_wpyfar9d",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_5uv0tuhc",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_66h66zyu",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_ph856pqg",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_ci058vdp",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_u08ok59j",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "84ad364e-57a9-4352-b289-0fd049d69180",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "POLLO-CARNE GDE.",
+   "descripcion": "salchicha de pollo, pollo o carne, papas palito, cebolla en cuadritos, zanahoria, salsas, queso amarillo.",
+   "precio": 15000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_hzb57cs1",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_mosu9t4u",
+        "nombre": "Pollo o carne"
+       },
+       {
+        "id": "r_7v6ebgnx",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_6op4dm8g",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_yz5zid04",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_x9gzvp02",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_d8x8wvau",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "8445f020-7bea-4489-a2d9-32f310c7a2d8",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "c080cd58-b1df-4c69-b71b-9c9fef0da11d",
+   "nombre": "POLLO-CARNE PEQ.",
+   "descripcion": "salchicha de pollo, pollo o carne, papas palito, cebolla en cuadritos, zanahoria, salsas, queso amarillo.",
+   "precio": 11000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_2g13510y",
+        "nombre": "Salchicha de pollo"
+       },
+       {
+        "id": "r_t3bvnhht",
+        "nombre": "Pollo o carne"
+       },
+       {
+        "id": "r_6kpiy7fp",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_03aw55cf",
+        "nombre": "Cebolla en cuadritos"
+       },
+       {
+        "id": "r_37bxysul",
+        "nombre": "Zanahoria"
+       },
+       {
+        "id": "r_e3kcgnrw",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_7362zmdp",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "3b3a0463-af20-4c3d-81bb-8700c543d90e",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "REFRESCO 1 L.",
+   "descripcion": "",
+   "precio": 5000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "b013bc87-758b-48ae-847b-16da260aa680",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "REFRESCO 1.5 L.",
+   "descripcion": "",
+   "precio": 7000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "fed83fae-3644-4ee1-a1e9-54d27fa13688",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "REFRESCO DE BOTELLA",
+   "descripcion": "",
+   "precio": 3000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "3b57a4c6-273a-477b-bd94-70675bf9f5ad",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "9980ec66-2d61-4f4a-8f21-74c9b4c33186",
+   "nombre": "SALCHIPAPA",
+   "descripcion": "Papas francesas, salchichas, vegetales, salsas y queso amarillo",
+   "precio": 30000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_wdmhs8sx",
+        "nombre": "Papas francesas"
+       },
+       {
+        "id": "r_zig5n49t",
+        "nombre": "Salchichas"
+       },
+       {
+        "id": "r_7peojxka",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_hh8hq79k",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_eyj5o3j7",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "91b2a909-4430-43b8-8637-a2c17ee9bd86",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "9980ec66-2d61-4f4a-8f21-74c9b4c33186",
+   "nombre": "SALCHIPAPA POLLO - CARNE",
+   "descripcion": "Papas francesas, salchichas, vegetales, picada de pollo o lomito, salsas y queso amarillo.",
+   "precio": 38000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_6o2p5n9w",
+        "nombre": "Papas francesas"
+       },
+       {
+        "id": "r_w87rtalm",
+        "nombre": "Salchichas"
+       },
+       {
+        "id": "r_6gki3g18",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_luvwdjhm",
+        "nombre": "Picada de pollo o lomito"
+       },
+       {
+        "id": "r_9ld37134",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_h7o41ol0",
+        "nombre": "Queso amarillo"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "b762ad4c-87f5-40ef-8c7e-475ef2cc3de6",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "cf2929a8-9fad-4e1f-b2e9-8f80587942db",
+   "nombre": "SERV. PAPAS FRANCESAS",
+   "descripcion": "",
+   "precio": 5000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": null
+  },
+  {
+   "id": "56418565-0d93-47a3-a1fa-8f8f586265a0",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "VILLA",
+   "descripcion": "Carne mechada, lomito, jamón, queso, vegetales, papas palito, salsas, papas francesa",
+   "precio": 15000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 0,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_vgwxy1cu",
+        "nombre": "Carne mechada"
+       },
+       {
+        "id": "r_k28urvwq",
+        "nombre": "Lomito"
+       },
+       {
+        "id": "r_jy2ks3yh",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_8hreq8cr",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_f0j9eugl",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_qewv3z0n",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_uc50tta1",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_848vmqlp",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "03c09194-4866-4482-8ee3-0507f23c347a",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "CHULETA",
+   "descripcion": "vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesas",
+   "precio": 23000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 1,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_fo415jyg",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_fsblwk0y",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_xsp8kkdr",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_rzn7cwdq",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_2ko57r4g",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_72lhm0xb",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_4jqg1zsh",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_5jgr6hhd",
+        "nombre": "Papas francesas"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "55ce4768-253c-4071-a798-e4f62c52db82",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "2 CARNES",
+   "descripcion": "vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, carnes a elegir y papas francesas",
+   "precio": 28000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 2,
+   "opciones_menu": {
+    "grupos": [
+     {
+      "id": "g_j7y7ce3a",
+      "max": 2,
+      "min": 2,
+      "tipo": "multiple",
+      "nombre": "Carne",
+      "opciones": [
+       {
+        "id": "o_079djcat",
+        "activo": true,
+        "nombre": "Mechada",
+        "precio": 0
+       },
+       {
+        "id": "o_ehrhpq3a",
+        "activo": true,
+        "nombre": "Lomito",
+        "precio": 0
+       },
+       {
+        "id": "o_eohonfh4",
+        "activo": true,
+        "nombre": "Milanesa",
+        "precio": 0
+       },
+       {
+        "id": "o_8rkd4czf",
+        "activo": true,
+        "nombre": "Croqueta",
+        "precio": 0
+       },
+       {
+        "id": "o_gg85o8j2",
+        "activo": true,
+        "nombre": "Chuleta",
+        "precio": 0
+       },
+       {
+        "id": "o_jl98o8xf",
+        "activo": true,
+        "nombre": "Pollo mechado",
+        "precio": 0
+       }
+      ],
+      "obligatorio": true
+     }
+    ],
+    "activadas": true,
+    "personalizacion": {
+     "version": 1,
+     "combinacion": {
+      "titulo": "Combina con",
+      "activada": false,
+      "regla_precio": "max",
+      "productos_compatibles": []
+     },
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_i5do0v2o",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_ekbpzbxw",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_iqip4v7x",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_a001pq5k",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_2vxrl6e2",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_o236xes0",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_z3rnel3d",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_m885c3lv",
+        "nombre": "Carnes a elegir y papas francesas"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "f2912787-962b-4007-8483-0109dbcd18d3",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "69ee1782-8087-4668-936f-135425d7e593",
+   "nombre": "REFRESCO 2 L.",
+   "descripcion": "",
+   "precio": 9000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 2,
+   "opciones_menu": null
+  },
+  {
+   "id": "1d8a8a55-0d69-4cc7-ad04-d6d0f39b1bff",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "MIXTA CON CHULETA",
+   "descripcion": "vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, papas francesas\n\nCARNES A ELEGIR:\n\nCarne Croqueta\nChuleta ahumada\nPollo mechado\nLomito\nCarne mechada\nMilanesa",
+   "precio": 30000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 3,
+   "opciones_menu": {
+    "personalizacion": {
+     "version": 1,
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_zmtx52gg",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_729sqjg9",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_940yqkjx",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_3wjetobc",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_jcgd4uvu",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_jw83tbeh",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_gfzm7a07",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_t4k4x0qm",
+        "nombre": "Papas francesas"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  },
+  {
+   "id": "66a5e8f2-80a9-486a-a9ea-72611a3086ae",
+   "comercio_id": "1559edf5-2eee-4837-acca-ee278a723d6c",
+   "categoria_id": "a69f48ff-d264-4eb2-a063-3bae1b59f681",
+   "nombre": "3 CARNES",
+   "descripcion": "Vegetales, jamón, queso, tocineta, huevo, salsas, papas palito, 3 Carnes a elegir, papas francesa.",
+   "precio": 37000,
+   "imagen_url": null,
+   "disponible": true,
+   "upsell_badge": null,
+   "precio_comparacion": null,
+   "upsell_enabled": true,
+   "orden": 4,
+   "opciones_menu": {
+    "grupos": [
+     {
+      "id": "g_fk73pt2h",
+      "max": 3,
+      "min": 3,
+      "tipo": "multiple",
+      "nombre": "Carne",
+      "opciones": [
+       {
+        "id": "o_5k7khd26",
+        "activo": true,
+        "nombre": "Mechada",
+        "precio": 0
+       },
+       {
+        "id": "o_56eivv1g",
+        "activo": true,
+        "nombre": "Lomito",
+        "precio": 0
+       },
+       {
+        "id": "o_x2z28uo6",
+        "activo": true,
+        "nombre": "Milanesa",
+        "precio": 0
+       },
+       {
+        "id": "o_55ekdhll",
+        "activo": true,
+        "nombre": "Croqueta",
+        "precio": 0
+       },
+       {
+        "id": "o_xcdf7dzv",
+        "activo": true,
+        "nombre": "Chuleta",
+        "precio": 0
+       },
+       {
+        "id": "o_dpozpgaz",
+        "activo": true,
+        "nombre": "Pollo mechado",
+        "precio": 0
+       }
+      ],
+      "obligatorio": true
+     }
+    ],
+    "activadas": true,
+    "personalizacion": {
+     "version": 1,
+     "combinacion": {
+      "titulo": "Combina con",
+      "activada": false,
+      "regla_precio": "max",
+      "productos_compatibles": []
+     },
+     "exclusiones": {
+      "titulo": "¿Quieres quitar algo?",
+      "pregunta": "¿Quieres quitar algún ingrediente?",
+      "activadas": true,
+      "ingredientes": [
+       {
+        "id": "r_wjbav2p3",
+        "nombre": "Vegetales"
+       },
+       {
+        "id": "r_mcau6zpv",
+        "nombre": "Jamón"
+       },
+       {
+        "id": "r_tcz4djqe",
+        "nombre": "Queso"
+       },
+       {
+        "id": "r_1qa5vjuk",
+        "nombre": "Tocineta"
+       },
+       {
+        "id": "r_kq25iw2t",
+        "nombre": "Huevo"
+       },
+       {
+        "id": "r_cdbl46bn",
+        "nombre": "Salsas"
+       },
+       {
+        "id": "r_a4yg87ft",
+        "nombre": "Papas palito"
+       },
+       {
+        "id": "r_aiawu56a",
+        "nombre": "3 Carnes a elegir"
+       },
+       {
+        "id": "r_c9qgc4dj",
+        "nombre": "Papas francesa"
+       }
+      ],
+      "desde_descripcion": true,
+      "pregunta_activada": true
+     }
+    }
+   }
+  }
+ ],
+ "checkoutExchange": {
+  "currencies": [
+   "COP",
+   "USD",
+   "VES"
+  ],
+  "exchangeRates": {
+   "USD": 1,
+   "VES": 0.3534709177064219
+  },
+  "exchangeRateModes": {
+   "USD": "manual",
+   "VES": "auto"
+  },
+  "exchangeRateSources": {
+   "USD": "google",
+   "VES": "p2p_binance"
+  },
+  "exchangeRateAdjustments": {
+   "VES": {
+    "enabled": true,
+    "factor": 1.1145081112439321,
+    "referenceValue": 3,
+    "referenceInverted": true
+   }
+  }
+ },
+ "marketRates": {
+  "bcv_rate": 926.3592,
+  "p2p_binance_rate": 1089.7,
+  "updated_at": "2026-11-26T21:40:03.813307+00:00",
+  "payload": {
+   "google_rates": {
+    "USD/COP": 3604.231,
+    "USD/EUR": 0.9121,
+    "VES/USD": 0.0010818373146028349
+   },
+   "bcv_rates": {
+    "EUR": 1016.8645,
+    "USD": 926.3592
+   }
+  }
+ }
+}

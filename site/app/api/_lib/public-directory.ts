@@ -153,8 +153,10 @@ const CATEGORY_DISHES_CANDIDATE_CAP = 48;
 const CATEGORY_DISHES_PER_BUSINESS = 8;
 
 function mergeProductNames(base: string[], extra: string[]) {
-  const out = [...base];
-  for (const name of extra) {
+  // Query hits go first: on big menus they would otherwise fall past the per-business cap
+  // and the restaurant would look like it does NOT sell what was searched.
+  const out: string[] = [];
+  for (const name of [...extra, ...base]) {
     if (!name || out.includes(name)) continue;
     if (out.length >= PRODUCT_NAMES_PER_BUSINESS) break;
     out.push(name);
@@ -172,6 +174,18 @@ function buildSearchIlikePatterns(rawQuery: string, normalizedQuery: string) {
   // Token patterns catch dish hits when the full phrase isn't in a single field.
   for (const token of tokenizeSearchText(normalizedQuery)) {
     if (token.length >= 3) add(token);
+  }
+  // People type "tequenos" for "Tequeños": ILIKE is accent-sensitive for ñ, so also try the ñ spelling.
+  for (const term of [...patterns]) {
+    const base = term.replace(/%/g, '');
+    if (!/n[aeiou]/.test(base) || base.includes('ñ')) continue;
+    let made = 0;
+    for (let i = 0; i < base.length - 1 && made < 4; i += 1) {
+      if (base[i] === 'n' && /[aeiou]/.test(base[i + 1])) {
+        add(`${base.slice(0, i)}ñ${base.slice(i + 1)}`);
+        made += 1;
+      }
+    }
   }
   return [...patterns];
 }

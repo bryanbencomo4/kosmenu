@@ -54,10 +54,27 @@ npx vercel rollback dpl_4AA3TTJeYvHzYP1rV8rd4kiJehQg --yes
 5. `.\scripts\deploy_flutter_web.ps1`  
 6. Smoke Trueno  
 
-## Post-cutover — anotar aquí
+## Post-cutover
 
-| | Nuevo dpl_ |
+| | Valor |
 | --- | --- |
-| Next | _(pendiente)_ |
-| Flutter | _(pendiente)_ |
-| Git SHA | _(pendiente)_ |
+| Next (live) | **`dpl_HhHhyxdbQ1LnksqMKkDZeCTAckjK`** → elmenuxfa.com |
+| Flutter (live) | **`dpl_BcSEFeDVt4N7mWwgLNNWjPTHvv9w`** → app.elmenuxfa.com |
+| Git tip | `7e08233` (`feature/conversational-ecosystem-unify`) |
+| Tag recovery | `recovery/pre-conversational-unify-20261126` |
+| Flags | `CHAT_SUPERVISION_*=1` Trueno-only; `NEXT_PUBLIC_APP_SITE_URL=https://app.elmenuxfa.com` |
+
+### Smoke manual Trueno
+
+1. https://elmenuxfa.com/v/pizzas-el-trueno?chatbot=1 — chat cliente  
+2. https://app.elmenuxfa.com/ — login `rest1@1xp.fr`  
+3. https://app.elmenuxfa.com/panel/conversaciones — inbox  
+4. https://app.elmenuxfa.com/asistente — bot negocio  
+
+### Rollback (si falla)
+
+```powershell
+npx vercel rollback dpl_2ir7HPWbMgHV6Q6oLU9dh6owa5MQ --yes
+npx vercel rollback dpl_4AA3TTJeYvHzYP1rV8rd4kiJehQg --yes
+# + soft kill: CHAT_SUPERVISION_ENABLED=0 / HUMAN_TAKEOVER=0 / WASENDER=0
+```

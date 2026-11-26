@@ -71,6 +71,39 @@ export function resolveVoiceHoldSlide(dx: number, dy: number): VoiceHoldSlide {
   return { intent, cancelProgress, lockProgress };
 }
 
+/** WhatsApp discards recordings shorter than this and shows the "hold to record" hint. */
+export const VOICE_MIN_SEND_MS = 1000;
+
+export type VoiceReleaseAction = 'send' | 'hint' | 'lock';
+
+/**
+ * What happens when the finger lifts while recording (WhatsApp behaviour):
+ *  - held long enough → send right away;
+ *  - too short on a touch screen → discard and show "Mantén presionado para grabar…";
+ *  - too short with a mouse (WhatsApp Web) → a click toggles hands-free recording.
+ */
+export function resolveVoiceRelease(input: {
+  recordedMs: number;
+  movedPx: number;
+  pointerType: string;
+}): VoiceReleaseAction {
+  if (input.recordedMs >= VOICE_MIN_SEND_MS) return 'send';
+  if (input.pointerType === 'mouse' && input.movedPx <= VOICE_TAP_SLOP_PX) return 'lock';
+  return 'hint';
+}
+
+/** Rows of 0..1 bars from raw input levels, resampled to `count` bars for the live waveform. */
+export function resampleVoiceLevels(levels: number[], count: number): number[] {
+  if (count <= 0) return [];
+  if (!levels.length) return Array.from({ length: count }, () => 0.08);
+  const out: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const idx = Math.min(levels.length - 1, Math.floor((i / count) * levels.length));
+    out.push(Math.max(0.08, Math.min(1, levels[idx])));
+  }
+  return out;
+}
+
 /** True when a press is short + stationary enough to be a tap (toggle-mode start). */
 export function isVoiceTap(heldMs: number, movedPx: number): boolean {
   return heldMs < VOICE_TAP_MAX_MS && movedPx <= VOICE_TAP_SLOP_PX;

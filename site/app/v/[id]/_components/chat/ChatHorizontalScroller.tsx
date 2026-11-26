@@ -225,7 +225,7 @@ export function ChatHorizontalScroller({
         onPointerCancel={endDrag}
         onClickCapture={onClickCapture}
         onDragStart={onDragStart}
-        className={`touch-pan-x cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-x] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
+        className={`cursor-grab overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth outline-none active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-x_pan-y] focus-visible:ring-2 focus-visible:ring-[var(--chat-send)] [&::-webkit-scrollbar]:hidden ${
           snap ? 'snap-x snap-proximity scroll-pl-3' : ''
         } ${className}`}
       >

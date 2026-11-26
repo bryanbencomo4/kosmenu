@@ -1,6 +1,8 @@
 import { runWaMasterAgentNlu } from './agent';
 import type { WaMasterAuthGate } from './auth';
 import { createMemoryWaMasterAuthGate } from './auth';
+import type { LoadShopDelivery } from './brain/delivery';
+import { describeImageTurn, parseImageTurn } from './image-turn';
 import type { WaMasterConfig } from './config';
 import {
   loadDefaultDiscoveryExecute,
@@ -30,6 +32,8 @@ import { runCommercialSpecialist } from './specialists/commercial';
 import { runConsumerSpecialist } from './specialists/consumer';
 import { tryHandleSmartMenu } from './menus';
 import { runCentralBrain } from './brain/respond';
+import { composeNatural, geminiCompose, type ComposeFn } from './brain/compose';
+import type { LoadMenu } from './brain/menu';
 import type {
   WaMasterIdentity,
   WaMasterIntent,
@@ -41,6 +45,9 @@ import type {
 export type WaMasterOrchestratorDeps = {
   discoveryCtx?: WaMasterDiscoveryCtx;
   executeDiscovery?: WaMasterDiscoveryExecute;
+  loadShopDelivery?: LoadShopDelivery;
+  /** The restaurant's public menu snapshot (same source as /v/{slug}). Injectable for tests. */
+  loadPublicMenu?: LoadMenu;
   authGate?: WaMasterAuthGate;
   loadMenu?: AdminMenuLoader;
   quota?: WaMasterQuotaStore;
@@ -49,6 +56,8 @@ export type WaMasterOrchestratorDeps = {
   forceSimulateAgent?: boolean;
   forceAgentFail?: boolean;
   forceQuotaExhausted?: boolean;
+  /** Natural-language composer (defaults to Gemini; injectable for tests). */
+  compose?: ComposeFn;
 };
 
 async function defaultMenuLoader(): Promise<WaMasterMenuSnapshot | null> {
@@ -63,7 +72,11 @@ export async function runWaMasterOrchestrator(
   config: WaMasterConfig,
   deps: WaMasterOrchestratorDeps = {},
 ): Promise<WaMasterOrchestratorResult> {
-  const { identity, text, messageId, nowMs } = input;
+  const { identity, messageId, nowMs } = input;
+  // A photo reaches us as a structured turn; everything but the brain sees a readable sentence.
+  const brainText = input.text;
+  const imageTurn = parseImageTurn(brainText);
+  const text = imageTurn ? describeImageTurn(imageTurn) : brainText;
   let memory: WaMasterMemory = {
     ...input.memory,
     summary: normalizeSummary(input.memory.summary, nowMs),
@@ -90,7 +103,9 @@ export async function runWaMasterOrchestrator(
   // Central brain (natural language, DB-backed) replaces the numbered smart menus.
   const brainHit = config.brainEnabled
     ? await runCentralBrain({
-        text,
+        text: brainText,
+        loadShopDelivery: deps.loadShopDelivery,
+        loadPublicMenu: deps.loadPublicMenu,
         identity,
         memory,
         config,
@@ -549,6 +564,35 @@ export async function runWaMasterOrchestrator(
 
   void liveCompose;
   void geminiHttpCalls;
+
+  // Natural voice: the brain/specialists decided the facts; the composer words them like a
+  // person who read this conversation (varied, contextual, validated against the draft).
+  if (
+    !input.forceDeterministic &&
+    !escalateHuman &&
+    mode !== 'gemini' &&
+    replies.length > 0 &&
+    replies.length <= 3 &&
+    !memory.summary.pendingAdminProposal &&
+    !brainHit?.skipCompose &&
+    !(specialist === 'admin' && !brainOwned)
+  ) {
+    const composed = await composeNatural(
+      {
+        userText: text,
+        drafts: replies,
+        memory,
+        identity,
+        topic: brainHit ? brainHit.topic : primary,
+      },
+      deps.compose ?? geminiCompose,
+    );
+    if (composed) {
+      replies = composed;
+      toolsUsed = [...toolsUsed, 'compose'];
+      mode = 'gemini';
+    }
+  }
 
   // Multi-intent: append secondary published pricing when user also asked cost
   // but primary went to another specialist (e.g. search + precios).

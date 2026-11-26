@@ -56,6 +56,7 @@ export type MerchantDomain =
   | 'hours'
   | 'payments'
   | 'logo'
+  | 'photo'
   | 'promo'
   | 'category'
   | 'order_status'
@@ -155,6 +156,46 @@ export function extractRestaurantName(original: string): string | null {
   return best;
 }
 
+const DISH_TRIGGER =
+  /\b(?:donde (?:venden|vende|vendan|hay|consigo|compro|encuentro|puedo (?:comprar|conseguir|encontrar|comer|pedir)|conseguir|comprar|encontrar)|(?:venden|vende|tienen|tiene|preparan|hacen)|(?:hay)|se me antoja|me antoja|antojo de|tengo antojo de|me provoca|busco|quiero|quisiera|queria|necesito|dame|pasame)\s+/;
+const DISH_FILLER = /^(?:(?:un|una|unos|unas|el|la|los|las|algo de|algo|de|por|unos? cuantos?|alguien que venda)\s+)+/;
+const DISH_CUT =
+  /\s+(?:en|cerca|por aqui|por mi|por mi zona|hoy|ahora|para|donde|que|cuanto|cuantos|a domicilio|abiert[oa]s?|con delivery|por favor|pls|porfa|ya|esta noche|manana)\b.*$/;
+const DISH_NOT_FOOD =
+  /^(?:ayuda|informacion|info|saber|ver|hablar|pedir|registr\w*|cambi\w*|conocer|empezar|comenzar|mi |mis |nuestr\w*|un asesor|asesor|humano|persona|menu|carta|enlace|link|precio|precios|cotizacion|plan|planes|cuenta|probar|crear|usar|tener|poner|hacer|que |como |cuanto|restaurante|restaurantes|comida|comer|cenar|almorzar|desayunar|lugar|sitio|negocio|local|algo|cosa|delivery|domicilio|envio|pedido|orden|ordenar|reservar|reserva|mesa|hablar|ayudarme|contactar|el menu|la carta|esto|eso|ese|esa|este|esta|asistente|bot|soporte|queja|reclamo|abierto|cerca|opciones|recomendacion|recomendaciones)\b/;
+
+/**
+ * "donde venden tequeños", "se me antoja un pastel de chucho", "busco cachapas":
+ * the dish the person wants, for foods not in the fixed rule list. `original` keeps the ñ
+ * so product names like "Tequeños" can be matched in the database.
+ */
+export function extractDishQuery(original: string): string | null {
+  const t = fold(original);
+  const lowered = original.toLowerCase();
+  const m = DISH_TRIGGER.exec(t);
+  if (!m) return null;
+  let start = m.index + m[0].length;
+  let tail = t.slice(start);
+  const filler = DISH_FILLER.exec(tail);
+  if (filler) {
+    start += filler[0].length;
+    tail = t.slice(start);
+  }
+  tail = tail.replace(/[¿?¡!.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  const cut = tail.replace(DISH_CUT, '').trim();
+  if (!cut || cut.length < 3 || DISH_NOT_FOOD.test(cut)) return null;
+  const words = cut.split(' ').filter(Boolean).slice(0, 4);
+  if (!words.length) return null;
+  const dish = words.join(' ');
+  // Re-read the same words from the original text so "ñ" survives.
+  const origTokens = lowered.replace(/[¿?¡!.,;:]/g, ' ').split(/\s+/).filter(Boolean);
+  const foldedTokens = origTokens.map((w) => fold(w));
+  for (let i = 0; i + words.length <= origTokens.length; i += 1) {
+    if (words.every((w, k) => foldedTokens[i + k] === w)) return origTokens.slice(i, i + words.length).join(' ');
+  }
+  return dish;
+}
+
 export function parseFood(t: string): FoodQuery | null {
   const rules: Array<[RegExp, FoodQuery]> = [
     [/\bpizza|pizzeria/, { category: 'pizzas', query: 'pizza', label: 'pizza' }],
@@ -164,7 +205,7 @@ export function parseFood(t: string): FoodQuery | null {
     [/\bpollo|broaster/, { category: 'pollo', query: 'pollo', label: 'pollo' }],
     [/\bperros? calientes?|hot ?dog/, { category: null, query: 'perro caliente', label: 'perros calientes' }],
     [/\bempanada/, { category: null, query: 'empanada', label: 'empanadas' }],
-    [/\bpostre|torta|pastel|dulce/, { category: 'postres', query: null, label: 'postres' }],
+    [/\bpostre|torta|pastel(?! de (chucho|pollo|carne|morrocoy|jamon|queso|cazon|pescado))|dulce/, { category: 'postres', query: null, label: 'postres' }],
     [/\bdesayun/, { category: null, query: 'desayuno', label: 'desayunos' }],
     [/\bcomida china|china\b/, { category: null, query: 'china', label: 'comida china' }],
     [/\bcomida venezolana|criolla/, { category: 'criolla', query: null, label: 'comida criolla' }],
@@ -207,7 +248,15 @@ export function merchantDomain(t: string, opts: { mine: boolean }): MerchantDoma
     return 'delivery';
   }
   if (/\bmetodos? de pago\b/.test(t) && /\b(agreg|configur|cambi|quiero|como)\w*/.test(t)) return 'payments';
-  if (/\b(logo|foto de (uno de )?mis? productos|descripcion de mi)\b/.test(t) && /\b(cambi|actualiz|quiero|como|necesito)\w*/.test(t)) {
+  if (
+    !/\blogo\b/.test(t) &&
+    /\b(foto|fotos|imagen|imagenes)\b/.test(t) &&
+    /\b(cambi|actualiz|pon|poner|sub|mejor|nueva|nuevo|quiero|necesito|como)\w*/.test(t) &&
+    !CAPABILITY_Q.test(t)
+  ) {
+    return 'photo';
+  }
+  if (/\b(logo|descripcion de mi)\b/.test(t) && /\b(cambi|actualiz|quiero|como|necesito)\w*/.test(t)) {
     return 'logo';
   }
   if (/\bpromocion\b/.test(t) && /\b(crear|creo|crearla|armar|quiero (hacer|armar|crear))\b/.test(t)) return 'promo';
@@ -477,12 +526,18 @@ export function classifyCentralTopic(params: {
   }
   if (/\b(es el mismo|el menu que me enviaron)\b/.test(t)) return res('consumer_howto');
 
-  if (food || /\b(restaurante|restaurantes|comer|comida|cenar|almorzar|almuerzo|cena|antojo|donde (consigo|puedo conseguir|hay)|hambre|pedir)\b/.test(t)) {
-    if (/\b(que restaurantes|restaurantes (tienen|hay|registrados)|catalogo|directorio|listado)\b/.test(t) && !food) {
+  // Any dish, not only the fixed list: "donde venden tequeños", "busco cachapas".
+  let dishFood: FoodQuery | undefined = food;
+  if (!dishFood && !restaurantName) {
+    const dish = extractDishQuery(original);
+    if (dish) dishFood = { category: null, query: dish, label: dish };
+  }
+  if (dishFood || /\b(restaurante|restaurantes|comer|comida|cenar|almorzar|almuerzo|cena|antojo|donde (consigo|puedo conseguir|hay)|hambre|pedir)\b/.test(t)) {
+    if (/\b(que restaurantes|restaurantes (tienen|hay|registrados)|catalogo|directorio|listado)\b/.test(t) && !dishFood) {
       return res('browse_directory');
     }
-    if (food || /\b(comer|cenar|almorzar|almuerzo|cena|antojo|hambre|restaurante cerca|mas cercano)\b/.test(t)) {
-      return res('search_food');
+    if (dishFood || /\b(comer|cenar|almorzar|almuerzo|cena|antojo|hambre|restaurante cerca|mas cercano)\b/.test(t)) {
+      return res('search_food', dishFood && !food ? { food: dishFood } : {});
     }
     if (/\b(pedir|hacer (un )?pedido|como pido)\b/.test(t)) return res('order_howto');
     return res('browse_directory');

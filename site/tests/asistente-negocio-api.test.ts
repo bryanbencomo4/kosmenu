@@ -82,7 +82,29 @@ describe('POST /api/asistente-negocio', () => {
         body: JSON.stringify({ handoffCode: rec.code, handoffAction: 'peek' }),
       }),
     );
-    const json = (await res.json()) as { text: string };
-    expect(json.text).toMatch(/venció|expir/i);
+    const json = (await res.json()) as { text: string; needsAuth?: boolean };
+    // Never a dead end: no "link already used/expired" wording, just a way back in.
+    expect(json.text).not.toMatch(/enlace|venci|expir|ya se us/i);
+    expect(json.text).toMatch(/entra|cuenta/i);
+    expect(json.needsAuth).toBe(true);
+  });
+
+  it('already-used handoff behaves like expired: friendly re-entry, not an error', async () => {
+    const rec = await store.issue({
+      destination: 'business_assistant',
+      payload: { pendingOperation: 'edit_price' },
+    });
+    await store.redeem({ code: rec.code });
+    const { POST } = await import('../app/api/asistente-negocio/route');
+    const res = await POST(
+      new Request('http://localhost/api/asistente-negocio', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ handoffCode: rec.code, handoffAction: 'peek' }),
+      }),
+    );
+    const json = (await res.json()) as { text: string; showAuthCard?: boolean };
+    expect(json.text).not.toMatch(/enlace|ya se us/i);
+    expect(json.showAuthCard).toBe(true);
   });
 });

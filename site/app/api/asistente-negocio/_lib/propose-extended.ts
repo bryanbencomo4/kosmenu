@@ -152,7 +152,7 @@ export async function proposeDeleteProduct(
     .select('id,nombre,precio,disponible')
     .eq('comercio_id', shop.comercioId)
     .order('nombre')
-    .limit(cfg.maxProductsSample);
+    .limit(Math.max(cfg.maxProductsSample, 300));
   const match = resolveProductMatch(products || [], productHint);
   if (match.status === 'ambiguous') {
     return {
@@ -884,7 +884,7 @@ export async function proposeProductOptions(
     .from('productos')
     .select('id,nombre,precio,disponible,opciones_menu')
     .eq('comercio_id', shop.comercioId)
-    .limit(cfg.maxProductsSample);
+    .limit(Math.max(cfg.maxProductsSample, 300));
   const match = resolveProductMatch(products || [], userText);
   if (match.status !== 'exact') {
     return {
@@ -991,7 +991,7 @@ export async function proposeUpsellBadge(
     .from('productos')
     .select('id,nombre,precio,disponible')
     .eq('comercio_id', shop.comercioId)
-    .limit(cfg.maxProductsSample);
+    .limit(Math.max(cfg.maxProductsSample, 300));
   const match = resolveProductMatch(products || [], userText);
   if (match.status !== 'exact') {
     return { text: `¿Cuál producto destacamos? Dime el nombre exacto.` };
@@ -1025,10 +1025,11 @@ export async function proposeProductImage(
   shop: BusinessShop,
   productHint: string,
   imageUrl: string,
+  productId?: string,
 ): Promise<BusinessToolResult> {
   if (!canManageCatalog(shop)) return { text: denied('cambiar fotos', shop) };
   if (!imageUrl.startsWith('http')) {
-    return { text: `Primero mándame la foto por el chat 🖼️` };
+    return { text: `Primero elige o toma la foto 🖼️` };
   }
   const cfg = getBusinessAssistantRuntimeConfig();
   const sb = getServiceSupabaseClient();
@@ -1036,17 +1037,33 @@ export async function proposeProductImage(
     .from('productos')
     .select('id,nombre,precio,disponible,imagen_url')
     .eq('comercio_id', shop.comercioId)
-    .limit(cfg.maxProductsSample);
-  const match = resolveProductMatch(products || [], productHint);
+    .limit(Math.max(cfg.maxProductsSample, 300));
+  const byId = productId ? (products || []).find((p) => String(p.id) === productId) : undefined;
+  const match = byId
+    ? ({ status: 'exact', product: byId } as const)
+    : resolveProductMatch(products || [], productHint);
+  const sampleOf = (rows: Array<Record<string, unknown>>) =>
+    rows.slice(0, 5).map((p) => ({
+      id: String(p.id),
+      nombre: String(p.nombre || ''),
+      precio: Number(p.precio) || 0,
+      disponible: p.disponible !== false,
+    }));
   if (match.status === 'ambiguous') {
     return {
-      text: `Varios productos podrían ser 👀\n${match.candidates
+      text: `Me llegó la foto 📷 Varios productos podrían ser:\n${match.candidates
         .map((p) => `• ${p.nombre}`)
-        .join('\n')}\n\n¿Para cuál es la foto?`,
+        .join('\n')}\n\n¿Para cuál es?`,
+      productsSample: sampleOf(match.candidates as unknown as Array<Record<string, unknown>>),
+      pendingImageUrl: imageUrl,
     };
   }
   if (match.status !== 'exact') {
-    return { text: `¿Para qué producto es esta foto? Escribe el nombre exacto.` };
+    return {
+      text: `Me llegó la foto 📷 ¿Para qué producto es? Escríbeme el nombre o elige uno.`,
+      productsSample: sampleOf((products || []) as unknown as Array<Record<string, unknown>>),
+      pendingImageUrl: imageUrl,
+    };
   }
   const proposal = makeProposal(
     userId,

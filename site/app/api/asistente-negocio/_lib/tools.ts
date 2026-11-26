@@ -67,6 +67,10 @@ export type BusinessToolResult = {
   /** Customer names from recent / today orders. */
   customersView?: BusinessCustomersView;
   auditId?: string;
+  /** Product whose photo the merchant is about to send (drives the in-chat photo picker). */
+  awaitPhoto?: { productId: string; productName: string; imageUrl?: string | null };
+  /** Uploaded photo waiting for the merchant to say which product it belongs to. */
+  pendingImageUrl?: string;
 };
 
 function pickProduct(
@@ -84,7 +88,7 @@ function ambiguousProductText(shopName: string, candidates: ProductRow[]): strin
     .slice(0, 6)
     .map((p) => `• ${String(p.nombre || '')}`)
     .join('\n');
-  return `Encontré varios parecidos en *${shopName}* 👀\n\n${list}\n\nEscribe el *nombre exacto* del que quieres cambiar.`;
+  return `Encontré varios parecidos en *${shopName}* 👀\n\n${list}\n\nDime cuál de esos es (basta con una parte del nombre) o tócalo abajo.`;
 }
 
 async function loadProducts(comercioId: string, limit: number) {
@@ -182,7 +186,7 @@ export async function guideChangeImage(
   productHint?: string,
 ): Promise<BusinessToolResult> {
   const cfg = getBusinessAssistantRuntimeConfig();
-  const products = await loadProducts(shop.comercioId, cfg.maxProductsSample);
+  const products = await loadProducts(shop.comercioId, Math.max(cfg.maxProductsSample, 300));
   const { product: match, ambiguous } = pickProduct(products, productHint);
   if (ambiguous.length) {
     return {
@@ -192,13 +196,18 @@ export async function guideChangeImage(
   }
   if (!match) {
     return {
-      text: `¿De cuál producto cambiamos la foto? 🖼️\n\nToca uno abajo o escribe el nombre.`,
+      text: `¿De cuál producto es la foto? 🖼️\n\nEscríbeme el nombre o elige uno aquí abajo.`,
       productsSample: mapProductsSample(products),
     };
   }
   return {
-    text: `Perfecto — *${match.nombre}* 🖼️\n\nPor ahora mándame la foto por aquí cuando esté listo el adjunto en el chat; mientras, dime si quieres *mejorarla con IA* o solo reemplazarla.`,
+    text: `Listo, vamos con *${match.nombre}* 🖼️\n\nElige la foto en la tarjeta de abajo (galería o cámara) y te la dejo lista para confirmar.`,
     productsSample: mapProductsSample([match], 1),
+    awaitPhoto: {
+      productId: String(match.id),
+      productName: String(match.nombre || ''),
+      imageUrl: match.imagen_url ? String(match.imagen_url) : null,
+    },
   };
 }
 
@@ -208,7 +217,7 @@ export async function proposePrice(
   opts: { productHint?: string; newPrice?: number },
 ): Promise<BusinessToolResult> {
   const cfg = getBusinessAssistantRuntimeConfig();
-  const products = await loadProducts(shop.comercioId, cfg.maxProductsSample);
+  const products = await loadProducts(shop.comercioId, Math.max(cfg.maxProductsSample, 300));
   const { product: match, ambiguous } = pickProduct(products, opts.productHint);
   if (ambiguous.length) {
     return {
@@ -258,7 +267,7 @@ export async function proposeAvailability(
   opts: { productHint?: string; available?: boolean },
 ): Promise<BusinessToolResult> {
   const cfg = getBusinessAssistantRuntimeConfig();
-  const products = await loadProducts(shop.comercioId, cfg.maxProductsSample);
+  const products = await loadProducts(shop.comercioId, Math.max(cfg.maxProductsSample, 300));
   const { product: match, ambiguous } = pickProduct(products, opts.productHint);
   if (ambiguous.length) {
     return {
@@ -695,7 +704,7 @@ export async function applyConfirm(params: {
       return {
         text: `¡Hecho! ✅ *${data.nombre}* quedó en *${data.precio}*${
           matchedShop.moneda ? ` ${matchedShop.moneda}` : ''
-        }\n\n(ref ${auditId})`,
+        }`,
         auditId,
       };
     }
@@ -722,8 +731,8 @@ export async function applyConfirm(params: {
       });
       return {
         text: data.disponible
-          ? `¡Listo! ✅ *${data.nombre}* otra vez disponible.\n\n(ref ${auditId})`
-          : `Listo ⏸️ *${data.nombre}* marcado como agotado.\n\n(ref ${auditId})`,
+          ? `¡Listo! ✅ *${data.nombre}* otra vez disponible.`
+          : `Listo ⏸️ *${data.nombre}* marcado como agotado.`,
         auditId,
       };
     }
@@ -748,8 +757,8 @@ export async function applyConfirm(params: {
       });
       return {
         text: data.en_linea
-          ? `¡Abierto! 🟢 *${data.nombre}* ya está en línea.\n\n(ref ${auditId})`
-          : `Cerrado por ahora 🔴 *${data.nombre}* fuera de línea.\n\n(ref ${auditId})`,
+          ? `¡Abierto! 🟢 *${data.nombre}* ya está en línea.`
+          : `Cerrado por ahora 🔴 *${data.nombre}* fuera de línea.`,
         auditId,
       };
     }
@@ -790,7 +799,7 @@ export async function applyConfirm(params: {
           ? payload.data.summary
           : formatFlutterScheduleForChat(horarios).split('\n')[0] || 'horario';
       return {
-        text: `¡Guardado! 🕒 Horario de *${data.nombre}* actualizado (${summary}).\n\n(ref ${auditId})`,
+        text: `¡Guardado! 🕒 Horario de *${data.nombre}* actualizado (${summary}).`,
         auditId,
       };
     }
@@ -811,7 +820,7 @@ export async function applyConfirm(params: {
         data: { ...payload.data, ...(extended.data || {}) },
         ok: true,
       });
-      return { text: `${extended.text}\n\n(ref ${auditId})`, auditId };
+      return { text: `${extended.text}`, auditId };
     }
 
     throw new Error('unsupported_op');

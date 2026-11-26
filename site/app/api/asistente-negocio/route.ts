@@ -242,6 +242,7 @@ async function executeBusinessIntent(params: {
         shop,
         intent.productHint || userText,
         intent.imageUrl || '',
+        intent.productId,
       );
     case 'update_profile':
       return proposeUpdateProfile(userId, shop, {
@@ -308,6 +309,8 @@ const bodySchema = z.object({
   comercioId: z.string().trim().max(64).optional(),
   /** Public URL from /api/asistente-negocio/upload (product-images bucket). */
   imageUrl: z.string().url().max(2000).optional(),
+  /** Product the photo belongs to when the UI already knows it (photo picker card). */
+  imageProductId: z.string().trim().max(64).optional(),
   /** Structured confirm from UI cards (preferred over typing "confirmar"). */
   confirmToken: z.string().trim().min(10).max(4000).optional(),
   confirmAction: z.enum(['apply', 'cancel']).optional(),
@@ -321,7 +324,16 @@ export async function OPTIONS(req: Request) {
   return appCorsPreflight(req, CORS);
 }
 
+/** Internal audit refs mean nothing to a merchant; never show them. */
+function stripInternalRefs(text: string): string {
+  return text.replace(/\s*\(ref [\w-]+\)\.?/gi, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
 function json(req: Request, data: unknown, status = 200) {
+  if (data && typeof data === 'object' && typeof (data as { text?: unknown }).text === 'string') {
+    const d = data as { text: string };
+    d.text = stripInternalRefs(d.text);
+  }
   return withAppCors(req, NextResponse.json(data, { status }), CORS);
 }
 
@@ -340,6 +352,8 @@ function withResult(
     metricsView: result.metricsView ?? null,
     customersView: result.customersView ?? null,
     auditId: result.auditId,
+    awaitPhoto: result.awaitPhoto ?? null,
+    pendingImageUrl: result.pendingImageUrl ?? null,
   };
 }
 
@@ -484,14 +498,22 @@ export async function POST(req: Request) {
     let bootMetrics: Awaited<ReturnType<typeof loadShopHomeMetrics>> = null;
     let chipPhase: 'auth' | 'boot' | 'multi_shop' | 'no_shop' = 'boot';
 
-    if (handoffError) {
-      bootText =
-        handoffError === 'expired'
-          ? 'Este enlace de WhatsApp ya venció ⏰\n\nEntra aquí abajo y seguimos igual 💪'
-          : handoffError === 'consumed'
-            ? 'Ese enlace ya se usó 🙂\n\nEntra aquí abajo y continuamos 💬'
-            : 'No pude leer el enlace de WhatsApp 😅\n\nEntra aquí abajo y arrancamos de cero ✨';
-      chipPhase = authenticated ? 'boot' : 'auth';
+    // An old / already-used WhatsApp link must never feel like an error: the link only carries
+    // context, the real access is the owner's own session. Signed in → straight to the home;
+    // signed out → friendly sign-in, no talk of "links".
+    if (handoffError && !authenticated) {
+      bootText = '¡Hola de nuevo! 👋\n\nEntra con tu cuenta aquí abajo y retomamos justo donde lo dejaste 💬';
+      chipPhase = 'auth';
+    } else if (handoffError && authenticated && selectedShop) {
+      bootMetrics = await loadShopHomeMetrics(selectedShop);
+      bootText = homeGreetingText(selectedShop, bootMetrics);
+      chipPhase = 'boot';
+    } else if (handoffError && authenticated && membership.list.length > 1) {
+      bootText = multiBusinessText(membership.list.map((c) => c.nombre));
+      chipPhase = 'multi_shop';
+    } else if (handoffError) {
+      bootText = authenticated ? noBusinessText() : '¡Hola! 👋 Entra con tu cuenta aquí abajo y arrancamos 💬';
+      chipPhase = authenticated ? 'no_shop' : 'auth';
     } else if (
       authenticated &&
       selectedShop &&
@@ -659,6 +681,7 @@ export async function POST(req: Request) {
       kind: 'set_product_image',
       productHint: lastUser?.text || '',
       imageUrl: body.imageUrl,
+      productId: body.imageProductId || undefined,
     };
   }
 

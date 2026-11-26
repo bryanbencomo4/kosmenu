@@ -32,11 +32,61 @@ export function extractProductHint(raw?: string): string {
  * Safe product resolution — never silently substitutes an unrelated product.
  * Prefer exact / full-name containment; if several match, ask the merchant.
  */
+const STOP = new Set([
+  'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'con', 'para', 'por', 'en', 'que',
+  'quiero', 'ahora', 'esa', 'ese', 'esta', 'este', 'mi', 'tu', 'es', 'son', 'al', 'lo', 'le',
+]);
+
+/** "Agua 1 Lt." / "agua 1L" / "AGUA 1 litro" → ["agua","1l"]. */
+function nameTokens(raw: string): string[] {
+  const t = foldText(raw)
+    .replace(/(\d+)\s*(?:litros?|lts?|lt|l)\b/g, '$1l')
+    .replace(/(\d+)\s*(?:mililitros?|ml)\b/g, '$1ml')
+    .replace(/(\d+)\s*(?:gramos?|grs?|gr|g)\b/g, '$1g')
+    .replace(/[^a-z0-9ñ]+/g, ' ')
+    .trim();
+  return t
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+}
+
+function fuzzyMatch(products: ProductRow[], raw: string): ProductMatchResult | null {
+  const base = nameTokens(raw.replace(NOISE, ' ')).filter((w) => !STOP.has(w));
+  if (!base.length) return null;
+  const attempts = [base, base.filter((w) => !/^\d/.test(w))].filter(
+    (a, i) => a.length > 0 && (i === 0 || a.length !== base.length),
+  );
+  for (const hint of attempts) {
+    const scored: Array<{ p: ProductRow; score: number }> = [];
+    for (const p of products) {
+      const nt = nameTokens(String(p.nombre || ''));
+      if (!nt.length) continue;
+      const ok = hint.every((h) =>
+        nt.some((n) => n === h || (h.length >= 3 && n.startsWith(h)) || (n.length >= 4 && h.startsWith(n))),
+      );
+      if (!ok) continue;
+      scored.push({ p, score: 50 + Math.round((50 * hint.length) / nt.length) });
+    }
+    if (!scored.length) continue;
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored[0]!.score;
+    const group = scored.filter((s) => s.score >= top - 1).map((s) => s.p);
+    if (group.length === 1) return { status: 'exact', product: group[0]! };
+    return { status: 'ambiguous', candidates: group.slice(0, 6) };
+  }
+  return null;
+}
+
 export function resolveProductMatch(
   products: ProductRow[],
   hint?: string,
 ): ProductMatchResult {
   if (!products.length) return { status: 'none' };
+  if (hint) {
+    const fuzzy = fuzzyMatch(products, hint);
+    if (fuzzy) return fuzzy;
+  }
   const cleaned = extractProductHint(hint);
   if (!cleaned || cleaned.length < 2) return { status: 'none' };
 

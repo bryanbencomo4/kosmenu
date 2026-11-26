@@ -25,6 +25,9 @@ export type DiscoveryRestaurantCard = {
   currencies: string[];
   paymentChannels: string[];
   acceptsVesBcv: boolean;
+  /** Only when requested (`includeDishes`): the product that matched the query, and menu names. */
+  matchedDish?: string | null;
+  productNames?: string[];
   showcaseDishes?: Array<{
     name: string;
     imageUrl: string;
@@ -120,7 +123,7 @@ function zonaLabel(entry: ClientDirectoryBusiness): string | null {
 
 export function toDiscoveryRestaurantCard(
   entry: ClientDirectoryBusiness,
-  options?: { includeChatLink?: boolean },
+  options?: { includeChatLink?: boolean; includeDishes?: boolean },
 ): DiscoveryRestaurantCard {
   const card: DiscoveryRestaurantCard = {
     id: entry.id,
@@ -142,6 +145,11 @@ export function toDiscoveryRestaurantCard(
     acceptsVesBcv: entry.acceptsVesBcv === true,
     showcaseDishes: (entry.showcaseDishes || []).slice(0, 4),
   };
+  if (options?.includeDishes) {
+    // Verified dish evidence for callers that must not claim "they sell X" without proof.
+    card.matchedDish = entry.matchedDish ?? null;
+    card.productNames = (entry.productNames || []).slice(0, 60);
+  }
   if (options?.includeChatLink !== false) {
     const chatUrl = buildServerDiscoveryChatUrl(entry.slug, entry.id);
     if (chatUrl) card.chatUrl = chatUrl;
@@ -210,7 +218,9 @@ export async function executeDiscoveryTool(
       limit: typeof args.limit === 'number' ? args.limit : undefined,
       offset: typeof args.offset === 'number' ? args.offset : undefined,
     });
-    const restaurants = payload.results.map((r) => toDiscoveryRestaurantCard(r));
+    const restaurants = payload.results.map((r) =>
+      toDiscoveryRestaurantCard(r, { includeDishes: args.includeDishes === true }),
+    );
     return {
       ok: true,
       tool: name,
@@ -264,7 +274,9 @@ export async function executeDiscoveryTool(
       120,
     );
     const page = filtered.slice(0, limit);
-    const restaurants = page.map((r) => toDiscoveryRestaurantCard(r));
+    const restaurants = page.map((r) =>
+      toDiscoveryRestaurantCard(r, { includeDishes: args.includeDishes === true }),
+    );
     return {
       ok: true,
       tool: name,

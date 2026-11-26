@@ -35,6 +35,40 @@ import type {
 } from '../types';
 import { ADVISOR_OFFER, matchFeature, pricingNote } from './kb';
 import {
+  MAX_SANE_DELIVERY_KM,
+  describeDelivery,
+  loadShopDeliveryFromDb,
+  quoteShopDelivery,
+  type LoadShopDelivery,
+} from './delivery';
+import {
+  computeTotals,
+  describeProductOptions,
+  describeTotal,
+  isMenuAsk,
+  loadMenuSnapshotFromDb,
+  matchCategories,
+  money,
+  parseMenuAsk,
+  planBudget,
+  productLine,
+  productMentions,
+  selectProducts,
+  type LoadMenu,
+  type MenuProduct,
+  type MenuSnapshot,
+} from './menu';
+import { extractPlaceText, isBareCity } from './place';
+import { haversineKm } from '../../../../_lib/delivery-config';
+import { describeImageTurn, parseImageTurn, type ImageTurn } from '../image-turn';
+import { extractCoords, geocodeAddress, looksLikeAddress } from '../../../_lib/geocode';
+import {
+  CONSUMER_FLAVOURED,
+  detectMerchantVoice,
+  inferMerchantDomain,
+  isBareOwnerStatement,
+} from './stance';
+import {
   classifyCentralTopic,
   extractCities,
   extractRestaurantName,
@@ -55,6 +89,11 @@ export type BrainResult = {
   topic: CentralTopic;
   delegate?: { specialist: WaMasterSpecialist; intent: WaMasterIntent };
   escalateHuman?: boolean;
+  /**
+   * Figures (prices, delivery, totals) were computed from the real menu/tariff: the natural-voice
+   * composer must not reword them (it could drop a line or blur a coverage verdict).
+   */
+  skipCompose?: boolean;
 };
 
 export type BrainParams = {
@@ -67,6 +106,10 @@ export type BrainParams = {
   handoffStore?: WaHandoffStore;
   discoveryCtx: WaMasterDiscoveryCtx;
   executeDiscovery: WaMasterDiscoveryExecute;
+  /** Delivery facts of one restaurant (real tariff config). Injectable for tests. */
+  loadShopDelivery?: LoadShopDelivery;
+  /** The restaurant's public menu (same source as /v/{slug}). Injectable for tests. */
+  loadPublicMenu?: LoadMenu;
 };
 
 type Ctx = BrainParams & {
@@ -107,8 +150,58 @@ function toRefs(cards: WaMasterDiscoveryCard[], config: WaMasterConfig): WaMaste
 function bulletList(cards: WaMasterDiscoveryCard[], config: WaMasterConfig): string {
   return cards
     .slice(0, 5)
-    .map((c) => `• *${c.nombre}* (${openWord(c)})\n  ${absMenu(c, config)}`)
+    .map(
+      (c) =>
+        `• *${c.nombre}* (${openWord(c)}${
+          typeof c.distanceKm === 'number' ? ` · a ${c.distanceKm.toFixed(1).replace('.', ',')} km` : ''
+        })${c.matchedDish ? `\n  🍽 ${c.matchedDish}` : ''}\n  ${absMenu(c, config)}`,
+    )
     .join('\n');
+}
+
+/** Singular-ish stem so "tequeños"/"tequeno" and "empanadas"/"empanada" compare equal. */
+function stem(word: string): string {
+  const w = fold(word);
+  if (w.length > 4 && w.endsWith('es')) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s')) return w.slice(0, -1);
+  return w;
+}
+
+function editDistanceAtMost1(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+const DISH_TOKEN_STOP = new Set(['de', 'del', 'con', 'sin', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'al', 'en', 'para']);
+
+/** The menu item of this restaurant that actually matches the dish asked for (or null). */
+export function dishEvidence(card: WaMasterDiscoveryCard, query: string): string | null {
+  const qTokens = fold(query)
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !DISH_TOKEN_STOP.has(w))
+    .map(stem);
+  if (!qTokens.length) return null;
+  const hasToken = (hay: string[], q: string) =>
+    hay.some(
+      (h) =>
+        h === q ||
+        (q.length >= 4 && h.startsWith(q)) ||
+        (h.length >= 4 && q.startsWith(h)) ||
+        (q.length >= 5 && editDistanceAtMost1(h, q)),
+    );
+  const names = [card.matchedDish, ...(card.productNames || [])].filter((n): n is string => Boolean(n));
+  for (const name of names) {
+    const hay = fold(name).split(/\s+/).map(stem);
+    if (qTokens.every((q) => hasToken(hay, q))) return name;
+  }
+  // A restaurant literally named after the dish ("Tequeñería Don Pepe").
+  const nameHay = fold(card.nombre).split(/\s+/).map(stem);
+  if (qTokens.every((q) => hasToken(nameHay, q))) return card.nombre;
+  return null;
 }
 
 async function dirSearch(
@@ -211,6 +304,12 @@ const DOMAIN_COPY: Record<MerchantDomain, DomainCopy> = {
     panel: 'entra a app.elmenuxfa.com y ve a Configuración → Tasas y cobros',
     pendingOp: 'admin_settings',
     intent: 'admin.settings',
+  },
+  photo: {
+    need: 'cambiar la foto de un producto',
+    panel: 'entra a app.elmenuxfa.com, abre el producto en tu menú y toca su foto para cambiarla',
+    pendingOp: 'change_product_image',
+    intent: 'admin.edit_product',
   },
   logo: {
     need: 'cambiar imagen o descripción del negocio',
@@ -429,7 +528,7 @@ async function restaurantFlow(c: Ctx, topic: CentralTopic, name: string | null):
   const card = found.card;
   const url = absMenu(card, c.config);
   const refs = toRefs([card], c.config);
-  const patch = { lastRestaurants: refs, brainPending: null };
+  const patch = { lastRestaurants: refs, brainPending: null, activeRestaurant: refs[0] };
 
   if (topic === 'hours_of') {
     return reply(c, topic, [P(`*${card.nombre}*: ${openWord(card)}${card.openLabel ? ` (${card.openLabel})` : ''}.`, `Menú y datos publicados: ${url}`)], {
@@ -505,19 +604,8 @@ async function restaurantFlow(c: Ctx, topic: CentralTopic, name: string | null):
       { memoryPatch: patch },
     );
   }
-  // menu_of
-  return reply(
-    c,
-    topic,
-    [
-      P(
-        `Este es el menú de *${card.nombre}*: ${url}`,
-        card.chatUrl ? `Y si quieres que te oriente con sus platos, tiene asistente: ${card.chatUrl}` : null,
-        'Ahí eliges tus productos y completas el pedido (delivery o retiro, según lo que tenga activo).',
-      ),
-    ],
-    { memoryPatch: patch },
-  );
+  // menu_of: resolve first (what it sells, whether it reaches the person), the link after.
+  return selectRestaurant(c, refs[0]);
 }
 
 async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'open_now' | 'delivery_find', opts: {
@@ -526,17 +614,50 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
   query?: string | null;
   label?: string | null;
   openOnly?: boolean;
+  /** Where the person is (shared location or geocoded address): sort by distance. */
+  geo?: { lat: number; lng: number; label?: string | null } | null;
 }): Promise<BrainResult> {
   const { zone } = opts;
+  // The place they described ("Los Palos Grandes, Caracas") is remembered to check coverage later,
+  // and (when it is more than a bare city) used to sort by real distance.
+  const cityList = c.tr.cities.length ? c.tr.cities : zone ? [zone] : [];
+  const place = zone && !opts.geo ? extractPlaceText(c.text, cityList) : null;
+  let geo = opts.geo ?? null;
+  let placeGeo: Dest | null = null;
+  if (!geo && place && !isBareCity(place, cityList)) {
+    const p = await geocodeAddress(place);
+    if (p) {
+      geo = { lat: p.lat, lng: p.lng, label: place };
+      placeGeo = { lat: p.lat, lng: p.lng, label: place, approx: 'place' };
+    }
+  }
   const args: Record<string, unknown> = { limit: 5 };
   if (zone) args.region = zone;
+  if (geo) {
+    args.lat = geo.lat;
+    args.lng = geo.lng;
+  }
   if (opts.category) args.category = opts.category;
   if (opts.query) args.query = opts.query;
+  // A dish search must be backed by the menu: fetch more candidates + their product names,
+  // then keep only restaurants that really list that dish (the directory ranks fuzzily).
+  const dishQuery = !opts.category && opts.query ? opts.query : null;
+  if (dishQuery) {
+    args.limit = 15;
+    args.includeDishes = true;
+  }
+  const verify = (list: WaMasterDiscoveryCard[]) =>
+    dishQuery
+      ? list
+          .map((card) => ({ ...card, matchedDish: dishEvidence(card, dishQuery) }))
+          .filter((card) => card.matchedDish)
+          .slice(0, 5)
+      : list;
   const tool = opts.openOnly ? 'filter_restaurants' : 'search_restaurants';
   if (opts.openOnly) args.openOnly = true;
   const first = await dirSearch(c, tool, args);
   const { ok } = first;
-  let cards = first.cards;
+  let cards = verify(first.cards);
   let zoneMiss = false;
   if (!ok) {
     return reply(c, topic, [
@@ -548,13 +669,14 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
     const { region: _drop, ...rest } = args;
     void _drop;
     const wide = await dirSearch(c, tool, rest);
-    if (wide.ok && wide.cards.length) {
-      cards = wide.cards;
+    const verified = verify(wide.cards);
+    if (wide.ok && verified.length) {
+      cards = verified;
       zoneMiss = true;
     }
   }
   const what = opts.label ? `*${opts.label}*` : 'lo que buscas';
-  const where = zone ? ` en *${zone}*` : '';
+  const where = zone ? ` en *${zone}*` : geo ? ' cerca de ti' : '';
   const orderNote = /\b(pedir|pido|pedido|ordenar)\b/.test(c.t)
     ? 'Los pedidos se hacen desde el menú de cada restaurante: ahí eliges y confirmas (delivery o retiro). Yo por aquí no tomo pedidos.'
     : null;
@@ -576,6 +698,19 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
       ]);
     }
     const explore = (c.config.consumerAssistantUrl || 'https://elmenuxfa.com/asistente').trim();
+    if (dishQuery) {
+      return reply(
+        c,
+        topic,
+        [
+          P(
+            `Busqué ${what}${where} en los menús publicados en ${BRAND} y no veo a ningún restaurante que lo tenga cargado ahora mismo 😕`,
+            'Puede que alguno lo prepare y aún no lo haya subido. ¿Quieres que lo busque en otra ciudad o te sugiero algo parecido?',
+          ),
+        ],
+        { memoryPatch: { zone, lastRestaurants: [] } },
+      );
+    }
     return reply(
       c,
       topic,
@@ -593,15 +728,24 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
   }
 
   const refs = toRefs(cards, c.config);
-  const intro = zoneMiss
+  const nearestKm = cards
+    .map((r) => r.distanceKm)
+    .filter((d): d is number => typeof d === 'number')
+    .sort((a, b) => a - b)[0];
+  const farAway = zoneMiss && nearestKm != null && nearestKm > MAX_SANE_DELIVERY_KM;
+  const intro = farAway
+    ? `No tengo ${what} confirmado en *${place || zone}*. Lo más cercano que veo en el directorio de ${BRAND} queda a unos ${Math.round(nearestKm!)} km, así que lo más probable es que no te llegue; te lo dejo por si te sirve:`
+    : zoneMiss
     ? `No tengo confirmado ${what} específicamente en *${zone}*, pero esto es lo que hay en el directorio de ${BRAND} (revisa en cada menú si llegan a tu zona):`
     : opts.openOnly
     ? `Estos son los que veo abiertos${where}:`
     : opts.label
       ? `Encontré estas opciones de ${what}${where}:`
       : `Estos son algunos restaurantes${where}:`;
-  const followZone = !zone && cards.length >= 5;
-  const follow = followZone
+  const followZone = !zone && !geo && cards.length >= 5;
+  const follow = geo
+    ? 'Dime cuál te interesa y te paso el menú, o dime qué se te antoja y lo afino.'
+    : followZone
     ? '¿En qué ciudad o zona estás? Así te filtro los más cercanos.'
     : opts.label || opts.openOnly
       ? 'Dime cuál te interesa y te paso más detalle, o dime otra comida y lo afino.'
@@ -614,6 +758,14 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
       memoryPatch: {
         zone,
         lastRestaurants: refs,
+        // A new list is a new context: the previous restaurant / product list no longer applies.
+        activeRestaurant: refs.length === 1 ? refs[0] : null,
+        lastMenuView: null,
+        foodHint: opts.category ?? opts.query ?? null,
+        ...(zone ? { placeText: place ?? zone } : {}),
+        ...(geo
+          ? { geo: { lat: geo.lat, lng: geo.lng, label: geo.label ?? null, atMs: c.nowMs, ...(placeGeo ? { approx: 'place' as const } : {}) } }
+          : {}),
         brainPending: followZone
           ? {
               kind: 'zone',
@@ -627,6 +779,17 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
       },
     },
   );
+}
+
+/** True when an earlier reply in this conversation already said "veo que X está registrado". */
+function alreadyGreetedShop(c: Ctx): boolean {
+  return (c.memory.turns || []).some((t) => t.role === 'assistant' && /est[aá] registrado con nosotros/i.test(t.text));
+}
+
+/** Deterministic rotation so repeated turns never read identical (the LLM composer varies further). */
+function pickVariant(c: Ctx, options: string[]): string {
+  const n = (c.memory.turns || []).length;
+  return options[n % options.length];
 }
 
 async function merchantFlow(c: Ctx, domain: MerchantDomain, kind: 'ops' | 'report' | 'account' | 'diag'): Promise<BrainResult> {
@@ -667,7 +830,13 @@ async function merchantFlow(c: Ctx, domain: MerchantDomain, kind: 'ops' | 'repor
   const intro = shop
     ? c.shops.length > 1
       ? `Vale, veo ${c.shops.length} negocios ligados a este número; sigo con *${shop.publicName}* (si es otro, dímelo).`
-      : `Vale, veo que *${shop.publicName}* está registrado con nosotros.`
+      : alreadyGreetedShop(c)
+        ? pickVariant(c, [
+            `Claro, seguimos con *${shop.publicName}*.`,
+            `Listo, con *${shop.publicName}*.`,
+            `Perfecto, vamos con eso para *${shop.publicName}*.`,
+          ])
+        : `Vale, veo que *${shop.publicName}* está registrado con nosotros.`
     : 'Por este número no veo un negocio registrado, así que por seguridad no puedo tocar nada sin verificarte.';
 
   if (kind === 'report') {
@@ -747,14 +916,18 @@ async function merchantFlow(c: Ctx, domain: MerchantDomain, kind: 'ops' | 'repor
   }
 
   // ops
-  const withShop = P(
-    intro,
-    `Para *${copy.need}*, ${copy.panel}.`,
-    url
-      ? `Y si prefieres que lo hagamos juntos, el asistente del negocio ya tiene tu solicitud: inicia sesión aquí y lo resolvemos paso a paso:\n${url}`
-      : null,
-    shop ? null : 'Si aún no tienes negocio registrado, dime y te ayudo a empezar.',
-  );
+  const withShop = url
+    ? P(
+        intro,
+        `Para *${copy.need}* lo más fácil es hacerlo juntos en el asistente del negocio: ya tiene tu solicitud, inicia sesión aquí y lo resolvemos paso a paso:\n${url}`,
+        `Si prefieres hacerlo tú, ${copy.panel}.`,
+        shop ? null : 'Si aún no tienes negocio registrado, dime y te ayudo a empezar.',
+      )
+    : P(
+        intro,
+        `Para *${copy.need}*, ${copy.panel}.`,
+        shop ? null : 'Si aún no tienes negocio registrado, dime y te ayudo a empezar.',
+      );
   return reply(c, topic, [withShop], { memoryPatch: memPatch });
 }
 
@@ -964,6 +1137,887 @@ function registerFlow(c: Ctx): BrainResult {
   );
 }
 
+const GEO_TTL_MS = 6 * 60 * 60 * 1000;
+const NEAR_ME =
+  /\b(cerca de mi|cerca de aqui|cerca de donde|cerca de casa|cerca de mi casa|por aqui cerca|cercan[oa]s?|mas cerca|mi zona|por mi zona|en mi zona|a mi alrededor|alrededor mio|por donde vivo|donde estoy|mi sector|por mi sector|cerquita)\b/;
+
+/** "Valencia" alone is a city answer for the legacy zone filter, not an address to geocode. */
+function CITY_ONLY(t: string, cities: string[]): boolean {
+  return cities.length > 0 && t.split(/\s+/).length <= 3 && !looksLikeAddress(t);
+}
+
+type Dest = { lat: number; lng: number; label?: string | null; approx?: 'city' | 'place' };
+
+function recentGeo(c: Ctx): Dest | null {
+  const g = c.memory.summary.geo;
+  return g && c.nowMs - g.atMs <= GEO_TTL_MS ? g : null;
+}
+
+/**
+ * Where the person is, for delivery coverage — most precise first: an address typed now, a
+ * location shared recently, then the place they described earlier ("Los Palos Grandes, Caracas").
+ * A place described in words is approximate and flagged so a fee is never presented as exact.
+ */
+async function resolveDest(c: Ctx): Promise<{ dest: Dest | null; fresh: boolean }> {
+  if (looksLikeAddress(c.text)) {
+    const p = await geocodeAddress(c.text);
+    if (p) return { dest: p, fresh: true };
+  }
+  const g = recentGeo(c);
+  if (g) return { dest: g, fresh: false };
+  const place = c.memory.summary.placeText;
+  if (place) {
+    const p = await geocodeAddress(place);
+    if (p) {
+      const approx: 'city' | 'place' = isBareCity(place, extractCities(fold(place))) ? 'city' : 'place';
+      return { dest: { lat: p.lat, lng: p.lng, label: place, approx }, fresh: true };
+    }
+  }
+  return { dest: null, fresh: false };
+}
+
+function askLocation(
+  c: Ctx,
+  topic: 'search_food' | 'browse_directory' | 'open_now' | 'delivery_find',
+  extra: Partial<WaMasterBrainPending> = {},
+  label?: string | null,
+): BrainResult {
+  return reply(
+    c,
+    topic,
+    [
+      P(
+        label
+          ? `Claro 📍 Para decirte dónde conseguir *${label}* cerca de ti, primero necesito saber dónde estás.`
+          : 'Claro 📍 Para decirte los más cercanos necesito saber dónde estás.',
+        'Compárteme tu *ubicación actual* (toca el clip 📎 → *Ubicación* → *Enviar tu ubicación actual*; la ubicación en tiempo real también me sirve) o escríbeme tu dirección, sector o un punto de referencia.',
+      ),
+    ],
+    { memoryPatch: { brainPending: { kind: 'zone', near: true, topic, atMs: c.nowMs, ...extra } } },
+  );
+}
+
+/** Restaurants sorted by distance from a point the person shared or typed. */
+async function nearbyFlow(
+  c: Ctx,
+  point: { lat: number; lng: number; label?: string | null },
+  pend: WaMasterBrainPending | null,
+): Promise<BrainResult> {
+  const topic = (['search_food', 'browse_directory', 'open_now', 'delivery_find'] as const).includes(
+    pend?.topic as never,
+  )
+    ? (pend!.topic as 'search_food' | 'browse_directory' | 'open_now' | 'delivery_find')
+    : 'browse_directory';
+  const out = await foodFlow(c, topic, {
+    zone: null,
+    category: pend?.category,
+    query: pend?.query,
+    label: pend?.query || pend?.category || null,
+    openOnly: pend?.openOnly,
+    geo: point,
+  });
+  const base = point.label ? `Listo, te ubiqué cerca de *${point.label}* 📍` : 'Listo, ya tengo tu ubicación 📍';
+  if (out.replies[0]) out.replies = [P(base, out.replies[0]), ...out.replies.slice(1)];
+  out.memoryPatch = {
+    ...out.memoryPatch,
+    geo: { lat: point.lat, lng: point.lng, label: point.label ?? null, atMs: c.nowMs },
+  };
+  return out;
+}
+
+/**
+ * Location first: a food / delivery / "open now" search with no city in the message only
+ * lists places once we know where the person is (recent share, address in the message),
+ * otherwise we ask BEFORE showing anything that may be far away.
+ */
+async function locationGate(
+  c: Ctx,
+  topic: 'search_food' | 'open_now' | 'delivery_find',
+  extra: Partial<WaMasterBrainPending>,
+  label: string | null,
+): Promise<BrainResult> {
+  let geo = recentGeo(c);
+  if (!geo && looksLikeAddress(c.text)) geo = await geocodeAddress(c.text);
+  if (!geo) return askLocation(c, topic, extra, label);
+  return nearbyFlow(c, geo, { kind: 'zone', near: true, topic, atMs: c.nowMs, ...extra });
+}
+
+/** The speaker declared they are the owner: switch role cleanly and offer next steps. */
+async function ownerWelcome(c: Ctx): Promise<BrainResult> {
+  const shop = pickShop(c);
+  const url = await businessHandoff(c, { intent: 'admin.settings', pendingOp: 'admin_help', shop });
+  return reply(
+    c,
+    'merchant_ops',
+    [
+      P(
+        shop
+          ? `Perfecto, seguimos con tu negocio *${shop.publicName}* 👍`
+          : 'Perfecto, hablemos de tu negocio 👍 Por este número no veo un negocio registrado, pero te ayudo igual.',
+        '¿Qué quieres hacer: precios, productos, agotados, horario, tasa, pedidos o tus enlaces? Cuéntame y lo resolvemos.',
+        url
+          ? `Si prefieres hacerlo directo en el chat de tu negocio, aquí lo tienes (ya sabe lo que hablamos):\n${url}`
+          : null,
+      ),
+    ],
+    {
+      memoryPatch: {
+        ...(shop ? { selectedComercioId: shop.comercioId } : {}),
+        activeService: 'admin',
+        lastRestaurants: [],
+        zone: null,
+        brainPending: url ? { kind: 'offer', topic: 'merchant_ops', url, atMs: c.nowMs } : null,
+      },
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Photos / payment receipts
+// ---------------------------------------------------------------------------
+
+const OWNER_PHOTO_WORDS = /\b(producto|mi menu|mi negocio|mi restaurante|cambiar|cambia|actualiz|subir|sube|poner|pon|foto del|imagen del|logo)\b/;
+
+/**
+ * An inbound photo / PDF, already described by the vision model. Never pretends to verify a
+ * payment; routes receipts to the restaurant and food photos to the real directory.
+ */
+async function imageFlow(c: Ctx, img: ImageTurn, params: BrainParams): Promise<BrainResult> {
+  const readable = describeImageTurn(img);
+  const cc: Ctx = { ...c, text: readable, t: fold(img.pie || '') };
+  const owner = c.shops.length > 0;
+  const last = c.memory.summary.lastRestaurants || [];
+  const captionT = fold(img.pie || '');
+  const rerun = (text: string) => runCentralBrainInner({ ...params, text });
+  const prefixFirst = (out: BrainResult | null, intro: string): BrainResult | null => {
+    if (out?.replies[0]) out.replies = [P(intro, out.replies[0]), ...out.replies.slice(1)];
+    return out;
+  };
+
+  if (img.tipo === 'comprobante') {
+    const bits = [
+      img.monto && `por *${img.monto}*`,
+      img.banco && `de *${img.banco}*`,
+      img.referencia && `ref. ${img.referencia}`,
+      img.fecha && `del ${img.fecha}`,
+    ].filter(Boolean);
+    const ack = bits.length
+      ? `Recibí tu comprobante ${bits.join(', ')} 🧾`
+      : 'Recibí tu imagen 🧾, pero no logro leer bien los datos del pago (monto, banco o referencia).';
+    const honest =
+      'Te aclaro algo: yo no recibo ni verifico pagos desde este chat; el comprobante lo confirma directamente el restaurante.';
+    if (last.length === 1) {
+      const r = last[0];
+      return reply(cc, 'order_howto', [
+        P(
+          ack,
+          honest,
+          `Si es del pedido en *${r.nombre}*, mándaselo por su chat para que lo validen: ${r.chatUrl || r.menuUrl}`,
+          bits.length ? null : 'Si puedes, reenvíalo con mejor luz y sin recortes para que se lea bien.',
+        ),
+      ]);
+    }
+    if (owner && !last.length) {
+      const shop = pickShop(cc);
+      const url = await businessHandoff(cc, { intent: 'admin.settings', pendingOp: 'order_status', shop });
+      return reply(
+        cc,
+        'merchant_ops',
+        [
+          P(
+            ack,
+            'Si eres el dueño y quieres revisar o confirmar el pago de un pedido, eso lo haces con la sesión de tu negocio (yo desde aquí no apruebo pagos).',
+            url
+              ? `Entra por aquí y dile al asistente qué pedido es; ya sabe lo que hablamos:\n${url}`
+              : 'Entra a app.elmenuxfa.com → Pedidos para verlo.',
+          ),
+        ],
+        { memoryPatch: { brainPending: url ? { kind: 'offer', topic: 'merchant_ops', url, atMs: c.nowMs } : null } },
+      );
+    }
+    return reply(
+      cc,
+      'order_howto',
+      [
+        P(
+          ack,
+          honest,
+          last.length > 1
+            ? `¿Para cuál restaurante es? Estuvimos viendo ${last.map((r) => r.nombre).slice(0, 4).join(', ')}.`
+            : '¿Para qué restaurante es el pago? Dime el nombre y te paso su chat para que se lo envíes.',
+        ),
+      ],
+      { memoryPatch: { brainPending: { kind: 'name', topic: 'restaurant_assistant', atMs: c.nowMs } } },
+    );
+  }
+
+  if (img.tipo === 'plato') {
+    if (owner && (merchantish(captionT) || OWNER_PHOTO_WORDS.test(captionT))) {
+      const out = await merchantFlow(cc, 'photo', 'ops');
+      out.memoryPatch = { ...out.memoryPatch, lastRestaurants: [], zone: null };
+      return out;
+    }
+    if (img.busqueda) {
+      const out = await rerun(`donde venden ${img.busqueda}`);
+      const hit = prefixFirst(out, `Por tu foto parece *${img.busqueda}* 😋`);
+      if (hit) {
+        if (owner && hit.replies[0]) {
+          hit.replies = [P(hit.replies[0], 'Y si la foto es para un producto de tu negocio, dímelo y te paso al asistente del negocio.')];
+        }
+        return hit;
+      }
+    }
+    return reply(cc, 'search_food', [
+      P(
+        `Qué rico se ve 😋${img.resumen ? ` (${img.resumen.toLowerCase().replace(/\.$/, '')})` : ''}`,
+        '¿Quieres que te diga dónde conseguir algo así? Cuéntame qué plato es y desde dónde lo pides.',
+      ),
+    ]);
+  }
+
+  if (owner && (img.tipo === 'menu' || img.tipo === 'logo')) {
+    const shop = pickShop(cc);
+    const url = await businessHandoff(cc, { intent: 'admin.edit_product', pendingOp: 'edit_products', shop });
+    return reply(
+      cc,
+      'merchant_ops',
+      [
+        P(
+          img.tipo === 'menu'
+            ? 'Veo la foto de un menú 📋 Si quieres cargarlo en tu negocio, el asistente del negocio lo lee y te ayuda a armar los productos.'
+            : 'Veo un logo / imagen de marca 🎨 Para ponerlo en tu negocio, lo haces desde el asistente del negocio.',
+          url ? `Entra por aquí y envíala allí; ya tiene el contexto:\n${url}` : 'Entra a app.elmenuxfa.com y súbela desde tu panel.',
+        ),
+      ],
+      { memoryPatch: { brainPending: url ? { kind: 'offer', topic: 'merchant_ops', url, atMs: c.nowMs } : null } },
+    );
+  }
+
+  // Anything else: what was typed with the photo drives the answer; otherwise describe and ask.
+  if (img.pie) {
+    const out = await rerun(img.pie);
+    if (out) return out;
+  }
+  const seen = img.resumen ? `Veo ${img.resumen.charAt(0).toLowerCase()}${img.resumen.slice(1).replace(/\.$/, '')}.` : 'Recibí tu imagen.';
+  if (img.tipo === 'menu') {
+    return reply(cc, 'search_food', [
+      P(
+        'Veo la foto de un menú 📋 Desde una foto no armo pedidos.',
+        'Si quieres, dime qué plato te interesa y te digo dónde conseguirlo, o dime el nombre del restaurante y te paso su menú digital.',
+      ),
+    ]);
+  }
+  return reply(cc, 'unknown', [
+    P(`${seen} 📷`, '¿Qué necesitas con ella? Puedo ayudarte a buscar un plato o restaurante, o resolver algo de tu negocio si lo tienes registrado.'),
+  ]);
+}
+
+function merchantish(t: string): boolean {
+  return /\b(mi (negocio|menu|restaurante|producto|local)|producto|cambiar|actualiz|subir|sube)\b/.test(t);
+}
+
+// ---------------------------------------------------------------------------
+// "¿Hacen delivery hasta mi casa y cuánto cobran?"
+// ---------------------------------------------------------------------------
+
+const DELIVERY_ASK =
+  /\b(delivery|domicilio|a domicilio|envio|envios|reparto|repartidor|despacho|despachan|llevan|llegan|llega|mandan|traen|entregan|envian)\b/;
+const DELIVERY_SPECIFIC =
+  /(cuanto (cobra|cobran|cuesta|sale|es|me cobra|seria|me cobrarian)|cobran|cobra\b|tarifa|costo|precio|hacen|hace\b|tienen|tiene\b|llevan|llegan|llega\b|mandan|traen|entregan|envian|hasta (mi|donde|aqui|casa)|a mi (casa|zona|ubicacion|sector)|donde (estoy|me encuentro|vivo))/;
+const DELIVERY_PRICE_ISH = /\b(cuanto|cobr\w*|tarifa|costo|precio|hasta (mi|donde|aqui|casa)|a mi (casa|zona|ubicacion))\b/;
+
+export function isDeliveryQuestion(t: string): boolean {
+  return DELIVERY_ASK.test(t) && DELIVERY_SPECIFIC.test(t);
+}
+
+const LOCATION_HOWTO =
+  'compárteme tu *ubicación actual* (toca el clip 📎 → *Ubicación* → *Enviar tu ubicación actual*) o escríbeme tu dirección o sector';
+
+/** The same link twice in a conversation reads like a bot: send it once, then just answer. */
+function linkAlreadySent(c: Ctx, url: string): boolean {
+  return (c.memory.turns || []).some((t) => t.role === 'assistant' && t.text.includes(url));
+}
+
+const GENERIC_NAME_WORDS = new Set([
+  'restaurante', 'restaurant', 'hamburgueseria', 'hamburguesas', 'hamburguesa', 'pizzeria', 'pizza', 'pizzas',
+  'arepera', 'pollos', 'pollo', 'cafe', 'parrilla', 'comida', 'comidas', 'rapida', 'casa', 'tequeneria',
+  'pasteleria', 'panaderia', 'heladeria', 'sushi', 'bar', 'grill', 'del', 'los', 'las', 'qa',
+]);
+
+/** The person named this restaurant: whole name, or all of its distinctive words ("bladi jaiper"). */
+function mentionsRestaurant(t: string, nombre: string): boolean {
+  const full = fold(nombre);
+  if (!full) return false;
+  if (t.includes(full)) return true;
+  const distinctive = full.split(/[^a-z0-9ñ]+/).filter((w) => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
+  if (!distinctive.length) return false;
+  const hay = t.split(/[^a-z0-9ñ]+/).map(stem);
+  return distinctive.every((w) => hay.includes(stem(w)));
+}
+
+function activeRef(c: Ctx): WaMasterRestaurantRef | null {
+  const a = c.memory.summary.activeRestaurant;
+  return a?.id ? a : null;
+}
+
+/** Keeps the list the person is choosing from; only replaces it when the ref is not in it. */
+function keepList(c: Ctx, ref: WaMasterRestaurantRef): WaMasterRestaurantRef[] {
+  const last = c.memory.summary.lastRestaurants || [];
+  return last.some((r) => r.id === ref.id) ? last : [ref];
+}
+
+function geoPatchOf(c: Ctx, dest: Dest | null, fresh: boolean): Partial<WaMasterSummary> {
+  return dest && fresh
+    ? { geo: { lat: dest.lat, lng: dest.lng, label: dest.label ?? null, atMs: c.nowMs, ...(dest.approx ? { approx: dest.approx } : {}) } }
+    : {};
+}
+
+async function deliveryFlow(
+  c: Ctx,
+  ref: WaMasterRestaurantRef,
+  dest: Dest | null,
+  opts: { fresh: boolean; ageNote?: boolean; pendingTopic?: string },
+): Promise<BrainResult> {
+  const load = c.loadShopDelivery ?? loadShopDeliveryFromDb;
+  let info = null as Awaited<ReturnType<LoadShopDelivery>>;
+  try {
+    info = await load(ref.id);
+  } catch {
+    info = null;
+  }
+  c.tools.push('delivery_quote');
+  const base = { lastRestaurants: keepList(c, ref), activeRestaurant: ref };
+  if (!info) {
+    return reply(
+      c,
+      'delivery_find',
+      [
+        P(
+          `Ahora mismo no logro leer la configuración de delivery de *${ref.nombre}* 😕`,
+          `Míralo directo en su menú (ahí ves si llega a tu zona y cuánto cuesta): ${ref.menuUrl}`,
+        ),
+      ],
+      { skipCompose: true, memoryPatch: { ...base, brainPending: null } },
+    );
+  }
+  // A whole city is too coarse to quote a fee, but it is enough to say "that is far away".
+  const km = dest && info.origin ? haversineKm(info.origin, dest) : null;
+  const tooCoarse = dest?.approx === 'city' && !(km != null && km > MAX_SANE_DELIVERY_KM);
+  const effective = tooCoarse ? null : dest;
+  const ans = describeDelivery({ ...info, nombre: info.nombre || ref.nombre }, effective);
+  const geoPatch = geoPatchOf(c, dest, opts.fresh);
+  const needLocationText =
+    tooCoarse && dest?.label
+      ? `Me dijiste *${dest.label}*, pero para confirmar si te llega y cuánto cuesta necesito algo más preciso: ${LOCATION_HOWTO}.`
+      : `Para confirmarte si llega hasta donde estás y cuánto te costaría exactamente, ${LOCATION_HOWTO}.`;
+  if (ans.needsLocation || tooCoarse) {
+    return reply(
+      c,
+      'delivery_find',
+      [P(...ans.lines, needLocationText)],
+      {
+        skipCompose: true,
+        memoryPatch: {
+          ...base,
+          ...geoPatch,
+          brainPending: { kind: 'delivery', comercioId: ref.id, topic: opts.pendingTopic ?? 'delivery_find', atMs: c.nowMs },
+        },
+      },
+    );
+  }
+  const approxNote =
+    dest?.approx === 'place' && dest.label
+      ? `Lo calculé con la zona que me dijiste (*${dest.label}*), que es aproximada; si me compartes tu ubicación exacta lo afino.`
+      : null;
+  return reply(
+    c,
+    'delivery_find',
+    [
+      P(
+        ...ans.lines,
+        approxNote,
+        opts.ageNote
+          ? 'Usé la ubicación que me compartiste antes; si ya no estás ahí, mándame la nueva y lo recalculo.'
+          : null,
+        linkAlreadySent(c, ref.menuUrl)
+          ? null
+          : ans.delivers
+            ? `Para pedir, entra a su menú: ${ref.menuUrl}`
+            : `Si quieres, ves su menú aquí: ${ref.menuUrl}`,
+      ),
+    ],
+    { skipCompose: true, memoryPatch: { ...base, brainPending: null, ...geoPatch } },
+  );
+}
+
+/** Which restaurant a delivery question is about: named, or the one we were just talking about. */
+async function resolveDeliveryShop(
+  c: Ctx,
+): Promise<{ ref?: WaMasterRestaurantRef; ambiguous?: WaMasterRestaurantRef[]; notFound?: string }> {
+  const last = c.memory.summary.lastRestaurants || [];
+  const mentioned = last.find((r) => mentionsRestaurant(c.t, r.nombre));
+  if (mentioned) return { ref: mentioned };
+  const active = activeRef(c);
+  const name = c.tr.restaurantName;
+  if (name) {
+    const { card } = await findByName(c, name);
+    if (card) return { ref: toRefs([card], c.config)[0] };
+    // A capitalised place ("Los Palos Grandes") is not a restaurant: stay with the one we are on.
+    if (!active) return { notFound: name };
+  }
+  if (active) return { ref: active };
+  if (last.length === 1) return { ref: last[0] };
+  if (last.length > 1) return { ambiguous: last };
+  return {};
+}
+
+async function deliveryQuestionFlow(c: Ctx): Promise<BrainResult | null> {
+  const found = await resolveDeliveryShop(c);
+  if (found.notFound) {
+    return reply(c, 'delivery_find', [
+      P(
+        `No ubico un restaurante llamado *${found.notFound}* en el directorio de ${BRAND} 🤔`,
+        '¿Me confirmas el nombre exacto o la ciudad? Así reviso su delivery.',
+      ),
+    ], { memoryPatch: { brainPending: { kind: 'name', topic: 'delivery_find', atMs: c.nowMs } } });
+  }
+  if (found.ambiguous) {
+    return reply(c, 'delivery_find', [
+      P(
+        `¿De cuál restaurante quieres saber el delivery? Estuvimos viendo ${found.ambiguous.map((r) => `*${r.nombre}*`).slice(0, 4).join(', ')}.`,
+        'Dime el nombre y te digo si llega a tu zona y cuánto cobra.',
+      ),
+    ], { memoryPatch: { brainPending: { kind: 'name', topic: 'delivery_find', atMs: c.nowMs } } });
+  }
+  if (!found.ref) {
+    if (!DELIVERY_PRICE_ISH.test(c.t)) return null; // generic "who has delivery": the directory flow answers
+    return reply(c, 'delivery_find', [
+      '¡Claro! Dime de qué restaurante quieres saber el delivery (nombre y ciudad si la sabes) y te digo si llega hasta donde estás y cuánto cobra 🛵',
+    ], { memoryPatch: { brainPending: { kind: 'name', topic: 'delivery_find', atMs: c.nowMs } } });
+  }
+  // Where is the person? An address in this message, a recent share, or the place they described.
+  const { dest, fresh } = await resolveDest(c);
+  const g = c.memory.summary.geo;
+  const ageNote = Boolean(dest && !fresh && g && c.nowMs - g.atMs > 30 * 60 * 1000);
+  return deliveryFlow(c, found.ref, dest, { fresh, ageNote });
+}
+
+// ---------------------------------------------------------------------------
+// The restaurant's real menu: cheapest, compare, price, total, budget, variants
+// ---------------------------------------------------------------------------
+
+const VIEW_TTL_MS = 60 * 60 * 1000;
+const MENU_PRESCREEN =
+  /\b(barat\w*|economic\w*|menor precio|mas bajo|mas car\w*|costos|premium|total|subtotal|cuanto (cuesta|cuestan|vale|valen|sale|salen|seria|serian|me|son|es)|precio|precios|a como|valor|recomiend\w*|recomend\w*|aconsej\w*|sugier\w*|presupuesto|conviene|que (tienen|hay|venden|manejan|ofrecen)|menu|carta|categorias|opciones|agotad\w*|disponib\w*|tiene|tienen|hay|viene|vienen|sin |doble|extra|combo|tamano|sabor|primera|segunda|tercera|cuarta|quinta|esas|esos|todas|todos|suma|calcula\w*|cuenta)\b|\b\d[\d.,]*\s*(mil|k|cop|usd|bs|pesos|dolares)\b|\btengo\s+\d/;
+
+async function getSnapshot(c: Ctx, ref: WaMasterRestaurantRef): Promise<MenuSnapshot | null> {
+  const load = c.loadPublicMenu ?? loadMenuSnapshotFromDb;
+  try {
+    const snap = await load(ref.slug || ref.id);
+    if (snap) c.tools.push('menu_query');
+    return snap;
+  } catch {
+    return null;
+  }
+}
+
+function currentView(c: Ctx, snap: MenuSnapshot) {
+  const v = c.memory.summary.lastMenuView;
+  return v && v.slug === snap.slug && c.nowMs - v.atMs <= VIEW_TTL_MS ? v : null;
+}
+
+function menuReply(
+  c: Ctx,
+  ref: WaMasterRestaurantRef,
+  lines: Array<string | null | undefined | false>,
+  extraPatch: Partial<WaMasterSummary> = {},
+): BrainResult {
+  return reply(c, 'menu_of', [P(...lines)], {
+    skipCompose: true,
+    memoryPatch: { activeRestaurant: ref, lastRestaurants: keepList(c, ref), brainPending: null, ...extraPatch },
+  });
+}
+
+const HERE_NEXT =
+  'Cuando quieras te calculo el total con delivery hasta donde estás, o comparo con otra categoría.';
+
+/**
+ * Answers a question about the active restaurant's products from its real public menu.
+ * Returns null when the message is not about products (the normal brain continues).
+ */
+async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult | null> {
+  if (!MENU_PRESCREEN.test(c.t)) return null;
+  const snap = await getSnapshot(c, ref);
+  if (!snap) {
+    // Only complain when the message is clearly a price / product question.
+    if (!/\b(barat|economic|total|precio|cuanto|recomiend|presupuesto|menu)\b/.test(c.t)) return null;
+    return menuReply(c, ref, [
+      `Ahora mismo no logro consultar el menú de *${ref.nombre}* para darte precios exactos 😕`,
+      'Dame un momento y vuelve a preguntarme; si prefieres verlo tú, está aquí: ' + ref.menuUrl,
+    ]);
+  }
+  const view = currentView(c, snap);
+  const ask = parseMenuAsk(c.text, snap, view);
+  if (!isMenuAsk(ask, Boolean(view?.productIds.length))) return null;
+
+  if (!snap.online) {
+    return menuReply(c, ref, [
+      `El menú de *${snap.nombre}* no está disponible ahora mismo (el negocio lo tiene en mantenimiento), así que no puedo darte precios confiables.`,
+      'Prueba más tarde o escribe *asesor* si necesitas ayuda de una persona.',
+    ]);
+  }
+
+  const cur = snap.currency;
+  const wantsDelivery = ask.withDelivery;
+
+  // Delivery fee for this order (needs where the person is).
+  const quoteFor = async (subtotal: number) => {
+    const { dest, fresh } = await resolveDest(c);
+    const far = dest && snap.delivery.origin ? haversineKm(snap.delivery.origin, dest) : null;
+    const coarse = dest?.approx === 'city' && !(far != null && far > MAX_SANE_DELIVERY_KM);
+    const used = coarse ? null : dest;
+    const quote = quoteShopDelivery(snap.delivery, used, subtotal, snap.convert);
+    return { quote, dest: used, origDest: dest, fresh, coarse };
+  };
+  const patchView = (ids: string[], category: string | null, qty: Record<string, number>): Partial<WaMasterSummary> => ({
+    lastMenuView: { slug: snap.slug, category, productIds: ids.slice(0, 12), qty, atMs: c.nowMs },
+  });
+  const placeLabel = (d: Dest | null) => (d?.label ? `*${d.label}*` : null);
+
+  // ---- Budget / "which do you recommend" ----------------------------------------------
+  if (ask.budget || ask.recommend) {
+    const sel = selectProducts(snap, { ...ask, cheapest: false, priciest: false, products: [] }, view);
+    const pool = sel.pool;
+    const sorted = [...pool].sort((a, b) => a.price - b.price || a.nombre.localeCompare(b.nombre, 'es'));
+    if (!ask.budget) {
+      const cheap = sorted.slice(0, 3);
+      return menuReply(
+        c,
+        ref,
+        [
+          `Para recomendarte bien en *${snap.nombre}* dime tu presupuesto (en ${cur}) y si es con delivery.`,
+          cheap.length ? `Mientras tanto, lo más económico${sel.category ? ` de ${sel.category.nombre}` : ''}:\n${cheap.map((p) => productLine(snap, p)).join('\n')}` : null,
+        ],
+        patchView(cheap.map((p) => p.id), sel.category?.nombre ?? null, {}),
+      );
+    }
+    let fee = 0;
+    let feeNote: string | null = null;
+    let pendingLoc = false;
+    if (wantsDelivery || view) {
+      const q = await quoteFor(ask.budget.amount);
+      if (q.quote.kind === 'fee') {
+        fee = q.quote.free ? 0 : q.quote.fee;
+        feeNote = `Descontando el delivery${placeLabel(q.dest) ? ` hasta ${placeLabel(q.dest)}` : ''}: ${money(snap, fee)}.`;
+      } else if (wantsDelivery) {
+        const t = describeTotal(snap, computeTotals([]), q.quote, null);
+        pendingLoc = t.needsLocation || q.coarse;
+        feeNote = pendingLoc
+          ? `Para descontar el delivery necesito saber dónde estás (${LOCATION_HOWTO}); por ahora lo calculo sin delivery.`
+          : t.lines.filter((l) => !l.startsWith('Subtotal')).join('\n') || null;
+      }
+    }
+    const plan = planBudget(snap, ask.budget, pool, fee);
+    if (plan.ok === false && plan.reason === 'currency') {
+      return menuReply(c, ref, [
+        `Tu presupuesto está en ${plan.budget.currency} pero este menú cobra en ${cur} y no tengo una tasa verificable para convertir, así que no voy a mezclar monedas.`,
+        `¿Me lo dices en ${cur}?`,
+      ]);
+    }
+    if (plan.ok === false) {
+      return menuReply(
+        c,
+        ref,
+        [
+          `Con ${money(snap, ask.budget.amount)}${fee ? ` (menos ${money(snap, fee)} de delivery)` : ''} no alcanza ni para lo más barato${sel.category ? ` de ${sel.category.nombre}` : ''}: ${plan.cheapest ? productLine(snap, plan.cheapest) : 'no hay productos con precio'}.`,
+          plan.needed ? `Necesitarías al menos ${money(snap, plan.needed)}${fee ? ' con el delivery' : ''}.` : null,
+        ],
+        patchView(plan.cheapest ? [plan.cheapest.id] : [], sel.category?.nombre ?? null, {}),
+      );
+    }
+    const convNote =
+      ask.budget.currency && ask.budget.currency !== cur
+        ? `(Convertí tu presupuesto de ${ask.budget.currency} a ${cur} con la tasa del menú: ${money(snap, plan.available + fee)}.)`
+        : null;
+    const unspecified = !ask.budget.currency ? `Tomé tu presupuesto en ${cur}, la moneda de este menú.` : null;
+    const picks = [plan.main, ...(plan.side ? [plan.side] : [])];
+    const total = round(plan.main.price + (plan.side?.price ?? 0) + fee);
+    return menuReply(
+      c,
+      ref,
+      [
+        convNote,
+        unspecified,
+        `Con ${money(snap, ask.budget.amount)} te recomiendo en *${snap.nombre}*:`,
+        `${productLine(snap, plan.main)}${plan.side ? `\n${productLine(snap, plan.side)}   (bebida más económica)` : ''}`,
+        `Eso suma ${money(snap, plan.main.price + (plan.side?.price ?? 0))}${fee ? ` + delivery ${money(snap, fee)} = ${money(snap, total)}` : ''}${plan.leftover > 0 ? `; te sobran ${money(snap, plan.leftover)}` : ''}.`,
+        plan.alternatives.length ? `Si prefieres algo más ligero:\n${plan.alternatives.map((p) => productLine(snap, p)).join('\n')}` : null,
+        feeNote,
+      ],
+      {
+        ...patchView(picks.map((p) => p.id), sel.category?.nombre ?? null, {}),
+        ...(pendingLoc ? { brainPending: { kind: 'delivery', comercioId: ref.id, topic: 'menu_total', atMs: c.nowMs } } : {}),
+      },
+    );
+  }
+
+  // ---- Products: cheapest / priciest / named / from the last list ---------------------
+  const sel = selectProducts(snap, ask, view);
+
+  const wordsInCategory = sel.source === 'category' && ask.optionWords.length > 0;
+  if (
+    (ask.availability || ask.list) &&
+    (!sel.lines.length || wordsInCategory) &&
+    (!ask.categories.length || wordsInCategory) &&
+    !ask.cheapest &&
+    !ask.priciest
+  ) {
+    // "¿tienen algo con pollo?", "¿viene sin cebolla?", "¿hamburguesa de pescado?": search
+    // ingredients / options / names (inside the category when one was named).
+    const words = ask.optionWords.filter((w) => w.length >= 3);
+    const hits = words.length
+      ? snap.products.filter(
+          (p) =>
+            (!ask.categories.length || ask.categories.some((cat) => cat.id === p.categoriaId)) &&
+            words.every((w) => productMentions(p, w)),
+        )
+      : [];
+    if (hits.length) {
+      const top = hits.slice(0, 6);
+      return menuReply(
+        c,
+        ref,
+        [
+          `Sí, en *${snap.nombre}* veo ${hits.length === 1 ? 'esto' : 'estas opciones'} con *${words.join(' ')}*:`,
+          top.map((p) => productLine(snap, p)).join('\n'),
+          hits.length > top.length ? `Y ${hits.length - top.length} más.` : null,
+        ],
+        patchView(top.map((p) => p.id), null, {}),
+      );
+    }
+    if (words.length) {
+      return menuReply(c, ref, [
+        `No veo *${words.join(' ')}* en el menú publicado de *${snap.nombre}*. El menú público solo muestra lo que está disponible ahora, así que puede estar agotado o simplemente no lo manejan.`,
+        'Si quieres, te muestro lo más parecido por categoría o por precio.',
+      ]);
+    }
+  }
+
+  if (!sel.lines.length) {
+    if (ask.list || ask.categories.length === 0) {
+      if (ask.list) {
+        const cats = snap.categories.map((cat) => {
+          const min = Math.min(...snap.products.filter((p) => p.categoriaId === cat.id && p.price > 0).map((p) => p.price));
+          return `• ${cat.nombre} (${cat.count})${Number.isFinite(min) ? ` — desde ${money(snap, min)}` : ''}`;
+        });
+        return menuReply(c, ref, [`Esto tiene *${snap.nombre}* (precios en ${cur}):`, cats.join('\n'), 'Dime la categoría o lo que se te antoja y te muestro los productos con sus precios.']);
+      }
+    }
+    return menuReply(c, ref, [
+      `¿De cuáles productos de *${snap.nombre}* quieres que lo calcule? Dime el nombre, o pídeme «las más baratas» de una categoría y lo armo.`,
+    ]);
+  }
+
+  const lines = sel.lines;
+  const ids = lines.map((l) => l.product.id);
+  const qty: Record<string, number> = {};
+  for (const l of lines) if (l.qty !== 1) qty[l.product.id] = l.qty;
+  const catLabel = sel.category ? ` de ${sel.category.nombre}` : '';
+  const header =
+    sel.source === 'cheapest'
+      ? `Las ${lines.length === 1 ? 'más económica' : `${lines.length} más económicas`}${catLabel} en *${snap.nombre}* (precios en ${cur}):`
+      : sel.source === 'priciest'
+        ? `Las ${lines.length === 1 ? 'más cara' : `${lines.length} más caras`}${catLabel} en *${snap.nombre}* (precios en ${cur}):`
+        : sel.source === 'category'
+          ? `${sel.category?.nombre ?? 'Productos'} en *${snap.nombre}*, de menor a mayor (precios en ${cur}):`
+          : `Esto es lo que dice el menú de *${snap.nombre}* (precios en ${cur}):`;
+  const body = lines.map((l) => productLine(snap, l.product, l.qty)).join('\n');
+  const tieNote = sel.ties.length
+    ? `Ojo: ${sel.ties.slice(0, 3).map((p) => p.nombre).join(', ')} ${sel.ties.length > 1 ? 'cuestan' : 'cuesta'} lo mismo (${money(snap, lines[lines.length - 1].product.price)}), por si quieres cambiar.`
+    : null;
+  const fromNote = lines.some((l) => l.product.from)
+    ? 'Los marcados «desde» cambian según lo que elijas dentro del producto.'
+    : null;
+
+  // Variants of the product(s) asked about.
+  let optionsBlock: string | null = null;
+  if (ask.availability && sel.source === 'named') {
+    const blocks: string[] = [];
+    for (const l of lines.slice(0, 3)) {
+      const opts = describeProductOptions(snap, l.product).slice(0, 5);
+      blocks.push(
+        `*${l.product.nombre}* sí aparece disponible (${money(snap, l.product.price)}${l.product.from ? ' desde' : ''}).${opts.length ? `\n${opts.map((o) => `  – ${o}`).join('\n')}` : ' No tiene variantes ni extras configurados.'}`,
+      );
+    }
+    optionsBlock = blocks.join('\n');
+    // "sin cebolla": answer from the product's own removable ingredients.
+    const sin = /\bsin\s+([a-zñ ]{3,30}?)(?:\s+y\s|\s+por\b|[?.,]|$)/.exec(fold(c.text));
+    if (sin) {
+      const word = sin[1].trim();
+      const removable = lines.filter((l) => l.product.removals.some((r) => fold(r).includes(word) || word.includes(fold(r))));
+      optionsBlock += removable.length
+        ? `\nSí puedes pedirlo *sin ${word}*: está entre lo que se puede quitar.`
+        : `\nNo veo *${word}* entre los ingredientes que se pueden quitar; si lo necesitas, déjalo anotado al pedir o pregúntale al local.`;
+    }
+  }
+
+  // Order total (+ delivery) — only when asked.
+  let totalBlock: string[] | null = null;
+  let pending: Partial<WaMasterSummary> = {};
+  let approxNote: string | null = null;
+  let askLocation: string | null = null;
+  const wantsTotal = ask.total || (wantsDelivery && !ask.price && !ask.availability) || (ask.total && wantsDelivery);
+  if (wantsTotal || (ask.price && wantsDelivery)) {
+    const totals = computeTotals(lines);
+    if (wantsDelivery) {
+      const q = await quoteFor(totals.subtotal);
+      const quoteKind = q.coarse ? ({ kind: 'needs_location' } as const) : q.quote;
+      const t = describeTotal(snap, totals, quoteKind, placeLabel(q.dest));
+      totalBlock = t.lines;
+      if (t.needsLocation) {
+        askLocation =
+          q.coarse && q.origDest?.label
+            ? `Me dijiste *${q.origDest.label}*, pero para sumarte el delivery necesito algo más preciso: ${LOCATION_HOWTO}.`
+            : `Para sumarte el delivery necesito saber dónde estás: ${LOCATION_HOWTO}.`;
+        pending = { brainPending: { kind: 'delivery', comercioId: ref.id, topic: 'menu_total', atMs: c.nowMs } };
+      }
+      if (q.dest?.approx === 'place' && q.dest.label && t.total != null && q.quote.kind === 'fee') {
+        approxNote = `La tarifa la calculé con la zona que me dijiste (*${q.dest.label}*), que es aproximada; con tu ubicación exacta puede variar.`;
+      }
+      Object.assign(pending, geoPatchOf(c, q.origDest, q.fresh));
+    } else {
+      totalBlock = describeTotal(snap, totals, null, null).lines;
+      totalBlock.push(`Total estimado sin delivery: ${money(snap, totals.subtotal)}`);
+      totalBlock.push('Si lo quieres con delivery, dime dónde estás y te lo sumo.');
+    }
+  }
+  const orderLink =
+    totalBlock && !linkAlreadySent(c, ref.menuUrl) ? `Cuando quieras pedirlo, desde su menú: ${ref.menuUrl}` : null;
+  const closing = !totalBlock && !optionsBlock && sel.source !== 'named' ? HERE_NEXT : null;
+
+  return menuReply(
+    c,
+    ref,
+    [
+      header,
+      body,
+      tieNote,
+      fromNote,
+      optionsBlock,
+      totalBlock ? totalBlock.join('\n') : null,
+      approxNote,
+      askLocation,
+      totalBlock ? 'Es un cálculo con los precios publicados ahora mismo; el total final lo confirma el menú al pedir.' : null,
+      orderLink,
+      closing,
+    ],
+    { ...patchView(ids, sel.category?.nombre ?? lastCategoryOf(snap, lines), qty), ...pending },
+  );
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** We asked where the person is to add the delivery to the order we had listed: finish it. */
+async function totalFromView(c: Ctx, ref: WaMasterRestaurantRef, point: Dest): Promise<BrainResult | null> {
+  const snap = await getSnapshot(c, ref);
+  const view = snap ? currentView(c, snap) : null;
+  if (!snap || !view) return null;
+  const lines = view.productIds
+    .map((id) => snap.products.find((p) => p.id === id))
+    .filter((p): p is MenuProduct => Boolean(p))
+    .map((product) => ({ product, qty: view.qty?.[product.id] ?? 1 }));
+  if (!lines.length) return null;
+  const totals = computeTotals(lines);
+  const quote = quoteShopDelivery(snap.delivery, point, totals.subtotal, snap.convert);
+  const t = describeTotal(snap, totals, quote, point.label ? `*${point.label}*` : null);
+  const body = lines.map((l) => productLine(snap, l.product, l.qty)).join('\n');
+  return menuReply(
+    c,
+    ref,
+    [
+      `Listo, con tu ubicación el cálculo de *${snap.nombre}* (precios en ${snap.currency}):`,
+      body,
+      t.lines.join('\n'),
+      t.total != null ? 'Es un cálculo con los precios publicados ahora mismo; el total final lo confirma el menú al pedir.' : null,
+    ],
+    geoPatchOf(c, point, true),
+  );
+}
+
+/** The category shared by every shown product (so "las más baratas" later stays on topic). */
+function lastCategoryOf(snap: MenuSnapshot, lines: Array<{ product: MenuProduct }>): string | null {
+  const cats = new Set(lines.map((l) => l.product.categoria).filter(Boolean));
+  return cats.size === 1 ? [...cats][0] : null;
+}
+
+/**
+ * The person picked this restaurant: resolve first (what it sells, whether it can reach them),
+ * links after. Answers the question in the same message when there is one.
+ */
+async function selectRestaurant(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult> {
+  const asked = await menuTurn(c, ref);
+  if (asked) return asked;
+  const snap = await getSnapshot(c, ref);
+  // What they were looking for becomes the default category ("las más baratas" = of the burgers).
+  const hint = c.memory.summary.foodHint;
+  const hintCat = snap && hint ? matchCategories(snap, hint)[0] : null;
+  const patch: Partial<WaMasterSummary> = {
+    activeRestaurant: ref,
+    lastRestaurants: keepList(c, ref),
+    lastMenuView: snap && hintCat ? { slug: snap.slug, category: hintCat.nombre, productIds: [], atMs: c.nowMs } : null,
+    brainPending: null,
+  };
+  if (!snap) {
+    return reply(
+      c,
+      'menu_of',
+      [
+        P(
+          `Perfecto, *${ref.nombre}*: ${ref.menuUrl}`,
+          ref.chatUrl ? `Y su asistente virtual, por si quieres preguntarle algo: ${ref.chatUrl}` : null,
+          'Ahí eliges tus productos y completas el pedido.',
+        ),
+      ],
+      { skipCompose: true, memoryPatch: patch },
+    );
+  }
+  const cats = snap.categories.map((cat) => {
+    const min = Math.min(...snap.products.filter((p) => p.categoriaId === cat.id && p.price > 0).map((p) => p.price));
+    return `${cat.nombre}${Number.isFinite(min) ? ` (desde ${money(snap, min)})` : ''}`;
+  });
+  const addr = snap.delivery.address?.split('\n')[0]?.trim();
+  // Is it even near the person? Say it now instead of letting them find out at checkout.
+  let farNote: string | null = null;
+  const place = c.memory.summary.placeText;
+  const g = recentGeo(c);
+  if (snap.delivery.origin && (g || place)) {
+    const p = g ?? (place ? await geocodeAddress(place) : null);
+    const km = p ? haversineKm(snap.delivery.origin, p) : null;
+    if (km != null && km > MAX_SANE_DELIVERY_KM) {
+      const where = (g?.label || place) ? `*${g?.label || place}*` : 'donde estás';
+      farNote = `⚠️ Ojo: queda${addr ? ` en ${addr}` : ''}, a unos ${String(Math.round(km)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} km de ${where}, así que lo más probable es que no te lleguen (te lo confirmo con tu ubicación exacta si quieres).`;
+    }
+  }
+  return reply(
+    c,
+    'menu_of',
+    [
+      P(
+        `Perfecto, *${snap.nombre}*${addr ? ` (${addr})` : ''}.`,
+        snap.categories.length ? `En su menú veo: ${cats.join(', ')}. Precios en ${snap.currency}.` : null,
+        farNote,
+        'Pregúntame lo que necesites: las más baratas, comparar precios, qué variantes tiene un plato, el total de tu pedido con delivery…',
+        linkAlreadySent(c, ref.menuUrl) && !/\b(link|enlace|url|pagina|manda\w*|pasa\w*|enviame|ver (el )?menu)\b/.test(c.t)
+          ? null
+          : `Menú completo, por si quieres verlo: ${ref.menuUrl}`,
+      ),
+    ],
+    { skipCompose: true, memoryPatch: patch },
+  );
+}
+
 export async function runCentralBrain(params: BrainParams): Promise<BrainResult | null> {
   const out = await runCentralBrainInner(params);
   // The brain never executes legacy admin proposals; a stale one must not block it
@@ -986,8 +2040,121 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
   const tr0 = classifyCentralTopic({ text, hasShops: shops.length > 0 });
   const c: Ctx = { ...params, tr: tr0, t, shops, tools: [] };
 
+  // A photo / PDF the vision model already described (payment receipt, dish, menu, …).
+  const imageTurn = parseImageTurn(text);
+  if (imageTurn) return imageFlow(c, imageTurn, params);
+
+  // The role follows THIS turn's words: an owner's command must never be read as a diner's
+  // zone answer / list pick left over from an earlier consumer conversation.
+  const inOwnerThread =
+    sum.activeService === 'admin' &&
+    (Boolean(sum.brainPending?.kind === 'offer' && params.nowMs - sum.brainPending.atMs <= BRAIN_PENDING_TTL_MS) ||
+      Boolean(sum.lastHandoffAtMs && params.nowMs - sum.lastHandoffAtMs <= BRAIN_PENDING_TTL_MS));
+  const merchantVoice = detectMerchantVoice(text, shops.length > 0, inOwnerThread);
+  if (merchantVoice && isBareOwnerStatement(text)) {
+    return ownerWelcome(c);
+  }
+
   const pending: WaMasterBrainPending | null =
-    sum.brainPending && params.nowMs - sum.brainPending.atMs <= BRAIN_PENDING_TTL_MS ? sum.brainPending : null;
+    !merchantVoice && sum.brainPending && params.nowMs - sum.brainPending.atMs <= BRAIN_PENDING_TTL_MS
+      ? sum.brainPending
+      : null;
+
+  // The person is working with one restaurant: questions about its products, prices, variants,
+  // totals and budget are answered from its real menu — before anything else can swallow them
+  // (a pending "where are you?" would read "las 3 más baratas" as an address).
+  const knownRefs = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
+  const otherMentioned = knownRefs.find((r) => r.id !== sum.activeRestaurant?.id && mentionsRestaurant(t, r.nombre));
+  const menuRef = otherMentioned ?? activeRef(c);
+  const searchish =
+    (tr0.topic === 'search_food' || tr0.topic === 'browse_directory' || tr0.topic === 'open_now') && tr0.cities.length > 0;
+  if (
+    menuRef &&
+    !merchantVoice &&
+    !searchish &&
+    !extractCoords(text) &&
+    !(looksLikeAddress(text) && (pending?.kind === 'delivery' || pending?.kind === 'zone'))
+  ) {
+    const menuOut = await menuTurn(c, menuRef);
+    if (menuOut) return menuOut;
+  }
+
+  // They named one of the restaurants we listed ("me interesa Bladi Jaiper"): that is the pick —
+  // never a new search (a name like "Hamburguesería X" contains "hamburguesa").
+  if (
+    !merchantVoice &&
+    !isDeliveryQuestion(t) &&
+    !extractCoords(text) &&
+    (['menu_of', 'search_food', 'browse_directory', 'open_now', 'unknown'] as string[]).includes(tr0.topic)
+  ) {
+    const named = (sum.lastRestaurants || []).find((r) => mentionsRestaurant(t, r.nombre));
+    if (named) return selectRestaurant(c, named);
+  }
+
+  // We asked where they are to quote a restaurant's delivery: location or address answers it.
+  if (pending?.kind === 'delivery' && pending.comercioId) {
+    const ref =
+      (sum.lastRestaurants || []).find((r) => r.id === pending.comercioId) ??
+      (sum.activeRestaurant?.id === pending.comercioId ? sum.activeRestaurant : undefined);
+    if (ref) {
+      let point: Dest | null = extractCoords(text);
+      const addressLike =
+        looksLikeAddress(text) ||
+        (tr0.topic === 'unknown' &&
+          t.length <= 200 &&
+          t.length >= 4 &&
+          !/^(no|nada|gracias|ok|okey|listo|dale|si|olvidalo|cancel\w*|luego|despues|mas tarde)\b/.test(t));
+      if (!point && addressLike) point = await geocodeAddress(text);
+      if (point && pending.topic === 'menu_total') {
+        const total = await totalFromView(c, ref, point);
+        if (total) return total;
+      }
+      if (point) return deliveryFlow(c, ref, point, { fresh: true });
+      if (addressLike) {
+        return reply(
+          c,
+          'delivery_find',
+          [
+            P(
+              'No logré ubicar esa dirección 🤔',
+              `Pruébala con sector y ciudad, o ${LOCATION_HOWTO}.`,
+            ),
+          ],
+          { memoryPatch: { brainPending: { ...pending, atMs: c.nowMs } } },
+        );
+      }
+    }
+  }
+
+  // A shared WhatsApp location (current or live), a maps link or raw coordinates.
+  const sharedPoint = merchantVoice ? null : extractCoords(text);
+  if (sharedPoint) {
+    return nearbyFlow(c, sharedPoint, pending?.kind === 'zone' ? pending : null);
+  }
+
+  // A typed address / sector in answer to "where are you?" (or clearly describing a place).
+  if (
+    pending?.kind === 'zone' &&
+    t.length <= 200 &&
+    (pending.near || looksLikeAddress(text)) &&
+    !CITY_ONLY(t, tr0.cities)
+  ) {
+    const point = await geocodeAddress(text);
+    if (point) return nearbyFlow(c, point, pending);
+    if (pending.near) {
+      return reply(
+        c,
+        (pending.topic as CentralTopic) || 'search_food',
+        [
+          P(
+            'No logré ubicar esa dirección 🤔',
+            'Prueba escribiéndola con el sector y la ciudad (por ejemplo «Av. Bolívar Norte, urbanización La Viña, Valencia»), o compárteme tu *ubicación actual* desde el clip 📎 → *Ubicación*.',
+          ),
+        ],
+        { memoryPatch: { brainPending: { ...pending, atMs: c.nowMs } } },
+      );
+    }
+  }
 
   // Pending follow-ups first (short answers to our last question).
   if (pending) {
@@ -1026,6 +2193,20 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
       t.length <= 80
     ) {
       const name = extractRestaurantName(text) || cleanName(text);
+      if (name && pending.topic === 'delivery_find') {
+        const { card } = await findByName(c, name);
+        if (card) {
+          let dest: { lat: number; lng: number; label?: string | null } | null = recentGeo(c);
+          if (!dest && looksLikeAddress(text)) dest = await geocodeAddress(text);
+          return deliveryFlow(c, toRefs([card], c.config)[0], dest, { fresh: false });
+        }
+        return reply(
+          c,
+          'delivery_find',
+          [P(`No ubico un restaurante llamado *${name}* 🤔`, '¿Me das el nombre exacto o la ciudad?')],
+          { memoryPatch: { brainPending: { ...pending, atMs: c.nowMs } } },
+        );
+      }
       if (name) {
         const topic = (['menu_of', 'contact_of', 'hours_of', 'payments', 'restaurant_assistant'] as const).includes(pending.topic as never)
           ? (pending.topic as CentralTopic)
@@ -1037,18 +2218,10 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
 
   // Ordinal pick from a list we just showed ("la segunda", "2").
   const last = sum.lastRestaurants || [];
-  if (last.length && (/\b(la |el )?(primera|primero|segunda|segundo|tercera|tercero)\b/.test(t) || /^[1-5]$/.test(t.trim()))) {
+  if (!merchantVoice && last.length && (/\b(la |el )?(primera|primero|segunda|segundo|tercera|tercero)\b/.test(t) || /^[1-5]$/.test(t.trim()))) {
     const idx = /primer|^1$/.test(t) ? 0 : /segund|^2$/.test(t) ? 1 : /tercer|^3$/.test(t) ? 2 : Number(t.trim()) - 1;
     const pick = last[idx] || last[0];
-    if (pick) {
-      return reply(c, 'menu_of', [
-        P(
-          `Perfecto, *${pick.nombre}*: ${pick.menuUrl}`,
-          pick.chatUrl ? `Y su asistente virtual, por si quieres preguntarle algo: ${pick.chatUrl}` : null,
-          'Ahí eliges tus productos y completas el pedido.',
-        ),
-      ], { memoryPatch: { brainPending: null } });
-    }
+    if (pick) return selectRestaurant(c, pick);
   }
 
   // Bare digit with no open question: never invent a menu — ask naturally.
@@ -1066,6 +2239,35 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
     return r;
   };
 
+  if (merchantVoice && CONSUMER_FLAVOURED.has(topic)) {
+    const out = await merchantFlow(c, inferMerchantDomain(text), 'ops');
+    out.memoryPatch = { ...out.memoryPatch, lastRestaurants: [], zone: null };
+    return out;
+  }
+
+  // "¿Hacen delivery hasta mi casa y cuánto cobran?": answer from the restaurant's real tariff.
+  if (!merchantVoice && isDeliveryQuestion(t)) {
+    const out = await deliveryQuestionFlow(c);
+    if (out) return out;
+  }
+
+  // "Restaurantes cerca de mí": ask for the live location / address (or reuse a fresh one).
+  const nearTopics = ['search_food', 'browse_directory', 'open_now', 'delivery_find'] as const;
+  type NearTopic = (typeof nearTopics)[number];
+  const isNearTopic = (nearTopics as readonly string[]).includes(topic);
+  if ((isNearTopic || topic === 'unknown') && NEAR_ME.test(t) && tr0.cities.length === 0) {
+    const nearTopic: NearTopic = isNearTopic ? (topic as NearTopic) : 'browse_directory';
+    const extra: Partial<WaMasterBrainPending> = {
+      category: tr0.food?.category ?? null,
+      query: tr0.food?.query ?? null,
+      openOnly: topic === 'open_now',
+    };
+    let geo = recentGeo(c);
+    if (!geo && looksLikeAddress(text)) geo = await geocodeAddress(text);
+    if (!geo) return askLocation(c, nearTopic, extra);
+    return nearbyFlow(c, geo, { kind: 'zone', near: true, topic: nearTopic, atMs: c.nowMs, ...extra });
+  }
+
   switch (topic) {
     case 'human_now':
       return {
@@ -1077,6 +2279,16 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
       };
     case 'search_food': {
       const zone = tr0.cities[0] || null;
+      if (!zone) {
+        return finish(
+          await locationGate(
+            c,
+            'search_food',
+            { category: tr0.food?.category ?? null, query: tr0.food?.query ?? null },
+            tr0.food?.label ?? null,
+          ),
+        );
+      }
       return finish(
         await foodFlow(c, 'search_food', {
           zone,
@@ -1093,26 +2305,32 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
       }
       return finish(r);
     }
-    case 'open_now':
+    case 'open_now': {
+      if (!tr0.cities[0]) {
+        return finish(await locationGate(c, 'open_now', { openOnly: true }, null));
+      }
       return finish(await foodFlow(c, 'open_now', { zone: tr0.cities[0] || null, openOnly: true }));
+    }
     case 'delivery_find': {
       if (/\b(cuanto cuesta|costo|tarifa|precio)\b/.test(t)) {
         return finish(
           reply(c, topic, [
             P(
-              'La tarifa del delivery la define cada restaurante según tu zona; la ves en su menú al elegir delivery.',
-              'Dime cuál restaurante (o tu zona) y te paso el menú.',
+              'La tarifa del delivery la define cada restaurante según tu zona, así que necesito saber de cuál hablamos.',
+              'Dime el nombre del restaurante y te calculo cuánto te cobraría hasta donde estás.',
             ),
-          ]),
+          ], { memoryPatch: { brainPending: { kind: 'name', topic: 'delivery_find', atMs: c.nowMs } } }),
         );
       }
       const zone = tr0.cities[0] || null;
       if (!zone) {
-        return askZone(
-          c,
-          'delivery_find',
-          'Reviso qué negocios tienen delivery para tu zona. ¿En qué ciudad o sector necesitas recibir el pedido?',
-          { query: tr0.food?.query ?? null, category: tr0.food?.category ?? null },
+        return finish(
+          await locationGate(
+            c,
+            'delivery_find',
+            { query: tr0.food?.query ?? null, category: tr0.food?.category ?? null },
+            tr0.food?.label ?? null,
+          ),
         );
       }
       return finish(

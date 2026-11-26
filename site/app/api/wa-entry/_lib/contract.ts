@@ -21,7 +21,7 @@
 
 /** Voice note / photo attached to an inbound message (needs decrypting via Wasender). */
 export type WaInboundMedia = {
-  kind: 'audio' | 'image';
+  kind: 'audio' | 'image' | 'document' | 'video';
   mimetype: string;
   key: unknown;
   message: unknown;
@@ -372,11 +372,33 @@ function pickMessageNode(
   return null;
 }
 
+/** Shared location (current or live) → plain text the Master can parse. */
+function extractLocationText(message: Record<string, unknown>): string {
+  const msgContent =
+    message.message && typeof message.message === 'object'
+      ? (message.message as Record<string, unknown>)
+      : null;
+  const loc = msgContent ? (msgContent.locationMessage ?? msgContent.liveLocationMessage) : null;
+  if (!loc || typeof loc !== 'object') return '';
+  const l = loc as Record<string, unknown>;
+  const lat = Number(l.degreesLatitude);
+  const lng = Number(l.degreesLongitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+  const label = [l.name, l.address]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean)
+    .join(' - ')
+    .slice(0, 100);
+  return `Mi ubicación: ${lat.toFixed(6)}, ${lng.toFixed(6)}${label ? ` (${label})` : ''}`;
+}
+
 function extractText(
   message: Record<string, unknown>,
   data: Record<string, unknown>,
   root: Record<string, unknown>,
 ): string {
+  const locationText = extractLocationText(message);
+  if (locationText) return locationText;
   const candidates = [
     message.messageBody,
     message.text,
@@ -401,10 +423,12 @@ function extractText(
       const t = (ext as { text?: unknown }).text;
       if (typeof t === 'string') return t.trim();
     }
-    const img = msgContent.imageMessage;
-    if (img && typeof img === 'object') {
-      const caption = (img as { caption?: unknown }).caption;
-      if (typeof caption === 'string') return caption.trim();
+    for (const key of ['imageMessage', 'videoMessage', 'documentMessage']) {
+      const node = msgContent[key];
+      if (node && typeof node === 'object') {
+        const caption = (node as { caption?: unknown }).caption;
+        if (typeof caption === 'string') return caption.trim();
+      }
     }
   }
   return '';
@@ -416,13 +440,23 @@ function extractMedia(message: Record<string, unknown>): WaInboundMedia | null {
       ? (message.message as Record<string, unknown>)
       : null;
   if (!content) return null;
-  const audio = content.audioMessage;
-  const image = content.imageMessage;
-  const node = audio && typeof audio === 'object' ? audio : image && typeof image === 'object' ? image : null;
-  if (!node) return null;
+  const pick = (name: string) => {
+    const n = content[name];
+    return n && typeof n === 'object' ? n : null;
+  };
+  const found: Array<[WaInboundMedia['kind'], object | null]> = [
+    ['audio', pick('audioMessage')],
+    ['image', pick('imageMessage')],
+    // A document wrapped with caption (WhatsApp sends this variant for PDFs with text).
+    ['document', pick('documentMessage') ?? pick('documentWithCaptionMessage')],
+    ['video', pick('videoMessage')],
+  ];
+  const hit = found.find(([, n]) => n);
+  if (!hit) return null;
+  const [kind, node] = hit as [WaInboundMedia['kind'], object];
   const mimetype = String((node as { mimetype?: unknown }).mimetype ?? '').trim();
   return {
-    kind: audio ? 'audio' : 'image',
+    kind,
     mimetype,
     key: message.key ?? null,
     message: content,

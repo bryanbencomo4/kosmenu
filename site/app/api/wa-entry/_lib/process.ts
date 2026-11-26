@@ -320,7 +320,9 @@ export async function processWaEntryEvent(
 
   // Voice notes / photos from the authorized sender → understand them as text.
   if (event.media) {
-    const understood = await understandInboundWaMedia(event.media, (event.text || '').trim());
+    const understood = await understandInboundWaMedia(event.media, (event.text || '').trim(), {
+      master: Boolean(config.masterAssistantEnabled && isMasterPilotAllowlisted(config, event.fromDigits)),
+    });
     if (understood.ok === true) {
       event.text = understood.text;
     } else {

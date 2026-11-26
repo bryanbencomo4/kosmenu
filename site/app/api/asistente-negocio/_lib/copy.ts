@@ -127,7 +127,7 @@ export function greetingText(
 
 export function needsAuthText(handoffStale: boolean): string {
   if (handoffStale) {
-    return `El enlace de WhatsApp ya no sirve 😅\n\nNo pasa nada: entra aquí abajo y seguimos igual 💪`;
+    return `Para seguir necesito que entres con tu cuenta 🔐\n\nUsa la tarjetita de abajo y retomamos justo donde lo dejaste 💪`;
   }
   return `Para ver tu menú o cambiar algo, necesito que entres 🔐\n\nUsa la tarjetita de abajo — *no tienes que ir a ningún otro lado* 🙌`;
 }
@@ -144,7 +144,7 @@ export function multiBusinessText(names: string[]): string {
 export function helpText(shopName: string, enLinea: boolean | null): string {
   const status =
     enLinea === true ? '🟢 en línea' : enLinea === false ? '🔴 fuera de línea' : '⚪️';
-  return `Estoy con *${shopName}* (${status}).\n\nToca lo que necesites en la barra de abajo — o escríbeme como en WhatsApp 💬`;
+  return `Estoy con *${shopName}* (${status}).\n\nToca lo que necesites en la barra de abajo — o escríbeme lo que necesites 💬`;
 }
 
 export function rateLimitText(): string {
