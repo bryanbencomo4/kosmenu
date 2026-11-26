@@ -244,7 +244,7 @@ describe('WA Central — conversational flows', () => {
     expect(out.memory.summary.pendingQuestion).not.toBe('business_name');
   });
 
-  it('consumer search issues opaque handoff (no phone in URL)', async () => {
+  it('consumer search uses directory (no private phones)', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: STRANGER, catalog: [] });
     const handoffStore = createMemoryWaHandoffStore();
     const out = await runWaMasterOrchestrator(
@@ -257,14 +257,25 @@ describe('WA Central — conversational flows', () => {
         memory: emptyMem(STRANGER),
       },
       cfg(),
-      { handoffStore },
+      {
+        handoffStore,
+        executeDiscovery: async () => ({
+          ok: true,
+          tool: 'search_restaurants',
+          restaurants: [
+            {
+              id: '1',
+              slug: 'demo-burger',
+              nombre: 'Demo Burger',
+              menuUrl: 'https://elmenuxfa.com/v/demo-burger',
+            },
+          ],
+        }),
+      },
     );
     const blob = out.replies.join('\n');
-    expect(blob).toMatch(/elmenuxfa\.com\/asistente|handoff/i);
-    expect(blob).not.toMatch(/58412|phone=|tel=/i);
-    if (out.memory.summary.lastHandoffUrl) {
-      expect(out.memory.summary.lastHandoffUrl).not.toMatch(/58412/);
-    }
+    expect(blob).toMatch(/Demo Burger|Encontré/i);
+    expect(blob).not.toMatch(/58412|phone=|tel=|password/i);
   });
 
   it('merchant handoff transfers conversation context', async () => {

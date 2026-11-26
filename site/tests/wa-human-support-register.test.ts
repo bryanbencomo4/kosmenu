@@ -54,7 +54,7 @@ describe('human support registration', () => {
     expect(msgs.some((m) => m.role === 'system' && m.text.includes(result.ticket.id))).toBe(
       true,
     );
-    expect(HUMAN_SUPPORT_SUCCESS_REPLY).toMatch(/Hemos recibido tu solicitud/);
+    expect(HUMAN_SUPPORT_SUCCESS_REPLY).toMatch(/584140821633/);
   });
 
   it('rejects short digits', async () => {

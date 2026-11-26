@@ -11,10 +11,14 @@ export type WaMasterConfig = {
   /** Simulate NLU/tools path without Google HTTP (default true when Gemini off). */
   simulateAgent: boolean;
   /**
-   * Receptionist mode: brief answers + opaque handoff links to specialized assistants.
-   * Default OFF — fail closed until Preview/pilot review.
+   * Receptionist mode: opaque handoffs available as helpers (not the default path).
+   * Resolve in WhatsApp with DB/tools first; hand off only when needed.
    */
   receptionistMode: boolean;
+  /** Optional Gemini TTS voice notes (Wasender audio). Fail-closed. */
+  voiceNotesEnabled: boolean;
+  /** Owner personal line for last-resort escalate (digits only). */
+  ownerEscalateDigits: string;
   maxTurnsInPrompt: number;
   maxRepliesPerTurn: number;
   maxMonthlyGeminiRequests: number;
@@ -55,6 +59,11 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
     allowGemini: envBool(env, 'PLATFORM_WA_MASTER_ALLOW_GEMINI', false),
     simulateAgent: envBool(env, 'PLATFORM_WA_MASTER_SIMULATE', true),
     receptionistMode: envBool(env, 'PLATFORM_WA_MASTER_RECEPTIONIST', false),
+    voiceNotesEnabled: envBool(env, 'PLATFORM_WA_MASTER_VOICE', false),
+    ownerEscalateDigits: envStr(env, 'PLATFORM_WA_MASTER_OWNER_DIGITS', '584140821633').replace(
+      /\D/g,
+      '',
+    ),
     maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', 12),
     maxRepliesPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_REPLIES', 2),
     maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 200),

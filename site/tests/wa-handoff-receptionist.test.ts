@@ -121,7 +121,7 @@ describe('wa handoff codes', () => {
 });
 
 describe('Master receptionist handoff', () => {
-  it('consumer search → brief reply with prepared handoff URL', async () => {
+  it('consumer search → directory options in WhatsApp (resolve-first)', async () => {
     const store = createMemoryWaHandoffStore();
     const identity = resolveWaMasterIdentity({ fromDigits: PILOT, catalog: [] });
     const out = await runWaMasterOrchestrator(
@@ -138,15 +138,11 @@ describe('Master receptionist handoff', () => {
       { handoffStore: store, executeDiscovery: mockDiscovery, forceSimulateAgent: true },
     );
     expect(out.replies).toHaveLength(1);
-    expect(out.replies[0]).toMatch(/Hablar con el asistente/i);
-    expect(out.replies[0]).toMatch(/Explorar restaurantes/i);
-    expect(out.replies[0]).toMatch(/elmenuxfa\.com\/asistente/);
-    expect(out.replies[0]).toMatch(/https:\/\/elmenuxfa\.com(?:\n|$)/);
-    expect(out.replies[0]).toMatch(/#h=/);
+    // Resolve-first: list real directory hits in WhatsApp; handoff only if empty / explicit.
+    expect(out.replies[0]).toMatch(/Encontré|Demo Burger|TORO|opciones/i);
     expect(out.replies[0]).toMatch(/Caracas/i);
-    expect(out.toolsUsed).toContain('handoff_consumer');
-    expect(out.replies[0]).not.toMatch(/1️⃣/);
-    expect(out.replies[0]).not.toMatch(/TORO BRAVO|Demo Burger/i);
+    expect(out.toolsUsed).toContain('search_restaurants');
+    expect(out.replies[0]).not.toMatch(/password|contraseña/i);
   });
 
   it('memory recall answers directly without link spam', async () => {
@@ -245,7 +241,7 @@ describe('Master receptionist handoff', () => {
     expect(b.replies[0]).toMatch(/app\.elmenuxfa\.com\/asistente\?h=/);
   });
 
-  it('receptionist flag off still guides to asistente + explorar (no WA restaurant dump)', async () => {
+  it('receptionist flag off still resolves with directory search', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: PILOT, catalog: [] });
     const out = await runWaMasterOrchestrator(
       {
@@ -260,11 +256,8 @@ describe('Master receptionist handoff', () => {
       masterCfg({ PLATFORM_WA_MASTER_RECEPTIONIST: '0' }),
       { forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
-    expect(out.toolsUsed).not.toContain('search_restaurants');
-    expect(out.replies[0]).toMatch(/Hablar con el asistente/i);
-    expect(out.replies[0]).toMatch(/Explorar restaurantes/i);
-    expect(out.replies[0]).toMatch(/https:\/\/elmenuxfa\.com(?:\n|$)/);
-    expect(out.replies[0]).not.toMatch(/Demo Burger/i);
+    expect(out.toolsUsed).toContain('search_restaurants');
+    expect(out.replies[0]).toMatch(/Demo Burger|Encontré/i);
   });
 
   it('does not echo stale Caracas; correction clears assumed city', async () => {
@@ -326,7 +319,7 @@ describe('Master receptionist handoff', () => {
       { forceSimulateAgent: true, executeDiscovery: mockDiscovery },
     );
     expect(out.specialist).toBe('consumer');
-    expect(out.replies[0]).toMatch(/Hablar con el asistente|Explorar restaurantes/i);
+    expect(out.replies[0]).toMatch(/ciudad|zona|Encontré|Demo Burger|buscar/i);
     expect(out.replies[0]).not.toMatch(/registro|registrar/i);
   });
 });

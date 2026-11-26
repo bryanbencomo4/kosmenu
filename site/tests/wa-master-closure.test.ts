@@ -236,18 +236,16 @@ describe('wa-master closure sprint', () => {
     dirs.length = 0;
   });
 
-  it('nuevo + info + consumidor guía a asistente y explorar', async () => {
+  it('nuevo + info + consumidor pide zona o lista del directorio', async () => {
     const mem = createMemoryWaMasterStore();
     const a = await processMaster('Hola, quiero información', { mem });
-    expect(a.result.replies[0]?.text).toMatch(/menú digital|pedir comida|asistente|Explorar/i);
+    expect(a.result.replies[0]?.text).toMatch(/menú digital|pedir comida|elmenuxfa|negocio/i);
 
     const b = await processMaster('Quiero unas hamburguesas', { mem, from: a.from });
-    expect(b.result.replies[0]?.text).toMatch(/Hablar con el asistente/i);
-    expect(b.result.replies[0]?.text).toMatch(/Explorar restaurantes/i);
-    expect(b.result.replies[0]?.text).toMatch(/elmenuxfa\.com/);
+    expect(b.result.replies[0]?.text).toMatch(/ciudad|zona|Encontré|hamburg/i);
   });
 
-  it('búsqueda pizza guía a web en vez de listar locales en WA', async () => {
+  it('búsqueda pizza lista opciones reales del directorio', async () => {
     const identity = resolveWaMasterIdentity({ fromDigits: '584140000200', catalog: [] });
     const out = await runWaMasterOrchestrator(
       {
@@ -261,9 +259,8 @@ describe('wa-master closure sprint', () => {
       masterCfg(),
       { executeDiscovery: mockDiscoveryExecute() },
     );
-    expect(out.toolsUsed).not.toContain('search_restaurants');
-    expect(out.replies[0]).toMatch(/Hablar con el asistente|Explorar restaurantes/i);
-    expect(out.replies[0]).toMatch(/San Cristóbal|pizza/i);
+    expect(out.toolsUsed).toContain('search_restaurants');
+    expect(out.replies[0]).toMatch(/Encontré|pizza|menú|elmenuxfa\.com\/v\//i);
     expect(out.memory.summary.zone?.toLowerCase()).toMatch(/san crist/);
   });
 

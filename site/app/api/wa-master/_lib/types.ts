@@ -169,4 +169,6 @@ export type WaMasterOrchestratorResult = {
   toolsUsed: string[];
   mode: 'deterministic' | 'gemini' | 'fallback';
   dedupeKey: string;
+  /** When set, entry may also send a voice note (text still sent). */
+  voiceScript?: string | null;
 };

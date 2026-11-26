@@ -173,7 +173,7 @@ export async function runCommercialSpecialist(params: {
       if (handoff) {
         return {
           replies: [
-            `¡Excelente! 🙌 Nuestro asistente te acompaña para registrar${nameBit} y comenzar a crear tu menú.\n\nPuedes continuar aquí:\n${handoff.url}\n\n¡Te estará esperando para comenzar! 😊`,
+            `¡Genial${nameBit}! 🙌 Para terminar el registro (con tu sesión segura) te paso al asistente del negocio:\n${handoff.url}\n\nSi te trabas, escríbeme aquí y te ayudo.`,
           ],
           toolsUsed: ['handoff_business'],
           memoryPatch: {

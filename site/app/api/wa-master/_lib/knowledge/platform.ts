@@ -88,48 +88,32 @@ export function matchPlatformFaq(text: string): string | null {
   return null;
 }
 
-/** Open greeting — NL first; numbers only as optional shortcuts. */
+/** Open greeting — human, NL-first. */
 export function openWelcomeUnknown(): string {
   return [
-    `¡Hola! 👋 Bienvenido a *${PLATFORM_BRAND}*.`,
+    `¡Hola! 👋 Soy la línea de *${PLATFORM_BRAND}*.`,
     '',
-    'Puedo ayudarte a *buscar comida*, *crear el menú de tu negocio*, o *resolver dudas* de la plataforma.',
+    'Puedo buscarte comida, ayudarte a crear el menú de tu negocio o resolver dudas de la plataforma.',
     '',
-    'Cuéntame en tus palabras qué necesitas.',
-    '',
-    '_Si prefieres atajos:_ 1 pedir · 2 crear menú · 3 ya tengo negocio · 8 soporte · 9 asesor',
+    'Dime qué necesitas, en tus palabras.',
   ].join('\n');
 }
 
 export function openWelcomeConsumer(): string {
-  return [
-    '¡Hola de nuevo! 😊',
-    '',
-    '¿Buscas un restaurante, un plato o ayuda con un pedido?',
-    '',
-    '_Atajos:_ 1 buscar · 2 delivery · 3 cerca · 8 soporte · 9 asesor',
-  ].join('\n');
+  return '¡Hola de nuevo! 😊 ¿Qué se te antoja o en qué te ayudo?';
 }
 
 export function openWelcomeProspect(): string {
   return [
-    `¡Perfecto! Te ayudo a llevar tu negocio a *${PLATFORM_BRAND}* 🏪`,
+    `¡Perfecto! Te ayudo con tu negocio en *${PLATFORM_BRAND}*.`,
     '',
-    'Puedo explicarte cómo funciona, precios o ayudarte a registrar el menú.',
-    '',
-    '_Atajos:_ 1 cómo funciona · 2 precios · 3 registrar · 8 soporte · 9 asesor',
+    '¿Quieres saber cómo funciona, los precios, o ya registramos el menú?',
   ].join('\n');
 }
 
 export function openWelcomeRegistered(businessName?: string | null): string {
   const title = businessName?.trim()
-    ? `Hola 👋 ¿Qué necesitas para *${businessName.trim()}*?`
-    : 'Hola 👋 ¿Qué necesitas para tu negocio?';
-  return [
-    title,
-    '',
-    'Puedo ayudarte con enlaces del menú, productos, precios o el asistente del negocio.',
-    '',
-    '_Atajos:_ 1 enlaces · 2 productos · 3 precios · 8 soporte · 9 asesor',
-  ].join('\n');
+    ? `¡Hola! 👋 ¿Qué hacemos con *${businessName.trim()}*?`
+    : '¡Hola! 👋 ¿Qué necesitas para tu negocio?';
+  return `${title}\n\nEnlaces, productos, precios… dime y lo vemos.`;
 }

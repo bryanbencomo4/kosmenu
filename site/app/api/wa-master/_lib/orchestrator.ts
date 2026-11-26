@@ -19,6 +19,7 @@ import type { WaHandoffStore } from '../../_lib/wa-handoff';
 import { createMemoryWaMasterQuotaStore, type WaMasterQuotaStore } from './quota';
 import { formatPublishedPricing } from './knowledge/platform';
 import { buildDeterministicReplies } from './replies';
+import { shouldOfferVoiceNote } from './voice';
 import {
   runAdminSpecialist,
   type AdminMenuLoader,
@@ -394,16 +395,14 @@ export async function runWaMasterOrchestrator(
     ];
   }
 
-  // Live Gemini polish (1 HTTP typical): natural wording grounded in specialist facts.
-  // Skipped for admin/auth, greetings, human escalate, and receptionist handoff replies.
-  // Greeting polish was inventing "menú sin productos" over a simple hello.
+  // Live Gemini polish: natural wording grounded in specialist facts (DB/tools).
+  // Skipped for admin writes path, greetings, and human escalate.
   const softForGemini =
     !primary.startsWith('admin') &&
     primary !== 'support.human' &&
     primary !== 'greeting' &&
     !escalateHuman &&
-    !skipGeminiPolish &&
-    !config.receptionistMode;
+    !skipGeminiPolish;
   if (!input.forceDeterministic && softForGemini && replies.length) {
     const factsBlock = replies.join('\n');
     const agent = await runWaMasterAgentNlu({
@@ -531,6 +530,14 @@ export async function runWaMasterOrchestrator(
     });
   }
 
+  const voiceScript =
+    config.voiceNotesEnabled &&
+    !escalateHuman &&
+    replies[0] &&
+    shouldOfferVoiceNote(replies[0])
+      ? replies[0]
+      : null;
+
   return {
     replies,
     intents,
@@ -540,6 +547,7 @@ export async function runWaMasterOrchestrator(
     toolsUsed,
     mode,
     dedupeKey: `wa-master:${specialist}:${primary}:${input.fromDigits}:${messageId}`,
+    voiceScript,
   };
 }
 

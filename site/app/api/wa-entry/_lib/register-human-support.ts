@@ -82,8 +82,16 @@ export async function registerHumanSupportRequest(params: {
   }
 }
 
-export const HUMAN_SUPPORT_SUCCESS_REPLY =
-  '¡Claro! 😊 Hemos recibido tu solicitud.\n\nEn unos momentos, alguien de nuestro equipo se pondrá en contacto contigo por este mismo WhatsApp.\n\nGracias por tu paciencia. 💚';
+/** Last-resort personal line — only used after escalate registration succeeds. */
+const OWNER_ESCALATE_DISPLAY = '+584140821633';
+
+export const HUMAN_SUPPORT_SUCCESS_REPLY = [
+  'Listo 🙏 No pude cerrarlo del todo con lo que tengo aquí.',
+  '',
+  `Te paso con atención personal: *${OWNER_ESCALATE_DISPLAY}*`,
+  '',
+  'También pueden escribirte por este mismo chat. Gracias por la paciencia.',
+].join('\n');
 
 export const HUMAN_SUPPORT_FAILURE_REPLY =
-  'No pude registrar tu solicitud en este momento. 🙏 Intenta de nuevo en unos minutos o escribe *9* otra vez.';
+  'No pude registrar tu solicitud ahora. 🙏 Intenta de nuevo en unos minutos o escribe *9* otra vez.';

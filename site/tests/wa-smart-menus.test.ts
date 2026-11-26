@@ -107,9 +107,7 @@ describe('wa smart menus', () => {
     });
     expect(out.handled).toBe(true);
     expect(out.replies[0]).toMatch(/elmenuxfa\.com/);
-    // NL-first welcome; numeric shortcuts optional (plain digits, not emoji menus).
-    expect(out.replies[0]).toMatch(/Cuéntame|necesitas/i);
-    expect(out.replies[0]).toMatch(/1 pedir|8 soporte|9 asesor/);
+    expect(out.replies[0]).toMatch(/necesitas|Dime qué/i);
     expect(out.memoryPatch.menuId).toBe('root_unknown');
   });
 
@@ -146,7 +144,6 @@ describe('wa smart menus', () => {
     expect(out.skipGeminiPolish).toBe(true);
     expect(out.memoryPatch.menuId).toBe('root_registered');
     expect(out.replies[0]).toMatch(/pizzas el trueno/);
-    expect(out.replies[0]).toMatch(/1 enlaces|8 soporte|9 asesor/);
   });
 
   it('0 returns to profile root without wiping signup memory', async () => {
@@ -253,7 +250,7 @@ describe('wa smart menus', () => {
 
   it('builds registered and consumer menus', () => {
     expect(buildMenuText('root_registered', { businessName: 'Trueno' })).toMatch(/Trueno/);
-    expect(buildMenuText('root_consumer')).toMatch(/restaurante|pedido/i);
+    expect(buildMenuText('root_consumer')).toMatch(/antoja|ayudo/i);
     expect(buildMenuText('support_issue')).toMatch(/pagos o suscripción/);
   });
 

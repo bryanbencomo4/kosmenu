@@ -1,5 +1,6 @@
 import type { WaMasterConfig } from '../config';
 import type {
+  WaMasterDiscoveryCard,
   WaMasterDiscoveryCtx,
   WaMasterDiscoveryExecute,
 } from '../discovery-bridge';
@@ -7,6 +8,16 @@ import { issueMasterHandoff } from '../handoff';
 import { buildHandoffContextFromMemory } from '../knowledge/handoff-context';
 import type { WaHandoffStore } from '../../../_lib/wa-handoff';
 import type { WaMasterIdentity, WaMasterMemory, WaMasterRestaurantRef } from '../types';
+
+function toRefs(cards: WaMasterDiscoveryCard[]): WaMasterRestaurantRef[] {
+  return cards.slice(0, 5).map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    nombre: r.nombre,
+    menuUrl: r.menuUrl?.startsWith('http') ? r.menuUrl : publicMenuUrl(r.slug),
+    chatUrl: r.chatUrl ?? null,
+  }));
+}
 
 function fold(s: string) {
   return s
@@ -90,7 +101,7 @@ function foodQueryHint(text: string): string {
   return text.trim().slice(0, 80);
 }
 
-/** Clean public surfaces for ordering — prefer web assistant + directory over WA lists. */
+/** Secondary helper when WA cannot list options — not the default path. */
 export function formatConsumerOrderGuide(params: {
   assistantUrl: string;
   exploreUrl?: string;
@@ -100,30 +111,17 @@ export function formatConsumerOrderGuide(params: {
 }): string {
   let explore = (params.exploreUrl || 'https://elmenuxfa.com').trim().replace(/\/$/, '');
   if (!explore) explore = 'https://elmenuxfa.com';
-  let assistantDisplay = (params.assistantUrl || 'https://elmenuxfa.com/asistente').trim();
-  try {
-    const u = new URL(assistantDisplay);
-    assistantDisplay = `${u.origin}/asistente`;
-  } catch {
-    assistantDisplay = 'https://elmenuxfa.com/asistente';
-  }
-  const primary = (params.handoffUrl || params.assistantUrl || assistantDisplay).trim();
+  const primary = (params.handoffUrl || params.assistantUrl || 'https://elmenuxfa.com/asistente').trim();
   const hint = params.queryHint?.trim();
   const what =
-    hint && hint.toLowerCase() !== 'delivery'
-      ? `buscar *${hint}*`
-      : 'pedir delivery o explorar locales';
+    hint && hint.toLowerCase() !== 'delivery' ? `*${hint}*` : 'comida';
   const where = params.zone?.trim() ? ` en *${params.zone.trim()}*` : '';
   return [
-    `¡Claro! 🛵 Para ${what}${where}, lo más fácil es hacerlo en *elmenuxfa.com*:`,
+    `No me alcanzó el directorio aquí para ${what}${where}.`,
     '',
-    '*Hablar con el asistente*',
-    primary,
+    `Si quieres, sigue con el asistente web:\n${primary}`,
     '',
-    '*Explorar restaurantes*',
-    explore,
-    '',
-    'Ahí eliges zona, ves menús completos y pides con delivery cuando el local lo tenga activo.',
+    `O explora en ${explore}`,
   ].join('\n');
 }
 
@@ -217,10 +215,17 @@ export async function runConsumerSpecialist(params: {
       t,
     );
 
-  // Ordering / discovery belongs on web (asistente + explorar), not a short WA list.
-  if (foodSeek) {
+  const clearsZone = isZoneCorrection(text);
+  const effectiveZone = clearsZone ? null : zone || null;
+
+  // Explicit ask for the web assistant → handoff (helpers, not default).
+  if (
+    foodSeek &&
+    /\b(asistente web|en la (web|pagina|página)|abrir (el )?asistente|pasame al asistente|pásame al asistente)\b/.test(
+      t,
+    )
+  ) {
     const query = foodQueryHint(text);
-    const clearsZone = isZoneCorrection(text);
     const handoff = await issueMasterHandoff({
       store: params.handoffStore,
       config,
@@ -228,60 +233,147 @@ export async function runConsumerSpecialist(params: {
       fromDigits: params.fromDigits || memory.profile.fromDigits,
       nowMs: params.nowMs,
       payload: buildHandoffContextFromMemory({
-        memory: {
-          ...memory,
-          summary: {
-            ...memory.summary,
-            zone: clearsZone ? null : zone || memory.summary.zone,
-          },
-        },
+        memory,
         identity,
         text,
         intent: 'consumer.search',
         profile: 'consumer_discovery',
         extra: {
           query,
-          zone: clearsZone ? null : zone || null,
-          conversationHint: `Buscar ${query}${zone ? ` en ${zone}` : ''}`,
-          summary: `Cliente busca ${query}${zone ? ` en ${zone}` : ''} desde WhatsApp`,
+          zone: effectiveZone,
+          conversationHint: `Buscar ${query}${effectiveZone ? ` en ${effectiveZone}` : ''}`,
         },
       }),
     });
-    const guide = formatConsumerOrderGuide({
-      assistantUrl: config.consumerAssistantUrl,
-      handoffUrl: handoff?.url ?? null,
-      // Never echo zone on correction turns.
-      zone: clearsZone ? null : zone || null,
-      queryHint: query,
-    });
     return {
-      replies: [guide],
+      replies: [
+        formatConsumerOrderGuide({
+          assistantUrl: config.consumerAssistantUrl,
+          handoffUrl: handoff?.url ?? null,
+          zone: effectiveZone,
+          queryHint: query,
+        }),
+      ],
       toolsUsed: [...toolsUsed, handoff ? 'handoff_consumer' : 'consumer_explore_guide'],
       memoryPatch: {
-        ...(zone ? { zone } : clearsZone ? { zone: null } : {}),
-        // Drop stale WA restaurant lists — ordering is on web now.
-        lastRestaurants: [],
-        pendingQuestion: null,
+        ...(effectiveZone ? { zone: effectiveZone } : clearsZone ? { zone: null } : {}),
         activeService: 'consumer',
         lastHandoffUrl: handoff?.url ?? memory.summary.lastHandoffUrl ?? null,
         lastHandoffAtMs: handoff ? params.nowMs ?? Date.now() : memory.summary.lastHandoffAtMs,
       },
-      skipGeminiPolish: true,
+    };
+  }
+
+  // Resolve in WhatsApp with directory data first.
+  if (foodSeek && !effectiveZone && discoveryCtx.lat == null && !discoveryCtx.region) {
+    return {
+      replies: [
+        '¡Dale! 🍔 ¿En qué ciudad o zona lo buscas? Así te paso opciones reales del directorio.',
+      ],
+      toolsUsed,
+      memoryPatch: {
+        pendingQuestion: 'zone',
+        activeService: 'consumer',
+        ...(clearsZone ? { zone: null } : {}),
+      },
+    };
+  }
+
+  if (foodSeek) {
+    let toolName = 'search_restaurants';
+    const args: Record<string, unknown> = {
+      limit: 5,
+      offset: 0,
+      region: effectiveZone || discoveryCtx.region,
+    };
+    if (/\bpizza/.test(t)) {
+      args.category = 'pizzas';
+      args.query = 'pizza';
+    } else if (/\bhamburg|burger/.test(t)) {
+      args.category = 'hamburguesas';
+      args.query = 'hamburguesa';
+    } else if (/\bmexican|taco/.test(t)) {
+      args.category = 'tacos';
+      args.query = 'mexicana';
+    } else if (/\bsushi/.test(t)) {
+      args.category = 'sushi';
+      args.query = 'sushi';
+    } else if (/\barepa/.test(t)) {
+      args.category = 'arepas';
+      args.query = 'arepa';
+    } else if (text.trim()) {
+      args.query = text.trim().slice(0, 80);
+    }
+    if (/\babierto|abiertos/.test(t)) {
+      toolName = 'filter_restaurants';
+      args.openOnly = true;
+    }
+
+    const result = await executeTool(toolName, args, discoveryCtx);
+    toolsUsed.push(toolName);
+    const restaurants = result.restaurants ?? [];
+    const refs = toRefs(restaurants);
+
+    if (!restaurants.length) {
+      const query = foodQueryHint(text);
+      const handoff = await issueMasterHandoff({
+        store: params.handoffStore,
+        config,
+        destination: 'consumer_discovery',
+        fromDigits: params.fromDigits || memory.profile.fromDigits,
+        nowMs: params.nowMs,
+        payload: buildHandoffContextFromMemory({
+          memory,
+          identity,
+          text,
+          intent: 'consumer.search',
+          profile: 'consumer_discovery',
+          extra: { query, zone: effectiveZone },
+        }),
+      });
+      return {
+        replies: [
+          formatConsumerOrderGuide({
+            assistantUrl: config.consumerAssistantUrl,
+            handoffUrl: handoff?.url ?? null,
+            zone: effectiveZone,
+            queryHint: query,
+          }),
+        ],
+        toolsUsed: [...toolsUsed, handoff ? 'handoff_consumer' : 'consumer_explore_guide'],
+        memoryPatch: {
+          zone: effectiveZone,
+          lastRestaurants: [],
+          pendingQuestion: null,
+          activeService: 'consumer',
+        },
+      };
+    }
+
+    const lines = refs.map((r, i) => `${i + 1}. *${r.nombre}* — ${r.menuUrl}`).join('\n');
+    const zoneNote = effectiveZone ? ` en ${effectiveZone}` : '';
+    return {
+      replies: [
+        `Encontré esto${zoneNote}:\n${lines}\n\nDime el número o “la segunda” y te paso el menú.`,
+      ],
+      toolsUsed,
+      memoryPatch: {
+        zone: effectiveZone,
+        lastRestaurants: refs,
+        pendingQuestion: null,
+        activeService: 'consumer',
+      },
     };
   }
 
   return {
     replies: [
-      formatConsumerOrderGuide({
-        assistantUrl: config.consumerAssistantUrl,
-        zone: zone || null,
-      }),
+      'Cuéntame qué buscas (tipo de comida o nombre del local) y la zona, y te ayudo con el directorio.',
     ],
-    toolsUsed: [...toolsUsed, 'consumer_explore_guide'],
+    toolsUsed,
     memoryPatch: {
-      ...(zone ? { zone } : {}),
+      ...(effectiveZone ? { zone: effectiveZone } : {}),
       activeService: 'consumer',
     },
-    skipGeminiPolish: true,
   };
 }

@@ -595,6 +595,24 @@ async function processMasterAssistantBranch(params: {
   });
   storeOps = dispatched.metrics.storeOps;
 
+  // Optional voice note (best-effort; text already sent).
+  if (
+    dispatched.action === 'replied' &&
+    orch.voiceScript &&
+    masterConfig.voiceNotesEnabled &&
+    !orch.escalateHuman
+  ) {
+    try {
+      const { sendMasterVoiceNote } = await import('../../wa-master/_lib/voice');
+      await sendMasterVoiceNote({
+        toDigits: event.fromDigits,
+        text: orch.voiceScript,
+      });
+    } catch {
+      // Keep text reply; voice is optional.
+    }
+  }
+
   if (orch.escalateHuman && escalateRegistered) {
     await takeConversation({
       store,

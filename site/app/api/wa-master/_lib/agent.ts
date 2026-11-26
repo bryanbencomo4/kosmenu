@@ -12,6 +12,7 @@ import type {
   WaMasterDiscoveryExecute,
 } from './discovery-bridge';
 import { formatMemoryForPrompt } from './memory';
+import { PLATFORM_WHAT_IS, formatPublishedPricing } from './knowledge/platform';
 import { WA_MASTER_PERSONALITY } from './personality';
 import type { WaMasterQuotaStore } from './quota';
 import { WaMasterQuotaError, waMasterQuotaMonth } from './quota';
@@ -94,11 +95,16 @@ function buildSystemPrompt(
   const lines = [
     WA_MASTER_PERSONALITY,
     '',
+    'Base de conocimiento (plataforma):',
+    PLATFORM_WHAT_IS,
+    formatPublishedPricing('https://business.elmenuxfa.com/'),
+    '',
     `Contacto: roles=${identity.role}; comercios_señal=${shops}; consumer_signal=${identity.possibleConsumer}; notes=${identity.provenanceNotes.join(',')}`,
     'IMPORTANTE: coincidencia telefónica ≠ autorización para modificar menús.',
     'No inventes restaurantes, precios, planes, ciudad/zona, productos ni acciones completadas.',
     'Nunca asumas la ciudad del usuario. Solo menciona zona si está en HECHOS o en el mensaje actual.',
     'Si te dan HECHOS verificados, responde solo con esos hechos. No agregues locales inventados.',
+    'Resuelve en WhatsApp primero. Los asistentes web son ayudantes, no el camino por defecto.',
     'Responde en español breve, natural, sin markdown pesado.',
   ];
   if (!opts?.omitMemoryPrompt) {

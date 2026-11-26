@@ -126,17 +126,16 @@ describe('wa-master E2E integrated', () => {
     expect(r1.action).toBe('replied');
     expect(r1.replies[0]?.text).toMatch(/menú digital|pedir comida|restaurantes/i);
 
-    // 3–4 search → web assistant / explorar (no WA restaurant dump)
+    // 3–4 search → real directory options in WhatsApp
     const r3 = await turn('Busco restaurantes');
     expect(r3.action).toBe('replied');
     const r4 = await turn('Quiero hamburguesas en San Cristóbal');
-    expect(r4.replies[0]?.text).toMatch(/hamburguesas|asistente|elmenuxfa\.com/i);
-    expect(r4.replies[0]?.text).toMatch(/san cristobal/i);
+    expect(r4.replies[0]?.text).toMatch(/Burger|opciones|Encontré/i);
     expect(r4.replies[0]?.text).not.toMatch(/58414|password/i);
 
-    // 5–6 follow-up still guided to web (ordinal list no longer kept in WA)
+    // 5–6 segunda → menu link
     const r5 = await turn('La segunda');
-    expect(r5.replies[0]?.text).toMatch(/asistente|elmenuxfa\.com|Explorar|menú/i);
+    expect(r5.replies[0]?.text).toMatch(/burger-dos|Burger Dos|menú|Menú/i);
 
     // 7–8 commercial switch + remember name
     const r7 = await turn('Quiero registrar mi restaurante en la plataforma');
