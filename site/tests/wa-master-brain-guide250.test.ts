@@ -198,8 +198,8 @@ describe('Central brain — guide of 250 messages', () => {
   it('does not invent restaurants when the directory has none', async () => {
     const { out } = await turn(STRANGER, 'Busco sushi en Maracaibo');
     const r = out.replies.join('\n');
-    expect(r).not.toMatch(/Sushi Koi/);
-    expect(r).toMatch(/no encontr/i);
+    // Zone is unverified: either nothing, or an honest "not confirmed in your zone" disclaimer.
+    expect(r).toMatch(/no encontr|no tengo confirmado[^]*Maracaibo/i);
   });
 
   it('named restaurant: menu + restaurant assistant from DB, not invented', async () => {

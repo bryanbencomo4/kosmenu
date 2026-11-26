@@ -534,11 +534,24 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
   if (opts.query) args.query = opts.query;
   const tool = opts.openOnly ? 'filter_restaurants' : 'search_restaurants';
   if (opts.openOnly) args.openOnly = true;
-  const { ok, cards } = await dirSearch(c, tool, args);
+  const first = await dirSearch(c, tool, args);
+  const { ok } = first;
+  let cards = first.cards;
+  let zoneMiss = false;
   if (!ok) {
     return reply(c, topic, [
       'Ahora mismo no logro consultar el directorio. Intenta de nuevo en un momento, o escribe *asesor* y te ayuda una persona.',
     ]);
+  }
+  // Zone data is sparse: when the zone filter finds nothing, retry without it and be honest.
+  if (!cards.length && zone && !opts.openOnly) {
+    const { region: _drop, ...rest } = args;
+    void _drop;
+    const wide = await dirSearch(c, tool, rest);
+    if (wide.ok && wide.cards.length) {
+      cards = wide.cards;
+      zoneMiss = true;
+    }
   }
   const what = opts.label ? `*${opts.label}*` : 'lo que buscas';
   const where = zone ? ` en *${zone}*` : '';
@@ -580,7 +593,9 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
   }
 
   const refs = toRefs(cards, c.config);
-  const intro = opts.openOnly
+  const intro = zoneMiss
+    ? `No tengo confirmado ${what} específicamente en *${zone}*, pero esto es lo que hay en el directorio de ${BRAND} (revisa en cada menú si llegan a tu zona):`
+    : opts.openOnly
     ? `Estos son los que veo abiertos${where}:`
     : opts.label
       ? `Encontré estas opciones de ${what}${where}:`
