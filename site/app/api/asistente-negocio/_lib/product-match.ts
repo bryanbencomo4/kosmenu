@@ -5,6 +5,9 @@ export type ProductRow = {
   nombre: unknown;
   precio?: unknown;
   disponible?: unknown;
+  imagen_url?: unknown;
+  categoria_id?: unknown;
+  descripcion?: unknown;
 };
 
 export type ProductMatchResult =
