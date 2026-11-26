@@ -18,6 +18,7 @@ import {
   greetingText,
   helpText,
   homeGreetingText,
+  humanHandoffHint,
   multiBusinessText,
   needsAuthText,
   noBusinessText,
@@ -500,11 +501,8 @@ export async function POST(req: Request) {
       needsAuth: !authenticated,
       showAuthCard: !authenticated,
       needsComercioSelect: Boolean(authenticated && !selectedShop && membership.list.length > 1),
-      handoffHint:
-        payload?.pendingOperation ||
-        payload?.summary ||
-        payload?.conversationHint ||
-        null,
+      handoffHint: humanHandoffHint(payload),
+      handoffDraft: (payload?.conversationHint || '').trim().slice(0, 160) || null,
       chips: suggestBusinessChips({
         phase: chipPhase,
         shop: selectedShop,

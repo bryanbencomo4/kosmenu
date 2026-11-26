@@ -52,6 +52,44 @@ export function homeGreetingText(
   return `${hello}\n\n${status}\n\n${metricsBlock}\n\n¿Qué hacemos? Usa la barra de abajo o escríbeme 🍕`;
 }
 
+/** Human labels for WhatsApp handoff operations (never show raw keys like `set_fx`). */
+const HANDOFF_OP_LABEL: Record<string, string> = {
+  set_fx: 'el cambio de tasa',
+  edit_price: 'el cambio de precio',
+  edit_products: 'la edición de productos',
+  set_availability: 'la disponibilidad de productos',
+  set_delivery: 'la configuración de delivery',
+  menu_links: 'tus enlaces del menú',
+  set_hours: 'el cambio de horario',
+  admin_settings: 'el ajuste de tu negocio',
+  admin_help: 'tu consulta',
+  register_business: 'el registro de tu negocio',
+};
+
+/** Friendly label for the pending handoff operation, or null when unknown. */
+export function handoffOperationLabel(op: string | null | undefined): string | null {
+  const key = (op ?? '').trim();
+  return key ? HANDOFF_OP_LABEL[key] ?? null : null;
+}
+
+/**
+ * Hint shown to the merchant for a WhatsApp handoff: a human label, never an internal key.
+ */
+export function humanHandoffHint(payload: WaHandoffPayload | null): string | null {
+  if (!payload) return null;
+  const label = handoffOperationLabel(payload.pendingOperation);
+  if (label) return label;
+  const candidates = [payload.pendingOperation, payload.conversationHint, payload.summary];
+  for (const raw of candidates) {
+    const v = (raw ?? '').trim();
+    if (!v) continue;
+    // Skip snake_case keys and "key · Shop" summaries.
+    if (/^[a-z]+(?:_[a-z]+)+(?:\s*·.*)?$/.test(v)) continue;
+    return v.slice(0, 160);
+  }
+  return null;
+}
+
 /** Short WhatsApp-style lines — human, warm, never walls of text. */
 export function greetingText(
   payload: WaHandoffPayload | null,
@@ -70,6 +108,13 @@ export function greetingText(
       return `¡Qué bien! 🎉 Vamos a crear tu negocio${name}.\n\nRegístrate o entra aquí abajo — no hace falta salir del chat 💬`;
     }
     return `¡Dale! 🚀 Seguimos el registro${name}. Dime cómo se llama el local y te guío paso a paso.`;
+  }
+  const opLabel = handoffOperationLabel(payload?.pendingOperation);
+  if (opLabel) {
+    if (!authenticated) {
+      return `¡Hola! 👋 Seguimos con *${opLabel}*.\n\nEntra aquí abajo y lo resolvemos juntos ✨`;
+    }
+    return `¡Hola de nuevo! 🙌 Seguimos con *${opLabel}*.\n\nDime cómo lo quieres y te lo preparo; tú solo confirmas aquí en el chat ✅`;
   }
   if (payload?.conversationHint) {
     return `¡Hola de nuevo! 😊 Retomamos: *${payload.conversationHint}*`;

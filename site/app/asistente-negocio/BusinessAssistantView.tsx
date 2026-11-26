@@ -32,6 +32,7 @@ import {
 } from '../v/[id]/_components/chat/chat-theme';
 import { ChatComposer } from '../v/[id]/_components/chat/ChatComposer';
 import { ChatHeader } from '../v/[id]/_components/chat/ChatHeader';
+import { ChatReceiptTicks } from '../v/[id]/_components/chat/ChatReceiptTicks';
 import {
   ChatSuggestedReplies,
   type ChatSuggestedChip,
@@ -378,8 +379,10 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
           messagesRef.current.length > 1 &&
           !wantAuth;
         if (!preserve) {
+          // The server text already says "Seguimos con …" / "Retomamos …"; never repeat it.
+          const alreadyContinues = /\b(seguimos con|retomamos)\b/i.test(json.text || '');
           const continuity =
-            !wantAuth && hint
+            !wantAuth && hint && !alreadyContinues
               ? `\n\nSigo con tu solicitud: *${hint}*. ¿La aplicamos?`
               : '';
           setMessages([
@@ -393,8 +396,9 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
               menuView: json.menuView ?? null,
             },
           ]);
-          if (!wantAuth && hint && !json.proposal) {
-            setDraft((d) => d || String(hint));
+          const draftHint = (json as { handoffDraft?: string | null }).handoffDraft;
+          if (!wantAuth && (draftHint || hint) && !json.proposal) {
+            setDraft((d) => d || String(draftHint || hint));
           }
         }
         bootedOnceRef.current = true;
@@ -698,8 +702,8 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
                 const isUser = m.role === 'user';
                 const groupedWithPrev = Boolean(prev) && prev.role === m.role;
                 const radius = isUser
-                  ? 'rounded-2xl rounded-br-md'
-                  : 'rounded-2xl rounded-bl-md';
+                  ? `rounded-2xl rounded-br-md ${groupedWithPrev ? 'rounded-tr-md' : ''}`
+                  : `rounded-2xl rounded-bl-md ${groupedWithPrev ? 'rounded-tl-md' : ''}`;
                 const timeLabel = formatBubbleTime(m.createdAt);
                 const isLast = index === messages.length - 1;
                 return (
@@ -722,11 +726,10 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
                       <div className="whitespace-pre-wrap break-words">
                         {formatChatText(m.text)}
                       </div>
-                      {timeLabel ? (
-                        <span className="mt-0.5 flex justify-end text-[10.5px] tabular-nums text-[var(--chat-text-muted)]">
-                          {timeLabel}
-                        </span>
-                      ) : null}
+                      <span className="mt-0.5 flex items-center justify-end gap-0.5 self-end pl-2 text-[10.5px] tabular-nums leading-none text-[var(--chat-text-muted)]">
+                        {timeLabel ? <span>{timeLabel}</span> : null}
+                        {isUser ? <ChatReceiptTicks status="read" /> : null}
+                      </span>
                     </div>
 
                     {m.menuView && m.menuView.categories.length > 0 ? (
