@@ -144,7 +144,7 @@ function makeProposal(
 }
 
 function mapProductsSample(
-  products: Array<{ id: unknown; nombre: unknown; precio: unknown; disponible: unknown }>,
+  products: ProductRow[],
   limit = 8,
 ) {
   return products.slice(0, limit).map((p) => ({
