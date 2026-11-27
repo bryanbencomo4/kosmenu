@@ -181,8 +181,8 @@ export type WaMasterMenuView = {
 };
 
 export type WaMasterBrainPending = {
-  /** `delivery`: waiting for the person's location to quote `comercioId`'s delivery fee. */
-  kind: 'zone' | 'name' | 'offer' | 'delivery';
+  /** `product_intent`: we asked a registered business owner whether a product they named is to CONSUME or to MANAGE (the product is in `query`). `delivery`: waiting for the person's location to quote `comercioId`'s delivery fee. */
+  kind: 'zone' | 'name' | 'offer' | 'delivery' | 'product_intent';
   comercioId?: string | null;
   /** The person asked for places "near me": answer with a location or an address. */
   near?: boolean;

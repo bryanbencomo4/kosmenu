@@ -63,6 +63,7 @@ import {
 } from './menu';
 import { extractPlaceText, isBareCity } from './place';
 import { PLATFORM_WORDS, foodKey, planTurn, type TurnPlan } from './plan';
+import { detectAmbiguousProduct, parseProductIntentAnswer, productIntentQuestion } from './product-intent';
 import {
   ACTIVE_REF_TTL_MS,
   TASK_TTL_MS,
@@ -2821,6 +2822,71 @@ async function runPlan(c: Ctx, plan: TurnPlan): Promise<BrainResult | null> {
   return out;
 }
 
+/**
+ * Consume-vs-manage clarification for a product named without an intent. Only called for numbers with a
+ * registered business. Handles BOTH halves: asks the question, and acts on the answer.
+ */
+async function productIntentTurn(c: Ctx, merchantVoice: boolean): Promise<BrainResult | null> {
+  const sum = c.memory.summary;
+  const live = sum.brainPending && c.nowMs - sum.brainPending.atMs <= BRAIN_PENDING_TTL_MS ? sum.brainPending : null;
+  // An owner command ('cambia el precio…') is already clear — except as the ANSWER to our own question,
+  // where en mi menú / cambiarle el precio must keep the product we asked about.
+  if (merchantVoice && live?.kind !== 'product_intent') return null;
+
+  // 1) The answer to our question.
+  if (live?.kind === 'product_intent' && live.query) {
+    const answer = parseProductIntentAnswer(c.text);
+    if (answer === 'consume') {
+      // Re-enter as an explicit search for that product: the normal consumer flow (location, directory…) takes over.
+      const out = await runCentralBrainInner({
+        text: `busco ${live.query}`,
+        memory: { ...c.memory, summary: { ...sum, brainPending: null } },
+        identity: c.identity,
+        config: c.config,
+        nowMs: c.nowMs,
+        fromDigits: c.fromDigits,
+        handoffStore: c.handoffStore,
+        loadShopDelivery: c.loadShopDelivery,
+        loadPublicMenu: c.loadPublicMenu,
+        discoveryCtx: c.discoveryCtx,
+        executeDiscovery: c.executeDiscovery,
+      });
+      if (out) return { ...out, memoryPatch: { brainPending: null, ...out.memoryPatch } };
+      return null;
+    }
+    if (answer === 'manage') {
+      const out = await merchantFlow(c, 'product', 'ops');
+      const lead = `Perfecto, entonces *${live.query}* lo gestionamos en tu menú.`;
+      return {
+        ...out,
+        replies: out.replies.length ? [`${lead}\n\n${out.replies[0]}`, ...out.replies.slice(1)] : [lead],
+        skipCompose: true,
+        memoryPatch: { ...out.memoryPatch, ...(out.memoryPatch.brainPending ? {} : { brainPending: null }) },
+      };
+    }
+    // Neither: the person moved on. Drop the question and let the normal flows read the message.
+    return null;
+  }
+
+  // 2) Another question is waiting for its answer (where are you / restaurant name / delivery / offer): not ours.
+  if (live) return null;
+
+  // 3) A bare product from a registered business: ask.
+  const amb = detectAmbiguousProduct({
+    text: c.text,
+    hasShops: c.shops.length > 0,
+    hasActiveRestaurant: Boolean(activeRef(c)),
+    tr: c.tr,
+  });
+  if (!amb) return null;
+  // The name of a restaurant we are talking about is a pick, not a product.
+  if (knownRefsOf(c).some((r) => mentionsRestaurant(c.t, r.nombre))) return null;
+  return reply(c, 'unknown', [productIntentQuestion(amb.product)], {
+    skipCompose: true,
+    memoryPatch: { brainPending: { kind: 'product_intent', topic: 'product_intent', query: amb.product, atMs: c.nowMs } },
+  });
+}
+
 export async function runCentralBrain(params: BrainParams): Promise<BrainResult | null> {
   const out = await runCentralBrainInner(params);
   // The restaurant we are "on" expires: stamp it whenever the brain (re)selects or clears one.
@@ -2865,6 +2931,14 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
   const merchantVoice = detectMerchantVoice(text, shops.length > 0, inOwnerThread);
   if (merchantVoice && isBareOwnerStatement(text)) {
     return ownerWelcome(c);
+  }
+
+  // STEP 0 — a product named with no stated intent, from a number that has a registered business:
+  // is it to CONSUME (order it, maybe at another business) or to MANAGE (their own menu)? Ask, never guess.
+  // Numbers with no registered business never get here (shops.length === 0 → normal flows).
+  if (shops.length > 0 && !extractCoords(text)) {
+    const productOut = await productIntentTurn(c, merchantVoice);
+    if (productOut) return productOut;
   }
 
   // STEP 1 — what operation does THIS message ask for? (search restaurants / compare menus / other)
