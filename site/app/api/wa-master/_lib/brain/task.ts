@@ -29,9 +29,9 @@ function stem(word: string): string {
 }
 
 const GENERIC_NAME_WORDS = new Set([
-  'restaurante', 'restaurant', 'hamburgueseria', 'hamburguesas', 'hamburguesa', 'pizzeria', 'pizza', 'pizzas',
+  'restaurante', 'restaurant', 'hamburgueseria', 'hamburguesas', 'hamburguesa', 'pizzeria',
   'arepera', 'pollos', 'pollo', 'cafe', 'parrilla', 'comida', 'comidas', 'rapida', 'casa', 'tequeneria',
-  'pasteleria', 'panaderia', 'heladeria', 'sushi', 'bar', 'grill', 'del', 'los', 'las', 'qa',
+  'pasteleria', 'panaderia', 'heladeria', 'sushi', 'bar', 'del', 'los', 'las', 'qa',
 ]);
 
 /** The person named this restaurant: whole name, or all of its distinctive words ("bladi jaiper"). */
@@ -111,9 +111,29 @@ export function detectExclusion(original: string, known: Array<{ id: string; nom
   return ids.size || names.size ? { ids: [...ids], names: [...names] } : null;
 }
 
+const NAME_STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'en']);
+const nameTokens = (s: string) =>
+  fold(s)
+    .split(/[^a-z0-9ñ]+/)
+    .filter((w) => w && !NAME_STOP.has(w))
+    .map(stem);
+
+/**
+ * Two spellings of the SAME restaurant: every word of the shorter name appears in the longer one
+ * ("Bladi Jaiper" = "Hamburguesería Bladi Jaiper"). Sharing one word is not enough:
+ * "QA Pizza Chacao" is not "QA Grill Chacao".
+ */
+export function sameRestaurantName(a: string, b: string): boolean {
+  const A = nameTokens(a);
+  const B = nameTokens(b);
+  if (!A.length || !B.length) return false;
+  const within = (x: string[], y: string[]) =>
+    x.every((w) => y.includes(w)) && x.some((w) => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
+  return within(A, B) || within(B, A);
+}
+
 export function isExcluded(nombre: string, excluded: string[]): boolean {
-  const f = fold(nombre);
-  return excluded.some((e) => e && (f === e || f.includes(e) || mentionsRestaurant(e, nombre)));
+  return excluded.some((e) => e && sameRestaurantName(e, nombre));
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +145,7 @@ const NUMBER_WORDS: Record<string, number> = {
 };
 
 const LIST_NOUN =
-  /\b(restaurantes?|opciones|lugares|sitios|locales|alternativas|negocios|hamburgueserias?|pizzerias?|areperas?)\b/;
+  /\b(restaurantes?|comercios?|establecimientos?|opciones|lugares|sitios|locales|alternativas|negocios|hamburgueserias?|pizzerias?|areperas?)\b/;
 const COUNT_BEFORE_NOUN = new RegExp(
   `\\b(\\d{1,2}|${Object.keys(NUMBER_WORDS).join('|')})\\s+(?:mejores\\s+|buenos?\\s+|buenas\\s+|otros\\s+|otras\\s+|distintos\\s+|distintas\\s+)?${LIST_NOUN.source.replace(/^\\b/, '')}`,
 );

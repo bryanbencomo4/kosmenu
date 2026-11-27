@@ -138,26 +138,22 @@ describe('acceptance: 10-turn purchase conversation, the last intent always wins
     expect(body(t1)).toMatch(/TORO BRAVO/);
     expect(body(t1)).toMatch(/QA Smash House/);
     expect(body(t1)).not.toMatch(/Maracaibo/);
+    expect(body(t1)).not.toMatch(/COP|delivery \d/); // a restaurant search shows no prices nor fees
     expect(m.summary.zone).toBe('Caracas');
     expect(m.summary.placeText).toBe('Los Palos Grandes, Caracas');
     expect(directoryCalls[0].args).toMatchObject({ region: 'Caracas', category: 'hamburguesas' });
 
-    // 2. "Recomiéndame tres restaurantes": still burgers, still Caracas, still that place; "tres" = 3 places.
+    // 2. "Recomiéndame tres restaurantes": still burgers, still Caracas; names only, nothing unasked.
     const t2 = await turn(1);
     const l2 = numbered(body(t2));
     expect(l2).toHaveLength(3);
     expect(l2[0]).toContain('TORO BRAVO');
     expect(l2.join('\n')).toMatch(/QA Smash House/);
-    expect(l2.join('\n')).toMatch(/QA Burger Altamira/);
-    expect(body(t2)).not.toMatch(/Maracaibo|Chacao/); // other city / no delivery: not recommended
-    expect(l2[0]).toContain(`hamburguesas desde ${cop(minBurger(1))}`);
-    expect(l2[1]).toContain(`desde ${cop(minBurger(0.8))}`);
-    expect(l2[2]).toContain(`desde ${cop(minBurger(0.9))}`);
-    expect(l2[0]).toContain(`delivery ${cop(feeTo('toro-bravo'))}`);
-    expect(l2[2]).toContain(`delivery ${cop(feeTo('qa-burger-altamira'))}`);
-    expect(body(t2)).not.toMatch(/en qué ciudad|ciudad o zona estás/i); // nothing indispensable was missing
+    expect(body(t2)).toMatch(/3 de los 4/); // says there are more, never silently truncates
+    expect(body(t2)).not.toMatch(/Maracaibo/); // other city
+    expect(body(t2)).not.toMatch(/COP|delivery \d/); // no prices / no delivery computed unasked
+    expect(body(t2)).not.toMatch(/en qué ciudad|ciudad o zona estás/i);
     expect(m.summary.lastRestaurants).toHaveLength(3);
-
     // 3. Pick TORO BRAVO.
     const t3 = await turn(2);
     expect(m.summary.activeRestaurant?.nombre).toBe('TORO BRAVO');
@@ -209,7 +205,6 @@ describe('acceptance: 10-turn purchase conversation, the last intent always wins
       'TORO BRAVO', // 1x — back, the exclusion belonged to the old task
     ]);
     expect(l7[0]).toContain(cop(minBurger(0.6)));
-    expect(l7[0]).toMatch(/sin delivery/);
     expect(m.summary.task?.excluded).toEqual([]);
     expect(m.summary.placeText).toBe('Los Palos Grandes, Caracas'); // not downgraded to "Caracas"
     expect(m.summary.geo?.label).toBe('Los Palos Grandes, Caracas');
@@ -355,10 +350,9 @@ describe('when a restaurant cannot serve the person, real alternatives are offer
     });
     const r = await say('Me interesa QA Burger Maracaibo', m);
     expect(body(r)).toMatch(/⚠️/);
-    expect(body(r)).toMatch(/Estos sí te llegan/);
-    expect(body(r)).toMatch(/TORO BRAVO/);
-    expect(body(r)).toMatch(/QA Smash House/);
-    expect(body(r)).not.toMatch(/Chacao/); // no delivery → not offered as a solution
+    expect(body(r)).toMatch(/queda en Centro, Maracaibo/);
+    expect(body(r)).toMatch(/te muestro los de \*Caracas\*/);
+    expect(body(r)).not.toMatch(/delivery \d|Total estimado/); // no coverage claimed without checking
     const d = await say('¿hacen delivery hasta mi casa?', r.memory);
     expect(body(d)).toMatch(/no te llega|demasiado lejos/);
     expect(body(d)).toMatch(/Estos sí te llegan/);

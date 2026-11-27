@@ -453,10 +453,14 @@ export function parseMenuAsk(text: string, snap: MenuSnapshot, view: WaMasterMen
     }
   }
   for (const p of products) {
-    const first = tokens(p.nombre).map(stem).find((w) => w.length >= 3);
-    if (!first) continue;
-    const re = new RegExp(`\\b(\\d{1,2}|un|una|dos|tres|cuatro|cinco|seis)\\s+(?:de\\s+)?(?:la |el |las |los )?(?:\\w+\\s+)?${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    const m = re.exec(t);
+    // "dos margarita" for PIZZA MARGARITA: the quantity may sit before any distinctive word of the name.
+    const words = tokens(p.nombre).map(stem).filter((w) => w.length >= 3);
+    if (!words.length) continue;
+    let m: RegExpExecArray | null = null;
+    for (const w of words) {
+      m = new RegExp(`\\b(\\d{1,2}|un|una|dos|tres|cuatro|cinco|seis)\\s+(?:de\\s+)?(?:la |el |las |los )?(?:\\w+\\s+)?${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).exec(t);
+      if (m) break;
+    }
     // "2 carnes" is the product's own name, not "two of the carnes".
     const ownNumber = m && tokens(p.nombre)[0] === m[1];
     const q = m && !ownNumber ? wordToNumber(m[1]) : null;

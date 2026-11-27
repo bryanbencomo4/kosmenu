@@ -27,6 +27,11 @@ export type WaMasterDiscoveryToolResult = {
   tool: string;
   text?: string;
   restaurants?: WaMasterDiscoveryCard[];
+  /** Paging of the directory: how many match in total and whether more pages exist. */
+  total?: number;
+  offset?: number;
+  limit?: number;
+  hasMore?: boolean;
   restaurant?: WaMasterDiscoveryCard | null;
   menuUrl?: string;
   chatUrl?: string | null;
@@ -79,6 +84,10 @@ export async function loadDefaultDiscoveryExecute(): Promise<WaMasterDiscoveryEx
         matchedDish: r.matchedDish ?? null,
         productNames: r.productNames,
       })),
+      total: result.total,
+      offset: result.offset,
+      limit: result.limit,
+      hasMore: result.hasMore,
       restaurant: result.restaurant
         ? {
             id: result.restaurant.id,

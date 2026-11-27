@@ -159,6 +159,14 @@ export type WaMasterTask = {
   delivery?: boolean;
   /** Restaurants ruled out for THIS task (folded names). */
   excluded: string[];
+  /** What the last turn did with this task (a search lists restaurants; a comparison opened menus). */
+  op?: 'search' | 'compare' | 'menu' | null;
+  /** Restaurants whose menus were opened for this task (ids), so a follow-up reuses THEM. */
+  investigated?: string[];
+  /** Products read in the last comparison (ids), in the menu currency of each restaurant. */
+  consulted?: Array<{ slug: string; productId: string; nombre: string; price: number; currency: string }>;
+  /** The last directory search: total matches, whether EVERY page was read, how many were listed. */
+  lastSearch?: { total: number; complete: boolean; shown: number; atMs: number } | null;
   atMs: number;
 };
 
