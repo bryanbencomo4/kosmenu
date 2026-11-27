@@ -463,6 +463,15 @@ export function parseMenuAsk(text: string, snap: MenuSnapshot, view: WaMasterMen
     if (q) qty[p.id] = q;
   }
 
+  // "¿Y cuánto pagaría por dos?": a bare quantity applies to the single product on the table.
+  if (view && view.productIds.length === 1 && !products.length) {
+    const m =
+      /\b(?:por|x|para|pedir|llevar|llevo|quiero|quiera|serian|seria)\s+(\d{1,2}|un|una|dos|tres|cuatro|cinco|seis)\b(?!\s*(?:mil|k|cop|usd|bs|pesos|dolares))/.exec(t) ||
+      /\b(\d{1,2}|dos|tres|cuatro|cinco|seis)\s+(?:de (?:esas?|esos?|estas?|estos?|ellas?)|unidades|piezas)\b/.exec(t);
+    const q = m ? wordToNumber(m[1]) : null;
+    if (q && q <= 20) qty[view.productIds[0]] = q;
+  }
+
   return {
     cheapest,
     priciest,
@@ -511,8 +520,19 @@ function byPriceAsc(a: MenuProduct, b: MenuProduct) {
   return a.price - b.price || a.nombre.localeCompare(b.nombre, 'es');
 }
 
+/** The same dish listed twice (same name and price) must not take two slots in a ranking. */
+export function dedupeProducts(list: MenuProduct[]): MenuProduct[] {
+  const seen = new Set<string>();
+  return list.filter((p) => {
+    const key = `${fold(p.nombre)}|${p.price}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function poolFor(snap: MenuSnapshot, ask: MenuAsk, view: WaMasterMenuView | null): { pool: MenuProduct[]; category: MenuCategory | null } {
-  const priced = snap.products.filter((p) => p.price > 0);
+  const priced = dedupeProducts(snap.products.filter((p) => p.price > 0));
   if (ask.categories.length) {
     const ids = new Set(ask.categories.map((c) => c.id));
     return { pool: priced.filter((p) => p.categoriaId && ids.has(p.categoriaId)), category: ask.categories.length === 1 ? ask.categories[0] : null };
@@ -697,6 +717,7 @@ export function planBudget(
   budget: Budget,
   pool: MenuProduct[],
   deliveryFee: number,
+  opts: { withSide?: boolean } = {},
 ): BudgetPlan {
   let amount = budget.amount;
   if (budget.currency && budget.currency !== snap.currency) {
@@ -711,7 +732,8 @@ export function planBudget(
   if (!cheapest) return { ok: false, reason: 'too_low', needed: 0, cheapest: undefined as never, available };
   const drinks = snap.products.filter((p) => /bebida|refresco|jugo|agua|malta/.test(fold(p.categoria)) && p.price > 0).sort(byPriceAsc);
   const isDrinkPool = priced.every((p) => /bebida|refresco|jugo|agua|malta/.test(fold(p.categoria)));
-  const side = !isDrinkPool ? drinks[0] ?? null : null;
+  // A drink is only suggested when the person asked for one (nobody asking for burgers wants a juice pushed).
+  const side = !isDrinkPool && opts.withSide ? drinks[0] ?? null : null;
   const sideCost = side?.price ?? 0;
   if (available < cheapest.price) {
     return { ok: false, reason: 'too_low', needed: round2(cheapest.price + deliveryFee), cheapest, available };

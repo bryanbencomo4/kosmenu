@@ -300,9 +300,10 @@ describe('acceptance: full purchase conversation (isolated QA shop in Los Palos 
     const t6 = await turn('Tengo 25 mil, ¿cuál me recomiendas con delivery?', t5.memory);
     const r6 = body(t6);
     expect(r6).toMatch(/VILLA — 15\.000 COP/);
-    expect(r6).toMatch(/JUGO DE CARTON — 2\.000 COP/);
-    expect(r6).toMatch(/22\.000 COP/); // 15.000 + 2.000 + 5.000 delivery
-    expect(r6).toMatch(/te sobran 3\.000 COP/);
+    // Asked about burgers: no drink is pushed on them.
+    expect(r6).not.toMatch(/JUGO|AGUA|bebida/i);
+    expect(r6).toMatch(/20\.000 COP/); // 15.000 + 5.000 delivery
+    expect(r6).toMatch(/te sobran 5\.000 COP/);
 
     // 7a. Variant of a product.
     const t7 = await turn('¿La 2 carnes viene sin vegetales? ¿qué carnes puedo elegir?', t6.memory);

@@ -32,6 +32,7 @@ import type {
   WaMasterRestaurantRef,
   WaMasterSpecialist,
   WaMasterSummary,
+  WaMasterTask,
 } from '../types';
 import { ADVISOR_OFFER, matchFeature, pricingNote } from './kb';
 import {
@@ -40,9 +41,11 @@ import {
   loadShopDeliveryFromDb,
   quoteShopDelivery,
   type LoadShopDelivery,
+  type ShopDeliveryQuote,
 } from './delivery';
 import {
   computeTotals,
+  dedupeProducts,
   describeProductOptions,
   describeTotal,
   isMenuAsk,
@@ -59,6 +62,22 @@ import {
   type MenuSnapshot,
 } from './menu';
 import { extractPlaceText, isBareCity } from './place';
+import {
+  TASK_TTL_MS,
+  crossAsk,
+  detectExclusion,
+  detectReset,
+  type Exclusion,
+  freshTask,
+  isExcluded,
+  isRestaurantListAsk,
+  mentionsRestaurant,
+  parseCount,
+  sameSearch,
+  wantsCheap,
+  wantsDeliveryFilter,
+  wantsOthers,
+} from './task';
 import { haversineKm } from '../../../../_lib/delivery-config';
 import { describeImageTurn, parseImageTurn, type ImageTurn } from '../image-turn';
 import { extractCoords, geocodeAddress, looksLikeAddress } from '../../../_lib/geocode';
@@ -762,7 +781,18 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
         activeRestaurant: refs.length === 1 ? refs[0] : null,
         lastMenuView: null,
         foodHint: opts.category ?? opts.query ?? null,
-        ...(zone ? { placeText: place ?? zone } : {}),
+        task: {
+          food: opts.category || opts.query || opts.label ? { category: opts.category ?? null, query: opts.query ?? null, label: opts.label ?? null } : null,
+          zone,
+          cheap: wantsCheap(c.t),
+          delivery: wantsDeliveryFilter(c.t),
+          excluded: [],
+          atMs: c.nowMs,
+        },
+        // A bare city never replaces the more precise place they already gave in that same city.
+        ...(zone && (place || !(c.memory.summary.placeText && fold(c.memory.summary.placeText).includes(fold(zone))))
+          ? { placeText: place ?? zone }
+          : {}),
         ...(geo
           ? { geo: { lat: geo.lat, lng: geo.lng, label: geo.label ?? null, atMs: c.nowMs, ...(placeGeo ? { approx: 'place' as const } : {}) } }
           : {}),
@@ -1438,26 +1468,13 @@ function linkAlreadySent(c: Ctx, url: string): boolean {
   return (c.memory.turns || []).some((t) => t.role === 'assistant' && t.text.includes(url));
 }
 
-const GENERIC_NAME_WORDS = new Set([
-  'restaurante', 'restaurant', 'hamburgueseria', 'hamburguesas', 'hamburguesa', 'pizzeria', 'pizza', 'pizzas',
-  'arepera', 'pollos', 'pollo', 'cafe', 'parrilla', 'comida', 'comidas', 'rapida', 'casa', 'tequeneria',
-  'pasteleria', 'panaderia', 'heladeria', 'sushi', 'bar', 'grill', 'del', 'los', 'las', 'qa',
-]);
-
-/** The person named this restaurant: whole name, or all of its distinctive words ("bladi jaiper"). */
-function mentionsRestaurant(t: string, nombre: string): boolean {
-  const full = fold(nombre);
-  if (!full) return false;
-  if (t.includes(full)) return true;
-  const distinctive = full.split(/[^a-z0-9ñ]+/).filter((w) => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
-  if (!distinctive.length) return false;
-  const hay = t.split(/[^a-z0-9ñ]+/).map(stem);
-  return distinctive.every((w) => hay.includes(stem(w)));
-}
-
 function activeRef(c: Ctx): WaMasterRestaurantRef | null {
   const a = c.memory.summary.activeRestaurant;
-  return a?.id ? a : null;
+  if (!a?.id) return null;
+  // A restaurant stays "the one we are on" only while the conversation is still about it.
+  const at = c.memory.summary.activeAtMs;
+  if (at && c.nowMs - at > TASK_TTL_MS) return null;
+  return a;
 }
 
 /** Keeps the list the person is choosing from; only replaces it when the ref is not in it. */
@@ -1529,6 +1546,7 @@ async function deliveryFlow(
     dest?.approx === 'place' && dest.label
       ? `Lo calculé con la zona que me dijiste (*${dest.label}*), que es aproximada; si me compartes tu ubicación exacta lo afino.`
       : null;
+  const alternatives = !ans.delivers && dest ? await alternativesNote(c, ref.id, dest) : null;
   return reply(
     c,
     'delivery_find',
@@ -1536,6 +1554,7 @@ async function deliveryFlow(
       P(
         ...ans.lines,
         approxNote,
+        alternatives,
         opts.ageNote
           ? 'Usé la ubicación que me compartiste antes; si ya no estás ahí, mándame la nueva y lo recalculo.'
           : null,
@@ -1608,7 +1627,7 @@ async function deliveryQuestionFlow(c: Ctx): Promise<BrainResult | null> {
 
 const VIEW_TTL_MS = 60 * 60 * 1000;
 const MENU_PRESCREEN =
-  /\b(barat\w*|economic\w*|menor precio|mas bajo|mas car\w*|costos|premium|total|subtotal|cuanto (cuesta|cuestan|vale|valen|sale|salen|seria|serian|me|son|es)|precio|precios|a como|valor|recomiend\w*|recomend\w*|aconsej\w*|sugier\w*|presupuesto|conviene|que (tienen|hay|venden|manejan|ofrecen)|menu|carta|categorias|opciones|agotad\w*|disponib\w*|tiene|tienen|hay|viene|vienen|sin |doble|extra|combo|tamano|sabor|primera|segunda|tercera|cuarta|quinta|esas|esos|todas|todos|suma|calcula\w*|cuenta)\b|\b\d[\d.,]*\s*(mil|k|cop|usd|bs|pesos|dolares)\b|\btengo\s+\d/;
+  /\b(barat\w*|economic\w*|menor precio|mas bajo|mas car\w*|costos|premium|total|subtotal|cuanto (cuesta|cuestan|vale|valen|sale|salen|seria|serian|me|son|es)|precio|precios|a como|valor|recomiend\w*|recomend\w*|aconsej\w*|sugier\w*|presupuesto|conviene|que (tienen|hay|venden|manejan|ofrecen)|menu|carta|categorias|opciones|agotad\w*|disponib\w*|tiene|tienen|hay|viene|vienen|sin |doble|extra|combo|tamano|sabor|primera|segunda|tercera|cuarta|quinta|esas|esos|todas|todos|suma|calcula\w*|cuenta|pagar\w*)\b|\b\d[\d.,]*\s*(mil|k|cop|usd|bs|pesos|dolares)\b|\btengo\s+\d/;
 
 async function getSnapshot(c: Ctx, ref: WaMasterRestaurantRef): Promise<MenuSnapshot | null> {
   const load = c.loadPublicMenu ?? loadMenuSnapshotFromDb;
@@ -1668,7 +1687,8 @@ async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult
   }
 
   const cur = snap.currency;
-  const wantsDelivery = ask.withDelivery;
+  // They asked for delivery earlier in this search ("opciones con delivery"): totals include it.
+  const wantsDelivery = ask.withDelivery || Boolean(taskOf(c)?.delivery);
 
   // Delivery fee for this order (needs where the person is).
   const quoteFor = async (subtotal: number) => {
@@ -1717,7 +1737,7 @@ async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult
           : t.lines.filter((l) => !l.startsWith('Subtotal')).join('\n') || null;
       }
     }
-    const plan = planBudget(snap, ask.budget, pool, fee);
+    const plan = planBudget(snap, ask.budget, pool, fee, { withSide: /\b(bebida|bebidas|jugo|refresco|gaseosa|malta|combo|acompan\w*|papas)\b/.test(c.t) });
     if (plan.ok === false && plan.reason === 'currency') {
       return menuReply(c, ref, [
         `Tu presupuesto está en ${plan.budget.currency} pero este menú cobra en ${cur} y no tengo una tasa verificable para convertir, así que no voy a mezclar monedas.`,
@@ -1866,6 +1886,7 @@ async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult
   let pending: Partial<WaMasterSummary> = {};
   let approxNote: string | null = null;
   let askLocation: string | null = null;
+  let altNote: string | null = null;
   const wantsTotal = ask.total || (wantsDelivery && !ask.price && !ask.availability) || (ask.total && wantsDelivery);
   if (wantsTotal || (ask.price && wantsDelivery)) {
     const totals = computeTotals(lines);
@@ -1885,6 +1906,7 @@ async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult
         approxNote = `La tarifa la calculé con la zona que me dijiste (*${q.dest.label}*), que es aproximada; con tu ubicación exacta puede variar.`;
       }
       Object.assign(pending, geoPatchOf(c, q.origDest, q.fresh));
+      if (q.quote.kind === 'blocked' && q.dest) altNote = await alternativesNote(c, ref.id, q.dest);
     } else {
       totalBlock = describeTotal(snap, totals, null, null).lines;
       totalBlock.push(`Total estimado sin delivery: ${money(snap, totals.subtotal)}`);
@@ -1907,6 +1929,7 @@ async function menuTurn(c: Ctx, ref: WaMasterRestaurantRef): Promise<BrainResult
       totalBlock ? totalBlock.join('\n') : null,
       approxNote,
       askLocation,
+      altNote,
       totalBlock ? 'Es un cálculo con los precios publicados ahora mismo; el total final lo confirma el menú al pedir.' : null,
       orderLink,
       closing,
@@ -1990,6 +2013,7 @@ async function selectRestaurant(c: Ctx, ref: WaMasterRestaurantRef): Promise<Bra
   const addr = snap.delivery.address?.split('\n')[0]?.trim();
   // Is it even near the person? Say it now instead of letting them find out at checkout.
   let farNote: string | null = null;
+  let farAlt: string | null = null;
   const place = c.memory.summary.placeText;
   const g = recentGeo(c);
   if (snap.delivery.origin && (g || place)) {
@@ -1998,6 +2022,14 @@ async function selectRestaurant(c: Ctx, ref: WaMasterRestaurantRef): Promise<Bra
     if (km != null && km > MAX_SANE_DELIVERY_KM) {
       const where = (g?.label || place) ? `*${g?.label || place}*` : 'donde estás';
       farNote = `⚠️ Ojo: queda${addr ? ` en ${addr}` : ''}, a unos ${String(Math.round(km)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} km de ${where}, así que lo más probable es que no te lleguen (te lo confirmo con tu ubicación exacta si quieres).`;
+      if (p) {
+        farAlt = await alternativesNote(c, ref.id, {
+          lat: p.lat,
+          lng: p.lng,
+          label: g?.label || place || null,
+          approx: g?.approx ?? (place && isBareCity(place, extractCities(fold(place))) ? 'city' : 'place'),
+        });
+      }
     }
   }
   return reply(
@@ -2008,6 +2040,7 @@ async function selectRestaurant(c: Ctx, ref: WaMasterRestaurantRef): Promise<Bra
         `Perfecto, *${snap.nombre}*${addr ? ` (${addr})` : ''}.`,
         snap.categories.length ? `En su menú veo: ${cats.join(', ')}. Precios en ${snap.currency}.` : null,
         farNote,
+        farAlt,
         'Pregúntame lo que necesites: las más baratas, comparar precios, qué variantes tiene un plato, el total de tu pedido con delivery…',
         linkAlreadySent(c, ref.menuUrl) && !/\b(link|enlace|url|pagina|manda\w*|pasa\w*|enviame|ver (el )?menu)\b/.test(c.t)
           ? null
@@ -2018,8 +2051,375 @@ async function selectRestaurant(c: Ctx, ref: WaMasterRestaurantRef): Promise<Bra
   );
 }
 
+// ---------------------------------------------------------------------------
+// The current search task: "tres opciones con delivery", "no quiero X", "empecemos de nuevo",
+// "¿cuál es la más económica?". The LAST explicit intent decides; memory only fills the gaps.
+// ---------------------------------------------------------------------------
+
+type TaskFood = NonNullable<WaMasterTask['food']>;
+
+const cityOfPlace = (place: string | null | undefined): string | null =>
+  place ? extractCities(fold(place))[0] ?? null : null;
+
+function taskOf(c: Ctx): WaMasterTask | null {
+  return freshTask(c.memory.summary.task, c.nowMs);
+}
+
+/** The dishes of the wanted food in this menu: its category first, then dish words. No duplicates. */
+function foodPool(snap: MenuSnapshot, food: TaskFood | null): MenuProduct[] {
+  const priced = snap.products.filter((p) => p.price > 0);
+  if (!food) return dedupeProducts(priced);
+  const words = [food.label, food.category, food.query].filter(Boolean).join(' ');
+  const cats = matchCategories(snap, words);
+  if (cats.length) {
+    const ids = new Set(cats.map((x) => x.id));
+    return dedupeProducts(priced.filter((p) => p.categoriaId && ids.has(p.categoriaId)));
+  }
+  const ws = words.split(/\s+/).filter((w) => w.length >= 4);
+  return dedupeProducts(priced.filter((p) => ws.some((w) => productMentions(p, w))));
+}
+
+const cheapestOf = (pool: MenuProduct[]): MenuProduct | null =>
+  pool.length ? [...pool].sort((a, b) => a.price - b.price || a.nombre.localeCompare(b.nombre, 'es'))[0] : null;
+
+const canDeliver = (q: ShopDeliveryQuote | null) => q?.kind === 'fee' || q?.kind === 'agreed';
+
+type Candidate = {
+  card: WaMasterDiscoveryCard;
+  ref: WaMasterRestaurantRef;
+  snap: MenuSnapshot | null;
+  km: number | null;
+  cheapest: MenuProduct | null;
+  quote: ShopDeliveryQuote | null;
+};
+
+/** Real menu + real delivery rules of every candidate (nothing is guessed from the directory card). */
+async function evaluateCandidates(
+  c: Ctx,
+  cards: WaMasterDiscoveryCard[],
+  food: TaskFood | null,
+  dest: Dest | null,
+): Promise<Candidate[]> {
+  const coarse = dest?.approx === 'city';
+  return Promise.all(
+    cards.map(async (card) => {
+      const ref = toRefs([card], c.config)[0];
+      const snap = await getSnapshot(c, ref);
+      const cheapest = snap ? cheapestOf(foodPool(snap, food)) : null;
+      const origin = snap?.delivery.origin ?? null;
+      const km =
+        typeof card.distanceKm === 'number'
+          ? card.distanceKm
+          : dest && !coarse && origin
+            ? Math.round((haversineKm(origin, dest) ?? 0) * 10) / 10
+            : null;
+      const quote = snap ? quoteShopDelivery(snap.delivery, coarse ? null : dest, cheapest?.price ?? 0, snap.convert) : null;
+      return { card, ref, snap, km, cheapest, quote };
+    }),
+  );
+}
+
+function deliveryTag(x: Candidate): string {
+  const q = x.quote;
+  if (!q || !x.snap) return 'delivery: no pude leerlo ahora';
+  switch (q.kind) {
+    case 'fee':
+      return q.free ? 'delivery gratis' : `delivery ${money(x.snap, q.fee)}`;
+    case 'agreed':
+      return 'delivery a convenir con el local';
+    case 'none':
+    case 'no_tariff':
+      return 'sin delivery (solo retiro en el local)';
+    case 'blocked':
+      return 'no te llega (fuera de su zona de delivery)';
+    case 'needs_location':
+      return 'delivery: depende de tu ubicación exacta';
+    default:
+      return 'delivery: no pude verificarlo';
+  }
+}
+
+const km1 = (km: number) => km.toFixed(1).replace('.', ',');
+
+/** A single capitalised word after "en/por" ("en Altamira") — a neighbourhood, not a dish. */
+function loosePlace(original: string): string | null {
+  const m = /(?:^|\s)(?:en|por|desde|cerca de)\s+([A-ZÁÉÍÓÚÑ][\p{L}]{3,})\s*[.!?]*$/u.exec(original.trim());
+  return m ? m[1] : null;
+}
+
+type SmartOpts = { exclusion?: Exclusion | null; recommend?: boolean };
+
+/**
+ * Restaurant search driven by the whole current task (food, city, preferences, exclusions) —
+ * every candidate is checked against its real menu and delivery rules before it is listed.
+ * Returns null when the directory has nothing at all, so the classic flow can widen the search.
+ */
+async function smartSearchFlow(c: Ctx, opts: SmartOpts): Promise<BrainResult | null> {
+  const sum = c.memory.summary;
+  const prev = taskOf(c);
+  const food: TaskFood | null = c.tr.food ?? prev?.food ?? null;
+  const zone = c.tr.cities[0] ?? prev?.zone ?? sum.zone ?? cityOfPlace(sum.placeText) ?? null;
+  const same = sameSearch(prev, food, zone);
+  const cheap = wantsCheap(c.t) || (same && Boolean(prev?.cheap));
+  const delivery = wantsDeliveryFilter(c.t) || (same && Boolean(prev?.delivery));
+  const excluded = [...new Set([...(same ? prev?.excluded ?? [] : []), ...(opts.exclusion?.names ?? [])])];
+  const cities = zone ? [zone] : [];
+
+  // Where: a place named now > a typed address > a recent share > the place described earlier.
+  const named = extractPlaceText(c.text, cities) ?? loosePlace(c.text);
+  let dest: Dest | null = null;
+  let newPlace = false;
+  if (named && !isBareCity(named, cities)) {
+    const q = zone && !fold(named).includes(fold(zone)) ? `${named}, ${zone}` : named;
+    const p = await geocodeAddress(q);
+    if (p) {
+      dest = { lat: p.lat, lng: p.lng, label: q, approx: 'place' };
+      newPlace = true;
+    }
+  }
+  if (!dest && looksLikeAddress(c.text)) {
+    const p = await geocodeAddress(c.text);
+    if (p) {
+      dest = p;
+      newPlace = true;
+    }
+  }
+  if (!dest) dest = recentGeo(c);
+  if (!dest && sum.placeText && (!zone || fold(sum.placeText).includes(fold(zone)))) {
+    const p = await geocodeAddress(sum.placeText);
+    if (p) dest = { lat: p.lat, lng: p.lng, label: sum.placeText, approx: isBareCity(sum.placeText, cities) ? 'city' : 'place' };
+  }
+  if (!dest && named) {
+    const p = await geocodeAddress(named);
+    if (p) dest = { lat: p.lat, lng: p.lng, label: named, approx: 'city' };
+  }
+  const coarse = dest?.approx === 'city';
+
+  if (delivery && (!dest || coarse)) {
+    return askLocation(c, 'search_food', { category: food?.category ?? null, query: food?.query ?? null }, food?.label ?? null);
+  }
+
+  const args: Record<string, unknown> = { limit: 15 };
+  if (zone) args.region = zone;
+  if (dest && !coarse) {
+    args.lat = dest.lat;
+    args.lng = dest.lng;
+  }
+  if (food?.category) args.category = food.category;
+  if (food?.query) args.query = food.query;
+  const dishQuery = !food?.category && food?.query ? food.query : null;
+  if (dishQuery) args.includeDishes = true;
+  const res = await dirSearch(c, 'search_restaurants', args);
+  if (!res.ok) return null;
+  let cards = dishQuery
+    ? res.cards.map((card) => ({ ...card, matchedDish: dishEvidence(card, dishQuery) })).filter((card) => card.matchedDish)
+    : res.cards;
+  const found = cards.length;
+  if (!found && !opts.exclusion) return null;
+  cards = cards.filter((card) => !isExcluded(card.nombre, excluded)).slice(0, 8);
+
+  const cands = await evaluateCandidates(c, cards, food, dest);
+  const pool = delivery ? cands.filter((x) => canDeliver(x.quote)) : cands;
+  const rank = (x: Candidate) => (canDeliver(x.quote) ? 0 : x.quote?.kind === 'blocked' ? 3 : x.quote?.kind === 'none' || x.quote?.kind === 'no_tariff' ? 2 : 1);
+  const byKm = (a: Candidate, b: Candidate) => (a.km ?? 1e9) - (b.km ?? 1e9);
+  const sorted = [...pool].sort((a, b) => {
+    if (cheap) return (a.cheapest?.price ?? 1e12) - (b.cheapest?.price ?? 1e12) || byKm(a, b);
+    if (opts.recommend) return rank(a) - rank(b) || byKm(a, b);
+    return byKm(a, b);
+  });
+  const n = Math.min(parseCount(c.t) ?? (opts.recommend ? 3 : 5), 5);
+  const shown = sorted.slice(0, n);
+
+  const foodName = food?.label ?? food?.query ?? food?.category ?? null;
+  const what = foodName ? ` de *${foodName}*` : '';
+  const where = zone ? ` en *${zone}*` : '';
+  const placeLabel = dest?.label ? `*${dest.label}*` : null;
+  const task: WaMasterTask = { food, zone, cheap, delivery, excluded, atMs: c.nowMs };
+  const basePatch: Partial<WaMasterSummary> = {
+    task,
+    zone,
+    activeRestaurant: null,
+    activeAtMs: null,
+    lastMenuView: null,
+    brainPending: null,
+    foodHint: food?.category ?? food?.query ?? null,
+    ...(newPlace && dest
+      ? {
+          geo: { lat: dest.lat, lng: dest.lng, label: dest.label ?? null, atMs: c.nowMs, ...(dest.approx ? { approx: dest.approx } : {}) },
+          placeText: dest.label ?? null,
+        }
+      : {}),
+  };
+  const droppedNames = (opts.exclusion?.names ?? []).map((nm) => {
+    const known = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])].find((r) => fold(r.nombre) === nm);
+    return `*${known?.nombre ?? nm.toUpperCase()}*`;
+  });
+
+  if (!shown.length) {
+    const lines: string[] = [];
+    if (delivery && cands.length) {
+      const pickup = cands.filter((x) => x.quote?.kind === 'none' || x.quote?.kind === 'no_tariff').slice(0, 3);
+      lines.push(
+        `De los ${cands.length} restaurantes${what}${where} que veo, ninguno tiene delivery verificado${placeLabel ? ` hasta ${placeLabel}` : ''}.`,
+        pickup.length
+          ? `Para retirar en el local tienes: ${pickup.map((x) => `*${x.card.nombre}*`).join(', ')}.`
+          : 'Si quieres, busco en otra zona o con otra comida.',
+      );
+    } else {
+      lines.push(
+        `No me quedan otros restaurantes${what}${where}${droppedNames.length ? ` aparte de ${droppedNames.join(', ')}` : ''} en el directorio de ${BRAND} ahora mismo.`,
+        'Puedo buscar en otra zona o con otro tipo de comida, ¿cuál probamos?',
+      );
+    }
+    return reply(c, 'search_food', [P(...lines)], { skipCompose: true, memoryPatch: { ...basePatch, lastRestaurants: [] } });
+  }
+
+  const header = opts.exclusion
+    ? `Dejé fuera ${droppedNames.join(', ') || 'ese restaurante'}. Estos son otros restaurantes${what}${where}${cheap ? ', del precio más bajo al más alto' : ''}:`
+    : delivery
+      ? `Estos son ${shown.length} restaurantes${what}${where} que sí te llegan${placeLabel ? ` hasta ${placeLabel}` : ''}${cheap ? ', del precio más bajo al más alto' : ''}:`
+      : opts.recommend
+        ? `Te recomiendo ${shown.length === 1 ? 'este restaurante' : `estos ${shown.length} restaurantes`}${what}${where} (primero los que te llegan con delivery y quedan más cerca):`
+        : cheap
+          ? `Estos son restaurantes${what}${where}, del precio más bajo al más alto:`
+          : `Estos son ${shown.length} restaurantes${what}${where}:`;
+  const list = shown
+    .map((x, i) => {
+      const bits = [
+        x.km != null ? `a ${km1(x.km)} km` : null,
+        x.cheapest && x.snap ? `${foodName ?? 'lo más barato'} desde ${money(x.snap, x.cheapest.price)}` : null,
+        deliveryTag(x),
+      ].filter(Boolean);
+      return `${i + 1}. *${x.card.nombre}* — ${bits.join(' · ')}`;
+    })
+    .join('\n');
+  const approxNote =
+    dest?.approx === 'place' && dest.label && shown.some((x) => x.quote?.kind === 'fee')
+      ? `Calculé el delivery con la zona que me dijiste (*${dest.label}*), que es aproximada; con tu ubicación exacta lo afino.`
+      : !dest || coarse
+        ? 'Dime tu zona o comparte tu ubicación y te confirmo cuáles te llegan y cuánto cobran.'
+        : null;
+  return reply(
+    c,
+    'search_food',
+    [P(header, list, approxNote, 'Dime cuál te interesa y te muestro su menú con precios, o pídeme «la más económica» para compararlas.')],
+    { skipCompose: true, memoryPatch: { ...basePatch, lastRestaurants: shown.map((x) => x.ref) } },
+  );
+}
+
+/**
+ * This restaurant cannot serve the person (too far, no delivery): find the ones that can, with the
+ * same food and city, checked against their real delivery rules — instead of leaving them stuck.
+ */
+async function alternativesNote(c: Ctx, exceptId: string, dest: Dest | null): Promise<string | null> {
+  if (!dest || dest.approx === 'city') return null;
+  const task = taskOf(c);
+  const zone = cityOfPlace(dest.label) ?? task?.zone ?? c.memory.summary.zone ?? null;
+  if (!zone) return null;
+  const hint = c.memory.summary.foodHint;
+  const food: TaskFood | null = task?.food ?? (hint ? { category: hint, query: null, label: hint } : null);
+  const args: Record<string, unknown> = { limit: 10, region: zone, lat: dest.lat, lng: dest.lng };
+  if (food?.category) args.category = food.category;
+  if (food?.query) args.query = food.query;
+  const res = await dirSearch(c, 'search_restaurants', args);
+  if (!res.ok) return null;
+  const cards = res.cards.filter((card) => card.id !== exceptId && !isExcluded(card.nombre, task?.excluded ?? [])).slice(0, 6);
+  if (!cards.length) return null;
+  const cands = (await evaluateCandidates(c, cards, food, dest)).filter((x) => canDeliver(x.quote));
+  cands.sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
+  const top = cands.slice(0, 3);
+  if (!top.length) return null;
+  const foodName = food?.label ?? food?.query ?? food?.category ?? null;
+  return P(
+    `Estos sí te llegan${foodName ? ` (de *${foodName}*)` : ''}${dest.label ? ` hasta *${dest.label}*` : ''}:`,
+    top
+      .map(
+        (x) =>
+          `• *${x.card.nombre}*${x.km != null ? ` — a ${km1(x.km)} km` : ''}${x.cheapest && x.snap ? ` · desde ${money(x.snap, x.cheapest.price)}` : ''} · ${deliveryTag(x)}`,
+      )
+      .join('\n'),
+    'Dime cuál te interesa y te muestro su menú.',
+  );
+}
+
+/** "¿Cuál es la más económica?" over the restaurants on the table: compares their real menus. */
+async function crossCompareFlow(c: Ctx, dir: 'cheapest' | 'priciest'): Promise<BrainResult | null> {
+  const sum = c.memory.summary;
+  const task = taskOf(c);
+  const refs = (sum.lastRestaurants || []).filter((r) => !isExcluded(r.nombre, task?.excluded ?? []));
+  if (refs.length < 2) return null;
+  const food = task?.food ?? null;
+  const { dest } = await resolveDest(c);
+  const coarse = dest?.approx === 'city';
+  const loaded = (await Promise.all(refs.map(async (ref) => ({ ref, snap: await getSnapshot(c, ref) })))).filter(
+    (x): x is { ref: WaMasterRestaurantRef; snap: MenuSnapshot } => Boolean(x.snap),
+  );
+  if (loaded.length < 2) return null;
+  if (new Set(loaded.map((x) => x.snap.currency)).size > 1) {
+    return reply(
+      c,
+      'search_food',
+      [P('Estos restaurantes cobran en monedas distintas y no tengo una tasa verificable entre ellas, así que no los comparo por precio para no mezclar monedas.', 'Dime de cuál quieres ver los precios y te los detallo.')],
+      { skipCompose: true },
+    );
+  }
+  type Row = { ref: WaMasterRestaurantRef; snap: MenuSnapshot; product: MenuProduct; quote: ShopDeliveryQuote; km: number | null };
+  let rows: Row[] = [];
+  for (const { ref, snap } of loaded) {
+    const best = (dir === 'cheapest' ? cheapestOf(foodPool(snap, food)) : [...foodPool(snap, food)].sort((a, b) => b.price - a.price)[0]) ?? null;
+    if (!best) continue;
+    const quote = quoteShopDelivery(snap.delivery, coarse ? null : dest, best.price, snap.convert);
+    const km = dest && !coarse && snap.delivery.origin ? Math.round((haversineKm(snap.delivery.origin, dest) ?? 0) * 10) / 10 : null;
+    rows.push({ ref, snap, product: best, quote, km });
+  }
+  if (task?.delivery) rows = rows.filter((r) => canDeliver(r.quote));
+  if (!rows.length) return null;
+  rows.sort((a, b) => (dir === 'cheapest' ? a.product.price - b.product.price : b.product.price - a.product.price) || (a.km ?? 1e9) - (b.km ?? 1e9) || a.ref.nombre.localeCompare(b.ref.nombre, 'es'));
+  const win = rows[0];
+  const foodName = food?.label ?? food?.query ?? 'productos';
+  const line = (r: Row) => `• ${r.product.nombre} — ${money(r.snap, r.product.price)} en *${r.ref.nombre}*${r.km != null ? ` (a ${km1(r.km)} km)` : ''}`;
+  let total: string | null = null;
+  if (win.quote.kind === 'fee') {
+    const fee = win.quote.free ? 0 : win.quote.fee;
+    total = `Con delivery${dest?.label ? ` hasta *${dest.label}*` : ''}: ${money(win.snap, win.product.price)} + ${money(win.snap, fee)} = *${money(win.snap, win.product.price + fee)}*${dest?.approx === 'place' ? ' (tarifa calculada con la zona que me dijiste, aproximada)' : ''}.`;
+  } else if (win.quote.kind === 'needs_location' || coarse || !dest) {
+    total = 'Dime tu zona exacta o comparte tu ubicación y te calculo el total con delivery.';
+  } else if (win.quote.kind === 'blocked') {
+    total = `Ojo: *${win.ref.nombre}* no te llega con delivery (${win.quote.reason}).`;
+  } else if (win.quote.kind === 'none' || win.quote.kind === 'no_tariff') {
+    total = `*${win.ref.nombre}* no hace delivery: sería para retirar en el local.`;
+  }
+  const rest = rows.slice(1, 3);
+  return reply(
+    c,
+    'search_food',
+    [
+      P(
+        `${dir === 'cheapest' ? 'Lo más económico' : 'Lo más caro'} en ${foodName} entre estas ${rows.length} opciones:`,
+        line(win),
+        rest.length ? `Le ${rest.length === 1 ? 'sigue' : 'siguen'}:\n${rest.map(line).join('\n')}` : null,
+        total,
+      ),
+    ],
+    {
+      skipCompose: true,
+      memoryPatch: {
+        activeRestaurant: win.ref,
+        activeAtMs: c.nowMs,
+        lastRestaurants: keepList(c, win.ref),
+        lastMenuView: { slug: win.snap.slug, category: win.product.categoria || null, productIds: [win.product.id], atMs: c.nowMs },
+        brainPending: null,
+      },
+    },
+  );
+}
+
 export async function runCentralBrain(params: BrainParams): Promise<BrainResult | null> {
   const out = await runCentralBrainInner(params);
+  // The restaurant we are "on" expires: stamp it whenever the brain (re)selects or clears one.
+  if (out && 'activeRestaurant' in out.memoryPatch && !('activeAtMs' in out.memoryPatch)) {
+    out.memoryPatch = { ...out.memoryPatch, activeAtMs: out.memoryPatch.activeRestaurant ? params.nowMs : null };
+  }
   // The brain never executes legacy admin proposals; a stale one must not block it
   // (or resurface later), so drop it as soon as the brain owns the turn.
   if (out && params.memory.summary.pendingAdminProposal) {
@@ -2055,6 +2455,49 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
     return ownerWelcome(c);
   }
 
+  // "Empecemos de nuevo": the previous task (restaurant, list, exclusions, open question) is dropped;
+  // where the person is and what they like are kept — they never asked to forget those.
+  if (!merchantVoice) {
+    const rs = detectReset(text);
+    if (rs.reset) {
+      const resetPatch: Partial<WaMasterSummary> = {
+        activeRestaurant: null,
+        activeAtMs: null,
+        lastRestaurants: [],
+        lastMenuView: null,
+        brainPending: null,
+        task: null,
+        foodHint: null,
+      };
+      if (fold(rs.rest).length >= 3) {
+        const out = await runCentralBrainInner({
+          ...params,
+          text: rs.rest,
+          memory: { ...memory, summary: { ...sum, ...resetPatch } },
+        });
+        if (out) {
+          return {
+            ...out,
+            replies: out.replies.length ? [`Listo, empezamos de nuevo 🙌\n\n${out.replies[0]}`, ...out.replies.slice(1)] : out.replies,
+            memoryPatch: { ...resetPatch, ...out.memoryPatch },
+          };
+        }
+      }
+      const place = sum.placeText || sum.geo?.label || null;
+      return reply(
+        c,
+        'greeting',
+        [
+          P(
+            `Listo, empezamos de nuevo 🙌${place ? ` Sigo con tu ubicación (*${place}*).` : ''}`,
+            '¿Qué se te antoja y en qué ciudad lo buscamos?',
+          ),
+        ],
+        { skipCompose: true, memoryPatch: resetPatch },
+      );
+    }
+  }
+
   const pending: WaMasterBrainPending | null =
     !merchantVoice && sum.brainPending && params.nowMs - sum.brainPending.atMs <= BRAIN_PENDING_TTL_MS
       ? sum.brainPending
@@ -2064,6 +2507,62 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
   // totals and budget are answered from its real menu — before anything else can swallow them
   // (a pending "where are you?" would read "las 3 más baratas" as an address).
   const knownRefs = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
+
+  // An explicit new intent beats whatever the previous search left behind: "no quiero X, busca
+  // otros", "tres opciones con delivery en…", "recomiéndame tres restaurantes", "¿cuál es la más barata?".
+  if (!merchantVoice && !extractCoords(text)) {
+    const deliveryQ = isDeliveryQuestion(t) && !isRestaurantListAsk(t);
+    const searchTopics: string[] = ['search_food', 'browse_directory', 'open_now', 'delivery_find', 'menu_of', 'unknown'];
+    const topicOk = searchTopics.includes(tr0.topic);
+    const exclusion = topicOk ? detectExclusion(text, knownRefs) : null;
+    const hasActive = Boolean(activeRef(c));
+    const listAsk = isRestaurantListAsk(t);
+    const others = wantsOthers(t) || /\brestaurantes?\b/.test(t);
+    const smart =
+      topicOk &&
+      !deliveryQ &&
+      (Boolean(exclusion) ||
+        (listAsk &&
+          (!hasActive || others) &&
+          (Boolean(parseCount(t)) ||
+            wantsCheap(t) ||
+            wantsDeliveryFilter(t) ||
+            wantsOthers(t) ||
+            /\b(recomiend\w*|recomend\w*|sugier\w*)\b/.test(t) ||
+            Boolean(taskOf(c)))) ||
+        (tr0.topic === 'search_food' && tr0.cities.length > 0 && (wantsCheap(t) || wantsDeliveryFilter(t))));
+    if (smart) {
+      // "No quiero X, quiero la de Y": pick Y (X stays out of this task).
+      const picked = exclusion
+        ? knownRefs.find((r) => !exclusion.ids.includes(r.id) && mentionsRestaurant(t, r.nombre))
+        : null;
+      if (picked) {
+        const out = await selectRestaurant(c, picked);
+        const prevTask = taskOf(c);
+        if (prevTask) {
+          out.memoryPatch = {
+            ...out.memoryPatch,
+            task: { ...prevTask, excluded: [...new Set([...prevTask.excluded, ...exclusion!.names])], atMs: c.nowMs },
+          };
+        }
+        return out;
+      }
+      const out = await smartSearchFlow(c, { exclusion, recommend: /\b(recomiend\w*|recomend\w*|sugier\w*)\b/.test(t) });
+      if (out) return out;
+    }
+    const cross = crossAsk(t);
+    if (
+      cross &&
+      !deliveryQ &&
+      (sum.lastRestaurants || []).length >= 2 &&
+      (!hasActive || /\b(entre (estas|esas|ellas|los|las)|de las opciones|de estos|de esos)\b/.test(t)) &&
+      !knownRefs.some((r) => mentionsRestaurant(t, r.nombre))
+    ) {
+      const out = await crossCompareFlow(c, cross);
+      if (out) return out;
+    }
+  }
+
   const otherMentioned = knownRefs.find((r) => r.id !== sum.activeRestaurant?.id && mentionsRestaurant(t, r.nombre));
   const menuRef = otherMentioned ?? activeRef(c);
   const searchish =

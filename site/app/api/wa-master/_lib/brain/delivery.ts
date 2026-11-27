@@ -184,7 +184,7 @@ export function describeDelivery(
   if (straightKm != null && straightKm > MAX_SANE_DELIVERY_KM) {
     const where2 = dest.label ? `hasta *${dest.label}*` : 'hasta donde estás';
     return {
-      delivers: true,
+      delivers: false,
       needsLocation: false,
       lines: [
         `${name} no te llega ${where2}: queda a unos ${trimNumber(straightKm)} km en línea recta de su local${info.address ? ` (${info.address.split('\n')[0]})` : ''}, demasiado lejos para un delivery.`,

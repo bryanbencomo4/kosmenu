@@ -140,6 +140,26 @@ export type WaMasterSummary = {
   foodHint?: string | null;
   /** The place the person described in words ("Los Palos Grandes, Caracas"), to verify coverage. */
   placeText?: string | null;
+  /**
+   * The search the person is currently doing (what, where, preferences, restaurants ruled out).
+   * A newer explicit request replaces it; "empecemos de nuevo" clears it (location is kept).
+   */
+  task?: WaMasterTask | null;
+  /** When `activeRestaurant` was last chosen/confirmed: it expires instead of lingering forever. */
+  activeAtMs?: number | null;
+};
+
+export type WaMasterTask = {
+  food: { category: string | null; query: string | null; label: string | null } | null;
+  /** City / region of the search ("Caracas"). */
+  zone: string | null;
+  /** They asked for low prices ("económicas", "baratas"): sort and compare by price. */
+  cheap: boolean;
+  /** They only want restaurants that deliver to where they are. */
+  delivery?: boolean;
+  /** Restaurants ruled out for THIS task (folded names). */
+  excluded: string[];
+  atMs: number;
 };
 
 export type WaMasterMenuView = {
