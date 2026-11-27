@@ -52,6 +52,15 @@ export function createSupabaseWaEntryStore(client: SupabaseClient): WaEntryAsync
       return data === true;
     },
 
+    async releaseClaim(messageId) {
+      // Plain table delete (service_role has DELETE on wa_entry_seen_messages) — no schema change needed.
+      const { error } = await client
+        .from('wa_entry_seen_messages')
+        .delete()
+        .eq('message_id', String(messageId).trim());
+      if (error) throw new Error(`wa_entry releaseClaim: ${error.message}`);
+    },
+
     async appendOutbound(record) {
       const { error } = await client.from('wa_entry_outbound').insert({
         id: record.id,

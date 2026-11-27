@@ -17,6 +17,11 @@ export interface WaEntryStore {
   markSeenMessage(messageId: string): void;
   /** Atomic claim: returns true only the first time this messageId is seen. */
   tryClaimMessage(messageId: string): boolean;
+  /**
+   * Undo a claim made by THIS delivery when processing failed before the user was answered, so the
+   * provider's retry can claim and process the message again (otherwise it is dropped as a duplicate).
+   */
+  releaseClaim(messageId: string): void;
   appendOutbound(record: WaOutboundRecord): void;
   listOutbound(): WaOutboundRecord[];
   /**
@@ -89,6 +94,11 @@ export function createMemoryWaEntryStore(
       state.seenMessageIds.push(messageId);
       trimSeen(state, seen);
       return true;
+    },
+    releaseClaim(messageId) {
+      if (!seen.delete(messageId)) return;
+      const i = state.seenMessageIds.lastIndexOf(messageId);
+      if (i >= 0) state.seenMessageIds.splice(i, 1);
     },
     appendOutbound(record) {
       state.outbound.push(record);
@@ -203,6 +213,12 @@ export function createFileWaEntryStore(dataDir: string): WaEntryStore {
       trimSeen(state, seen);
       persist();
       return true;
+    },
+    releaseClaim(messageId) {
+      if (!seen.delete(messageId)) return;
+      const i = state.seenMessageIds.lastIndexOf(messageId);
+      if (i >= 0) state.seenMessageIds.splice(i, 1);
+      persist();
     },
     appendOutbound(record) {
       state.outbound.push(record);

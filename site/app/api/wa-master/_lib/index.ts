@@ -16,6 +16,10 @@ export {
 export {
   createMemoryWaMasterStore,
   loadOrCreateMemory,
+  loadMemorySafe,
+  saveMemorySafe,
+  WaMasterMemoryStoreError,
+  type SafeMemoryLoad,
   type WaMasterMemoryStore,
 } from './memory-store';
 export { createFileWaMasterMemoryStore } from './memory-store-file';

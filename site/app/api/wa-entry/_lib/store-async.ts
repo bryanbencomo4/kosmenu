@@ -6,6 +6,8 @@ export type WaEntryAsyncStore = {
   getThread(fromDigits: string): Promise<WaThreadRecord | null>;
   saveThread(thread: WaThreadRecord): Promise<void>;
   tryClaimMessage(messageId: string, sessionId?: string): Promise<boolean>;
+  /** Optional: undo this delivery's claim after a failure so the provider retry is processed (not dropped). */
+  releaseClaim?(messageId: string): Promise<void>;
   appendOutbound(record: WaOutboundRecord): Promise<void>;
   listOutbound(limit?: number): Promise<WaOutboundRecord[]>;
   matchBotEcho(params: {
@@ -29,6 +31,9 @@ export function asAsyncStore(store: WaEntryStore): WaEntryAsyncStore {
     },
     async tryClaimMessage(messageId) {
       return store.tryClaimMessage(messageId);
+    },
+    async releaseClaim(messageId) {
+      store.releaseClaim(messageId);
     },
     async appendOutbound(record) {
       store.appendOutbound(record);

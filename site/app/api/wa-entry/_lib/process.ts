@@ -15,7 +15,8 @@ import { asAsyncStore } from './store-async';
 import type { WaEntryStore } from './store';
 import {
   createMemoryWaMasterStore,
-  loadOrCreateMemory,
+  loadMemorySafe,
+  saveMemorySafe,
   loadWaMasterConfig,
   resolveWaMasterIdentity,
   runWaMasterOrchestrator,
@@ -81,6 +82,8 @@ export type ProcessWaEntryParams = {
   masterLoadMenu?: AdminMenuLoader;
   masterOrchestratorDeps?: WaMasterOrchestratorDeps;
   masterIdentitySource?: WaMasterIdentitySource | null;
+  /** Waits (ms) before giving up on the per-chat send lock. Default [250, 500, 1000]; tests shorten it. */
+  sendLockWaitsMs?: number[];
 };
 
 function safeParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -105,6 +108,47 @@ function resolveAsyncStore(store: WaEntryStore | WaEntryAsyncStore): WaEntryAsyn
  */
 export async function processWaEntryEvent(
   params: ProcessWaEntryParams,
+): Promise<WaEntryProcessResult> {
+  const claim: ClaimTracker = { messageId: null, store: null };
+  try {
+    const result = await processWaEntryEventInner(params, claim);
+    // The user was NOT answered and the provider will retry: give the claim back so the retry is
+    // processed instead of being dropped as a duplicate. Policy refusals are final (no retry storm).
+    if (result.action === 'error' && !isFinalRefusal(result.reason)) await releaseClaimSafe(claim);
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (!isFinalRefusal(message)) await releaseClaimSafe(claim);
+    throw err;
+  }
+}
+
+/** Remembers which message THIS delivery claimed, so only the owner can give it back. */
+type ClaimTracker = { messageId: string | null; store: WaEntryAsyncStore | null };
+
+function isFinalRefusal(text: string): boolean {
+  return /wa_entry_refused|auto_reply_not_allowed/.test(text);
+}
+
+async function releaseClaimSafe(claim: ClaimTracker): Promise<void> {
+  if (!claim.messageId || !claim.store?.releaseClaim) return;
+  const id = claim.messageId;
+  claim.messageId = null; // release once
+  try {
+    await claim.store.releaseClaim(id);
+    console.warn('[wa-entry] claim_released_for_retry', { eventId: id.slice(0, 12) });
+  } catch (err) {
+    // Last resort: surface it. The claim stays, so the retry would be dropped — make that visible.
+    console.error('[wa-entry] claim_release_failed', {
+      eventId: id.slice(0, 12),
+      error: err instanceof Error ? err.message.slice(0, 120) : 'unknown',
+    });
+  }
+}
+
+async function processWaEntryEventInner(
+  params: ProcessWaEntryParams,
+  claim: ClaimTracker,
 ): Promise<WaEntryProcessResult> {
   const nowMs = params.nowMs ?? Date.now();
   const { config, sender } = params;
@@ -150,6 +194,10 @@ export async function processWaEntryEvent(
 
   const claimed = await store.tryClaimMessage(event.messageId, event.sessionId);
   storeOps += 1;
+  if (claimed) {
+    claim.messageId = event.messageId;
+    claim.store = store;
+  }
   if (!claimed) {
     return {
       accepted: true,
@@ -336,6 +384,7 @@ export async function processWaEntryEvent(
         nowMs,
         storeOps,
         forceSendFail: params.forceSendFail,
+        sendLockWaitsMs: params.sendLockWaitsMs,
       });
     }
   }
@@ -360,6 +409,7 @@ export async function processWaEntryEvent(
       masterLoadMenu: params.masterLoadMenu,
       masterOrchestratorDeps: params.masterOrchestratorDeps,
       masterIdentitySource: params.masterIdentitySource,
+      sendLockWaitsMs: params.sendLockWaitsMs,
     });
   }
 
@@ -411,6 +461,7 @@ export async function processWaEntryEvent(
     nowMs,
     storeOps,
     forceSendFail: params.forceSendFail,
+        sendLockWaitsMs: params.sendLockWaitsMs,
     expectedAttentionVersion: attentionBefore,
   });
 }
@@ -433,6 +484,7 @@ async function processMasterAssistantBranch(params: {
   masterLoadMenu?: AdminMenuLoader;
   masterOrchestratorDeps?: WaMasterOrchestratorDeps;
   masterIdentitySource?: WaMasterIdentitySource | null;
+  sendLockWaitsMs?: number[];
 }): Promise<WaEntryProcessResult> {
   const { config, store, sender, event, nowMs } = params;
   let storeOps = params.storeOps;
@@ -481,12 +533,10 @@ async function processMasterAssistantBranch(params: {
   } as NodeJS.ProcessEnv);
 
   const memStore = params.masterMemoryStore ?? createMemoryWaMasterStore();
-  const memory = await loadOrCreateMemory(
-    memStore,
-    event.fromDigits,
-    nowMs,
-    masterConfig.profileTtlMs,
-  );
+  // A database failure must neither break the turn nor look like "new user": the turn runs on a blank
+  // stand-in and the write-back is skipped so the stored session is never overwritten with it.
+  const loaded = await loadMemorySafe(memStore, event.fromDigits, nowMs, masterConfig.profileTtlMs);
+  const memory = loaded.memory;
   const expectedAttentionVersion = describeConversationControl(
     event.fromDigits,
     params.threadBefore,
@@ -494,8 +544,17 @@ async function processMasterAssistantBranch(params: {
   ).attentionVersion;
 
   // Privacy erase request — wipe L1/L2/L3 for this contact when asked.
+  // The turn's memory must NOT be written back afterwards (that would undo the erase).
+  let erased = false;
   if (/\b(borrar mis datos|eliminar mi informacion|eliminar mis datos)\b/i.test(event.text)) {
-    await memStore.delete(event.fromDigits);
+    erased = true;
+    try {
+      await memStore.delete(event.fromDigits);
+    } catch (err) {
+      console.error('[wa-master] memory_erase_failed', {
+        error: err instanceof Error ? err.message.slice(0, 160) : 'unknown',
+      });
+    }
   }
 
   // Production identity: live catalog only (no contract fixtures). Tests may inject catalog.
@@ -512,7 +571,10 @@ async function processMasterAssistantBranch(params: {
           includeFixtures: !hasLiveIdentity,
         });
 
-  const orch = await runWaMasterOrchestrator(
+  let orchestratorFailed = false;
+  let orch: Awaited<ReturnType<typeof runWaMasterOrchestrator>>;
+  try {
+  orch = await runWaMasterOrchestrator(
     {
       fromDigits: event.fromDigits,
       text: event.text,
@@ -537,9 +599,37 @@ async function processMasterAssistantBranch(params: {
         (masterConfig.simulateAgent || !masterConfig.allowGemini),
     },
   );
+  } catch (err) {
+    // The brain/specialists threw (bug, tool outage): answer with a safe fallback instead of a 500,
+    // which would have dropped the message. Nothing from this turn is persisted.
+    orchestratorFailed = true;
+    console.error('[wa-master] orchestrator_failed', {
+      eventId: String(event.messageId).slice(0, 12),
+      error: err instanceof Error ? err.message.slice(0, 160) : 'unknown',
+    });
+    orch = {
+      replies: [
+        'Tuve un problema técnico revisando eso. Puedo reintentar o dejarte el asistente web: ' +
+          masterConfig.consumerAssistantUrl,
+      ],
+      intents: ['unknown'],
+      specialist: 'orchestrator',
+      memory,
+      escalateHuman: false,
+      toolsUsed: [],
+      mode: 'fallback',
+      dedupeKey: `wa-master:fallback:${event.fromDigits}:${event.messageId}`,
+      voiceScript: null,
+    };
+  }
 
-  await memStore.save(event.fromDigits, orch.memory);
-  storeOps += 1;
+  // Write-back happens AFTER the reply is out (see persistMemory calls below). Saving first meant a failed
+  // send left memory claiming the assistant had answered, and a provider retry appended the user turn twice.
+  const persistMemory = async () => {
+    if (loaded.degraded || erased || orchestratorFailed) return;
+    await saveMemorySafe(memStore, event.fromDigits, orch.memory);
+    storeOps += 1;
+  };
 
   // Register support BEFORE claiming success; take after send (attention version).
   const attentionForSend = expectedAttentionVersion;
@@ -581,6 +671,7 @@ async function processMasterAssistantBranch(params: {
     orch.escalateHuman && escalateRegistered ? 'human_handling' : 'awaiting_audience';
 
   if (config.masterAssistantShadow || masterConfig.shadowMode) {
+    await persistMemory();
     if (orch.escalateHuman && escalateRegistered) {
       await takeConversation({
         store,
@@ -614,9 +705,12 @@ async function processMasterAssistantBranch(params: {
     nowMs,
     storeOps,
     forceSendFail: params.forceSendFail,
+        sendLockWaitsMs: params.sendLockWaitsMs,
     expectedAttentionVersion: attentionForSend,
   });
   storeOps = dispatched.metrics.storeOps;
+  // Not answered (send failed / lock busy) → the provider retries from the previous memory; don't advance it.
+  if (dispatched.action !== 'error') await persistMemory();
 
   // Optional voice note (best-effort; text already sent).
   if (
@@ -651,6 +745,25 @@ async function processMasterAssistantBranch(params: {
   return dispatched;
 }
 
+const SEND_LOCK_WAITS_MS = [250, 500, 1_000];
+
+async function acquireSendLockWithWait(
+  store: WaEntryAsyncStore,
+  chat: string,
+  nowMs: number,
+  ttlMs: number,
+  waitsMs: number[],
+): Promise<boolean> {
+  const t0 = Date.now();
+  if (await store.tryAcquireSendLock(chat, nowMs, ttlMs)) return true;
+  for (const wait of waitsMs) {
+    await new Promise((r) => setTimeout(r, wait));
+    // Advance the clock the lock compares against so an expiring lock is actually seen as expired.
+    if (await store.tryAcquireSendLock(chat, nowMs + (Date.now() - t0), ttlMs)) return true;
+  }
+  return false;
+}
+
 async function dispatchReplies(params: {
   sender: WaEntrySender;
   store: WaEntryAsyncStore;
@@ -662,6 +775,7 @@ async function dispatchReplies(params: {
   storeOps: number;
   forceSendFail?: boolean;
   expectedAttentionVersion?: number;
+  sendLockWaitsMs?: number[];
 }): Promise<WaEntryProcessResult> {
   const { sender, store, event, nowMs } = params;
   let storeOps = params.storeOps;
@@ -703,13 +817,27 @@ async function dispatchReplies(params: {
     }
   }
 
-  const locked = await store.tryAcquireSendLock(event.fromDigits, nowMs, 15_000);
+  // The lock only serializes SENDS for this chat. Another turn (or a crashed invocation, up to the 15 s
+  // TTL) may hold it: wait briefly instead of dropping. Dropping here used to return 200 "ignored", so the
+  // provider never retried and the user was left without an answer.
+  const locked = await acquireSendLockWithWait(
+    store,
+    event.fromDigits,
+    nowMs,
+    15_000,
+    params.sendLockWaitsMs ?? SEND_LOCK_WAITS_MS,
+  );
   storeOps += 1;
   if (!locked) {
+    console.warn('[wa-entry] send_lock_busy', {
+      eventId: String(event.messageId).slice(0, 12),
+      chat: `${event.fromDigits.slice(0, 3)}***${event.fromDigits.slice(-2)}`,
+    });
+    // action 'error' → webhook 5xx + claim released → the provider's retry is processed. Never silent.
     return {
       accepted: true,
-      action: 'ignored',
-      reason: 'rate_limited',
+      action: 'error',
+      reason: 'send_lock_busy',
       eventId: event.messageId,
       chatId: event.fromDigits,
       state: params.nextState,
@@ -741,13 +869,15 @@ async function dispatchReplies(params: {
       };
     }
 
-    for (const text of params.repliesText) {
+    for (const [replyIndex, text] of params.repliesText.entries()) {
       const outbound = await sendWithBoundedRetry({
         sender,
         to: event.fromDigits,
         text,
         eventId: event.messageId,
-        dedupeKey: params.dedupeKey,
+        // One key PER reply (first keeps the original). A shared key made the queue dedupe reply #2/#3 of
+        // the same turn as a duplicate of #1, silently dropping it; retries still dedupe because it is deterministic.
+        dedupeKey: replyIndex === 0 ? params.dedupeKey : `${params.dedupeKey}:r${replyIndex}`,
         forceFail: params.forceSendFail,
       });
       storeOps += 1;
@@ -779,7 +909,11 @@ async function dispatchReplies(params: {
       }
     }
   } finally {
-    await store.releaseSendLock(event.fromDigits);
+    try {
+      await store.releaseSendLock(event.fromDigits);
+    } catch {
+      // The lock expires by TTL; a failed release must not mask the result of the send.
+    }
     storeOps += 1;
   }
 
