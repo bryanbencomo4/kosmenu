@@ -107,4 +107,66 @@ describe('POST /api/asistente-negocio', () => {
     expect(json.text).not.toMatch(/enlace|ya se us/i);
     expect(json.showAuthCard).toBe(true);
   });
+
+  describe('"Sin respuesta" regression: the reply always carries text', () => {
+    const post = async (body: unknown) => {
+      const { POST } = await import('../app/api/asistente-negocio/route');
+      const res = await POST(
+        new Request('http://localhost/api/asistente-negocio', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: typeof body === 'string' ? body : JSON.stringify(body),
+        }),
+      );
+      return { res, json: (await res.json()) as { text?: string; error?: string } };
+    };
+
+    it('a long saved thread (80 messages) is trimmed, not rejected', async () => {
+      const messages = Array.from({ length: 80 }, (_, i) => ({
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        text: `mensaje ${i}`,
+      }));
+      messages.push({ role: 'user', text: 'Hola' });
+      const { res, json } = await post({ messages });
+      expect(res.status).toBe(200);
+      expect(json.error).toBeUndefined();
+      expect((json.text || '').length).toBeGreaterThan(5);
+    });
+
+    it('over-long and empty messages in the history are clipped / dropped, not rejected', async () => {
+      const { res, json } = await post({
+        messages: [
+          { role: 'assistant', text: 'x'.repeat(5000) },
+          { role: 'user', text: '   ' },
+          { role: 'user', text: 'Hola' },
+        ],
+      });
+      expect(res.status).toBe(200);
+      expect(json.error).toBeUndefined();
+      expect((json.text || '').length).toBeGreaterThan(5);
+    });
+
+    it('a request that cannot be read still answers with a human sentence', async () => {
+      const { res, json } = await post('{not json');
+      expect(res.status).toBe(400);
+      expect((json.text || '').length).toBeGreaterThan(10);
+    });
+
+    it('an unexpected server error answers with text instead of an empty body', async () => {
+      (globalThis as unknown as { __waHandoffStore?: unknown }).__waHandoffStore = {
+        validate: async () => {
+          throw new Error('boom');
+        },
+        redeem: async () => {
+          throw new Error('boom');
+        },
+        issue: async () => {
+          throw new Error('boom');
+        },
+      };
+      const { res, json } = await post({ handoffCode: 'ABCDEFGH', handoffAction: 'peek' });
+      expect(res.status).toBe(200);
+      expect(json.text).toMatch(/problema técnico/i);
+    });
+  });
 });

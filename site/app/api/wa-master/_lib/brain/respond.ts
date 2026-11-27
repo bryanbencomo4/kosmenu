@@ -83,7 +83,7 @@ import {
 } from './task';
 import { haversineKm } from '../../../../_lib/delivery-config';
 import { describeImageTurn, parseImageTurn, type ImageTurn } from '../image-turn';
-import { extractCoords, geocodeAddress, looksLikeAddress } from '../../../_lib/geocode';
+import { extractCoords, geocodeAddress, looksLikeAddress, looksLikePlaceAnswer } from '../../../_lib/geocode';
 import {
   CONSUMER_FLAVOURED,
   detectMerchantVoice,
@@ -681,6 +681,13 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
   openOnly?: boolean;
   /** Where the person is (shared location or geocoded address): sort by distance. */
   geo?: { lat: number; lng: number; label?: string | null } | null;
+  /**
+   * A shared pin / coordinates are trusted. A place guessed from typed text is not: when
+   * nothing sits within a sane distance of it we say so and do NOT remember that point.
+   */
+  geoTrusted?: boolean;
+  /** Out-param: set when the (untrusted) point turned out to be far from every result. */
+  probe?: { far: boolean };
 }): Promise<BrainResult> {
   const { zone } = opts;
   // The place they described ("Los Palos Grandes, Caracas") is remembered to check coverage later,
@@ -804,7 +811,13 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
     .filter((d): d is number => typeof d === 'number')
     .sort((a, b) => a - b)[0];
   const farAway = zoneMiss && nearestKm != null && nearestKm > MAX_SANE_DELIVERY_KM;
-  const intro = farAway
+  // A point guessed from typed text that is nowhere near any result is most likely a wrong
+  // place (a mis-heard voice note, a homonymous street): say so, never present it as "cerca de ti".
+  const geoFar = Boolean(geo) && !zone && !opts.geoTrusted && nearestKm != null && nearestKm > MAX_SANE_DELIVERY_KM;
+  if (opts.probe) opts.probe.far = geoFar;
+  const intro = geoFar
+    ? `Tomé *${geo!.label || 'ese lugar'}* como tu ubicación, pero lo más cercano que veo en ${BRAND} queda a unos ${Math.round(nearestKm!)} km, y eso no parece "cerca de ti" 🤔 Si ese lugar no es el correcto, te dejo igual lo que hay por si te sirve:`
+    : farAway
     ? `No tengo ${what} confirmado en *${place || zone}*. Lo más cercano que veo en el directorio de ${BRAND} queda a unos ${Math.round(nearestKm!)} km, así que lo más probable es que no te llegue; te lo dejo por si te sirve:`
     : zoneMiss
     ? `No tengo confirmado ${what} específicamente en *${zone}*, pero esto es lo que hay en el directorio de ${BRAND} (revisa en cada menú si llegan a tu zona):`
@@ -814,7 +827,9 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
       ? `Encontré estas opciones de ${what}${where}:`
       : `Estos son algunos restaurantes${where}:`;
   const followZone = !zone && !geo && cards.length >= 5;
-  const follow = geo
+  const follow = geoFar
+    ? 'Para afinarlo, compárteme tu *ubicación actual* (clip 📎 → *Ubicación*) o escríbeme tu dirección con sector y ciudad (por ejemplo «Av. Bolívar Norte, La Viña, Valencia»).'
+    : geo
     ? 'Dime cuál te interesa y te paso el menú, o dime qué se te antoja y lo afino.'
     : followZone
     ? '¿En qué ciudad o zona estás? Así te filtro los más cercanos.'
@@ -858,10 +873,20 @@ async function foodFlow(c: Ctx, topic: 'search_food' | 'browse_directory' | 'ope
         ...(zone && (place || !(c.memory.summary.placeText && fold(c.memory.summary.placeText).includes(fold(zone))))
           ? { placeText: place ?? zone }
           : {}),
-        ...(geo
+        ...(geo && !geoFar
           ? { geo: { lat: geo.lat, lng: geo.lng, label: geo.label ?? null, atMs: c.nowMs, ...(placeGeo ? { approx: 'place' as const } : {}) } }
           : {}),
-        brainPending: followZone
+        brainPending: geoFar
+          ? {
+              kind: 'zone',
+              near: true,
+              topic,
+              category: opts.category ?? null,
+              query: opts.query ?? null,
+              openOnly: Boolean(opts.openOnly),
+              atMs: c.nowMs,
+            }
+          : followZone
           ? {
               kind: 'zone',
               topic,
@@ -1236,6 +1261,9 @@ const GEO_TTL_MS = 6 * 60 * 60 * 1000;
 const NEAR_ME =
   /\b(cerca de mi|cerca de aqui|cerca de donde|cerca de casa|cerca de mi casa|por aqui cerca|cercan[oa]s?|mas cerca|mi zona|por mi zona|en mi zona|a mi alrededor|alrededor mio|por donde vivo|donde estoy|mi sector|por mi sector|cerquita)\b/;
 
+const WRONG_LOCATION =
+  /\b(no estoy (ahi|alli|en ese lugar)|(esa|esta|esa no es mi|esa no es la) ubicacion (no es|esta mal|es incorrecta|esta equivocada|incorrecta|equivocada)|ubicacion (incorrecta|equivocada|erronea)|me ubicaste mal|ubicame de nuevo|otra ubicacion|cambiar (mi )?ubicacion|esa no es mi ubicacion|ahi no vivo|ahi no estoy|no vivo ahi)\b/;
+
 /** "Valencia" alone is a city answer for the legacy zone filter, not an address to geocode. */
 function CITY_ONLY(t: string, cities: string[]): boolean {
   return cities.length > 0 && t.split(/\s+/).length <= 3 && !looksLikeAddress(t);
@@ -1297,12 +1325,14 @@ async function nearbyFlow(
   c: Ctx,
   point: { lat: number; lng: number; label?: string | null },
   pend: WaMasterBrainPending | null,
+  trusted = false,
 ): Promise<BrainResult> {
   const topic = (['search_food', 'browse_directory', 'open_now', 'delivery_find'] as const).includes(
     pend?.topic as never,
   )
     ? (pend!.topic as 'search_food' | 'browse_directory' | 'open_now' | 'delivery_find')
     : 'browse_directory';
+  const probe = { far: false };
   const out = await foodFlow(c, topic, {
     zone: null,
     category: pend?.category,
@@ -1310,7 +1340,11 @@ async function nearbyFlow(
     label: pend?.query || pend?.category || null,
     openOnly: pend?.openOnly,
     geo: point,
+    geoTrusted: trusted,
+    probe,
   });
+  // The point looked wrong (far from everything): keep the honest reply, remember nothing.
+  if (probe.far) return out;
   const base = point.label ? `Listo, te ubiqué cerca de *${point.label}* 📍` : 'Listo, ya tengo tu ubicación 📍';
   if (out.replies[0]) out.replies = [P(base, out.replies[0]), ...out.replies.slice(1)];
   out.memoryPatch = {
@@ -3098,10 +3132,26 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
     }
   }
 
+  // "Esa no es mi ubicación": forget the remembered place and ask again (never keep a wrong one).
+  if (!merchantVoice && !extractCoords(text) && WRONG_LOCATION.test(t)) {
+    const out = askLocation(c, 'browse_directory', {
+      category: pending?.category ?? null,
+      query: pending?.query ?? c.memory.summary.task?.food?.query ?? null,
+    });
+    out.replies = [
+      P(
+        'Entendido, olvido esa ubicación 👍',
+        'Compárteme tu *ubicación actual* (clip 📎 → *Ubicación*) o escríbeme tu dirección con sector y ciudad, y busco de nuevo.',
+      ),
+    ];
+    out.memoryPatch = { ...out.memoryPatch, geo: null, placeText: null };
+    return out;
+  }
+
   // A shared WhatsApp location (current or live), a maps link or raw coordinates.
   const sharedPoint = merchantVoice ? null : extractCoords(text);
   if (sharedPoint) {
-    return nearbyFlow(c, sharedPoint, pending?.kind === 'zone' ? pending : null);
+    return nearbyFlow(c, sharedPoint, pending?.kind === 'zone' ? pending : null, true);
   }
 
   // A typed address / sector in answer to "where are you?" (or clearly describing a place).
@@ -3109,7 +3159,11 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
     pending?.kind === 'zone' &&
     t.length <= 200 &&
     (pending.near || looksLikeAddress(text)) &&
-    !CITY_ONLY(t, tr0.cities)
+    !CITY_ONLY(t, tr0.cities) &&
+    // A greeting, filler or mis-heard voice note is not an address: never send it to the geocoder.
+    looksLikePlaceAnswer(text) &&
+    // "pizza cerca de mí" is a NEW request (it asks for the location again), not a place.
+    !(NEAR_ME.test(t) && tr0.topic !== 'unknown')
   ) {
     const point = await geocodeAddress(text);
     if (point) return nearbyFlow(c, point, pending);

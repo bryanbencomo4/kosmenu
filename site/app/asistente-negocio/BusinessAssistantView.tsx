@@ -741,7 +741,7 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       {
         id: newId('a'),
         role: 'assistant',
-        text: json.text || 'Sin respuesta.',
+        text: json.text || 'No me llegó respuesta esta vez 😅 Intenta de nuevo en un momento.',
         createdAt: Date.now(),
         awaitPhoto: json.awaitPhoto ?? null,
         proposal: json.proposal ?? null,
@@ -835,8 +835,11 @@ export function BusinessAssistantView(props: { initialHandoffCode: string | null
       await consumeOnce();
       try {
         const { json } = await apiPost({
+          // Only the latest turns travel to the server (it keeps at most 40): a long saved thread
+          // must never make the request fail.
           messages: nextMsgs
             .filter((m) => m.text.trim())
+            .slice(-30)
             .map((m) => ({ role: m.role, text: m.text.slice(0, 1900) })),
           handoffCode: code || undefined,
           handoffAction: 'peek',

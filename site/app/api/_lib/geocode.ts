@@ -58,6 +58,40 @@ export function looksLikeAddress(text: string): boolean {
   );
 }
 
+const NOT_A_PLACE_WORDS = new Set([
+  'hola', 'holaa', 'holaaa', 'holi', 'holis', 'hols', 'holss', 'hello', 'hey', 'ey', 'buenas', 'buenos', 'buen',
+  'dias', 'tardes', 'noches', 'dia', 'tarde', 'noche', 'ok', 'okey', 'oka', 'vale', 'dale', 'listo', 'bueno',
+  'gracias', 'grax', 'si', 'sii', 'no', 'nop', 'nada', 'aja', 'ajam', 'mmm', 'hmm', 'ya', 'wao', 'wow', 'jaja',
+  'jajaja', 'jeje', 'test', 'prueba', 'probando', 'audio', 'nota', 'voz', 'mensaje', 'que', 'tal', 'como', 'estas',
+  'esta', 'estan', 'quiero', 'busco', 'dime', 'mejor', 'ayuda', 'ayudame', 'gracias', 'por', 'favor', 'porfa',
+  'la', 'el', 'lo', 'un', 'una', 'de', 'y', 'a', 'me', 'mi', 'tu', 'es', 'eso', 'esto', 'aqui', 'ahi', 'alli',
+]);
+
+/**
+ * Is this plausibly the answer to "where are you?" — a street, sector, landmark or city —
+ * and not a greeting, a filler word or a mis-transcribed voice note? Geocoding anything else
+ * makes the geocoder invent a place (a "Holss" street in another country) and the person then
+ * gets restaurants hundreds of km away. Addresses with street words always pass.
+ */
+export function looksLikePlaceAnswer(text: string): boolean {
+  const t = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (t.length < 4) return false;
+  if (looksLikeAddress(t)) return true;
+  const tokens = t.split(' ').filter(Boolean);
+  const meaningful = tokens.filter((w) => !NOT_A_PLACE_WORDS.has(w) && !/^(.)\1{2,}$/.test(w));
+  if (meaningful.length === 0) return false;
+  // A single short word is far more often a greeting / noise than a sector name.
+  if (tokens.length === 1 && meaningful[0]!.length < 5) return false;
+  return true;
+}
+
 function stripFiller(text: string): string {
   return String(text || '')
     .replace(/https?:\/\/\S+/g, ' ')
@@ -66,18 +100,41 @@ function stripFiller(text: string): string {
     .trim();
 }
 
+const COLOMBIA_HINT =
+  /\b(colombia|cucuta|bogota|medellin|cali|barranquilla|bucaramanga|santa marta|riohacha|maicao|arauca|cartagena|palomino)\b/;
+
+/**
+ * The directory is Venezuelan: look in Venezuela first. Colombia is only searched when the text
+ * itself points there, otherwise a vague word lands on a Colombian street 400+ km from every
+ * restaurant.
+ */
 export async function geocodeAddress(
   text: string,
   opts: { timeoutMs?: number; countryCodes?: string } = {},
 ): Promise<GeoPoint | null> {
+  if (opts.countryCodes) return geocodeOnce(text, opts.timeoutMs, opts.countryCodes);
+  const inVe = await geocodeOnce(text, opts.timeoutMs, 've');
+  if (inVe) return inVe;
+  const folded = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return COLOMBIA_HINT.test(folded) ? geocodeOnce(text, opts.timeoutMs, 'co') : null;
+}
+
+async function geocodeOnce(
+  text: string,
+  timeoutMs: number | undefined,
+  countryCodes: string,
+): Promise<GeoPoint | null> {
   const q = stripFiller(text).slice(0, 180);
   if (q.length < 4) return null;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 4_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? 4_000);
   try {
     const url =
       'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=es' +
-      `&countrycodes=${encodeURIComponent(opts.countryCodes || 've,co')}` +
+      `&countrycodes=${encodeURIComponent(countryCodes)}` +
       `&q=${encodeURIComponent(q)}`;
     const res = await fetch(url, {
       signal: controller.signal,

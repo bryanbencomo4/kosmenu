@@ -299,11 +299,33 @@ const CORS = {
   headers: 'authorization, content-type, accept',
 };
 
+const MAX_HISTORY_MESSAGES = 40;
+
+/**
+ * The chat keeps the whole conversation on the device and sends it along; a long thread used to
+ * trip `.max(40)` and every later message failed with `invalid_body` (the UI then showed
+ * "Sin respuesta."). Keep the NEWEST messages, clip long texts and drop empty ones instead of
+ * rejecting the request.
+ */
+function normalizeHistory(raw: unknown): unknown {
+  if (!Array.isArray(raw)) return raw;
+  const cleaned = raw
+    .filter((m): m is { role: unknown; text: unknown } => Boolean(m) && typeof m === 'object')
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : null,
+      text: typeof m.text === 'string' ? m.text.trim().slice(0, 2000) : '',
+    }))
+    .filter((m) => m.role && m.text.length > 0);
+  return cleaned.slice(-MAX_HISTORY_MESSAGES);
+}
+
 const bodySchema = z.object({
-  messages: z
-    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().min(1).max(2000) }))
-    .max(40)
-    .optional(),
+  messages: z.preprocess(
+    normalizeHistory,
+    z
+      .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().min(1).max(2000) }))
+      .max(MAX_HISTORY_MESSAGES),
+  ).optional(),
   handoffCode: z.string().trim().max(64).optional(),
   handoffAction: z.enum(['peek', 'consume']).optional(),
   comercioId: z.string().trim().max(64).optional(),
@@ -389,6 +411,24 @@ async function buildShopContextForNlu(shop: { comercioId: string; moneda: string
 }
 
 export async function POST(req: Request) {
+  try {
+    return await handlePost(req);
+  } catch (error) {
+    // Never answer with an empty body: the chat would print "Sin respuesta.". Say what happened.
+    console.error('[asistente-negocio] unhandled', error instanceof Error ? error.message : 'unknown');
+    return json(
+      req,
+      {
+        ok: true,
+        text: 'Tuve un problema técnico un momento 😅 Intenta de nuevo; si sigue igual, escribe *asesor* y te ayuda una persona.',
+        chips: [{ id: 'retry', label: '🔄 Reintentar', text: 'hola' }],
+      },
+      200,
+    );
+  }
+}
+
+async function handlePost(req: Request) {
   const cfg = getBusinessAssistantRuntimeConfig();
   const vercelEnv = (process.env.VERCEL_ENV || '').trim().toLowerCase();
   const allow =
@@ -397,7 +437,11 @@ export async function POST(req: Request) {
     vercelEnv === 'preview' ||
     vercelEnv === '';
   if (!allow) {
-    return json(req, { ok: false, error: 'disabled' }, 403);
+    return json(
+      req,
+      { ok: false, error: 'disabled', text: 'El asistente del negocio no está disponible ahora mismo. Intenta más tarde.' },
+      403,
+    );
   }
 
   const ip = getClientIp(req);
@@ -421,7 +465,11 @@ export async function POST(req: Request) {
   try {
     body = bodySchema.parse(await req.json());
   } catch {
-    return json(req, { ok: false, error: 'invalid_body' }, 400);
+    return json(
+      req,
+      { ok: false, error: 'invalid_body', text: 'No pude leer ese mensaje 😅 Escríbelo de nuevo, o toca *Nuevo chat* para empezar limpio.' },
+      400,
+    );
   }
 
   const user = await getUserFromBearerRequest(req);
