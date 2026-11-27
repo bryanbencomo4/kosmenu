@@ -11,7 +11,7 @@ import type {
   WaMasterDiscoveryCtx,
   WaMasterDiscoveryExecute,
 } from './discovery-bridge';
-import { formatMemoryForPrompt } from './memory';
+import { formatMemoryForPrompt, WA_MASTER_TURN_CAP } from './memory';
 import { PLATFORM_WHAT_IS, formatPublishedPricing } from './knowledge/platform';
 import { WA_MASTER_PERSONALITY } from './personality';
 import type { WaMasterQuotaStore } from './quota';
@@ -89,7 +89,7 @@ async function callGemini(params: {
 function buildSystemPrompt(
   identity: WaMasterIdentity,
   memory: WaMasterMemory,
-  opts?: { omitMemoryPrompt?: boolean },
+  opts?: { omitMemoryPrompt?: boolean; maxTurnsInPrompt?: number },
 ): string {
   const shops = identity.comercios.map((c) => c.publicName).join(', ') || '—';
   const lines = [
@@ -112,7 +112,7 @@ function buildSystemPrompt(
     'Responde en español breve, natural, sin markdown pesado.',
   ];
   if (!opts?.omitMemoryPrompt) {
-    lines.push('', formatMemoryForPrompt(memory, 8));
+    lines.push('', formatMemoryForPrompt(memory, opts?.maxTurnsInPrompt ?? WA_MASTER_TURN_CAP));
   }
   return lines.join('\n');
 }
@@ -232,6 +232,7 @@ export async function runWaMasterAgentNlu(params: {
             {
               text: buildSystemPrompt(identity, memory, {
                 omitMemoryPrompt: Boolean(params.omitMemoryPrompt),
+                maxTurnsInPrompt: config.maxTurnsInPrompt,
               }),
             },
           ],

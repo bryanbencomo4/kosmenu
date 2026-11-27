@@ -3,6 +3,8 @@
  * router stays unchanged until explicit activation review.
  */
 
+import { WA_MASTER_TURN_CAP } from './memory';
+
 export type WaMasterConfig = {
   enabled: boolean;
   /** Shadow: run orchestrator but caller must not send replies. */
@@ -70,7 +72,7 @@ export function loadWaMasterConfig(env: NodeJS.ProcessEnv = process.env): WaMast
       /\D/g,
       '',
     ),
-    maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', 12),
+    maxTurnsInPrompt: envInt(env, 'PLATFORM_WA_MASTER_MAX_TURNS', WA_MASTER_TURN_CAP),
     maxRepliesPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_REPLIES', 2),
     maxMonthlyGeminiRequests: envInt(env, 'PLATFORM_WA_MASTER_MAX_MONTHLY_REQUESTS', 200),
     maxGeminiHttpPerTurn: envInt(env, 'PLATFORM_WA_MASTER_MAX_GEMINI_HTTP_PER_TURN', 2),

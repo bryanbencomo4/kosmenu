@@ -64,6 +64,7 @@ import {
 import { extractPlaceText, isBareCity } from './place';
 import { PLATFORM_WORDS, foodKey, planTurn, type TurnPlan } from './plan';
 import {
+  ACTIVE_REF_TTL_MS,
   TASK_TTL_MS,
   crossAsk,
   detectExclusion,
@@ -1534,10 +1535,24 @@ function linkAlreadySent(c: Ctx, url: string): boolean {
 function activeRef(c: Ctx): WaMasterRestaurantRef | null {
   const a = c.memory.summary.activeRestaurant;
   if (!a?.id) return null;
-  // A restaurant stays "the one we are on" only while the conversation is still about it.
+  // Same TTL as the consumer task. A missing stamp is stale legacy state — never eternal.
   const at = c.memory.summary.activeAtMs;
-  if (at && c.nowMs - at > TASK_TTL_MS) return null;
+  if (at == null || !Number.isFinite(at) || c.nowMs - at > ACTIVE_REF_TTL_MS) return null;
   return a;
+}
+
+/** Restaurants still on the table for this turn: fresh list + live active (TTL-aligned). */
+function knownRefsOf(c: Ctx): WaMasterRestaurantRef[] {
+  const active = activeRef(c);
+  const last = c.memory.summary.lastRestaurants || [];
+  const out: WaMasterRestaurantRef[] = [];
+  const seen = new Set<string>();
+  for (const r of [...last, ...(active ? [active] : [])]) {
+    if (!r?.id || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
 }
 
 /** Keeps the list the person is choosing from; only replaces it when the ref is not in it. */
@@ -1688,7 +1703,8 @@ async function deliveryQuestionFlow(c: Ctx): Promise<BrainResult | null> {
 // The restaurant's real menu: cheapest, compare, price, total, budget, variants
 // ---------------------------------------------------------------------------
 
-const VIEW_TTL_MS = 60 * 60 * 1000;
+/** Menu product view rides the same TTL as the active restaurant / task. */
+const VIEW_TTL_MS = ACTIVE_REF_TTL_MS;
 const MENU_PRESCREEN =
   /\b(barat\w*|economic\w*|menor precio|mas bajo|mas car\w*|costos|premium|total|subtotal|cuanto (cuesta|cuestan|vale|valen|sale|salen|seria|serian|me|son|es)|precio|precios|a como|valor|recomiend\w*|recomend\w*|aconsej\w*|sugier\w*|presupuesto|conviene|que (tienen|hay|venden|manejan|ofrecen)|menu|carta|categorias|opciones|agotad\w*|disponib\w*|tiene|tienen|hay|viene|vienen|sin |doble|extra|combo|tamano|sabor|primera|segunda|tercera|cuarta|quinta|esas|esos|todas|todos|suma|calcula\w*|cuenta|pagar\w*)\b|\b\d[\d.,]*\s*(mil|k|cop|usd|bs|pesos|dolares)\b|\btengo\s+\d/;
 
@@ -2620,7 +2636,7 @@ async function compareMenusFlow(c: Ctx, plan: TurnPlan): Promise<BrainResult | n
   const food: TaskFood | null = plan.food ?? prev?.food ?? hintFood(sum.foodHint);
   const excluded = [...new Set([...(prev?.excluded ?? []), ...(plan.exclusion?.names ?? [])])];
   const zone = plan.zone ?? prev?.zone ?? sum.zone ?? cityOfPlace(sum.placeText) ?? null;
-  const known = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
+  const known = knownRefsOf(c);
   const uniq = (list: WaMasterRestaurantRef[]) => list.filter((r, i) => list.findIndex((x) => x.id === r.id) === i);
   const named = uniq(known.filter((r) => mentionsRestaurant(c.t, r.nombre)));
 
@@ -2779,7 +2795,7 @@ async function compareMenusFlow(c: Ctx, plan: TurnPlan): Promise<BrainResult | n
 /** The search/compare plan of this turn, with the person's pick and the "starting over" header. */
 async function runPlan(c: Ctx, plan: TurnPlan): Promise<BrainResult | null> {
   const sum = c.memory.summary;
-  const known = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
+  const known = knownRefsOf(c);
   if (plan.op === 'compare') return compareMenusFlow(c, plan);
 
   // "No quiero X, quiero la de Y": pick Y (X stays out of this task).
@@ -2855,13 +2871,12 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
   // Decided before any keyword flow can swallow the message: the active restaurant never blocks a
   // new search, a food change replaces the task, and "precios" next to restaurants is not "planes".
   if (!merchantVoice) {
-    const knownNow = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
     const live = taskOf(c);
     const plan = planTurn({
       text,
       t,
       tr: tr0,
-      known: knownNow,
+      known: knownRefsOf(c),
       active: activeRef(c),
       listed: live ? sum.lastRestaurants || [] : [],
       task: live,
@@ -2927,7 +2942,7 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
   // The person is working with one restaurant: questions about its products, prices, variants,
   // totals and budget are answered from its real menu — before anything else can swallow them
   // (a pending "where are you?" would read "las 3 más baratas" as an address).
-  const knownRefs = [...(sum.lastRestaurants || []), ...(sum.activeRestaurant ? [sum.activeRestaurant] : [])];
+  const knownRefs = knownRefsOf(c);
 
   // Follow-ups over the restaurants on the table (the search/compare plan above already ran): "¿cuál es la más barata?".
   if (!merchantVoice && !extractCoords(text)) {
@@ -2946,7 +2961,8 @@ async function runCentralBrainInner(params: BrainParams): Promise<BrainResult | 
     }
   }
 
-  const otherMentioned = knownRefs.find((r) => r.id !== sum.activeRestaurant?.id && mentionsRestaurant(t, r.nombre));
+  const liveActive = activeRef(c);
+  const otherMentioned = knownRefs.find((r) => r.id !== liveActive?.id && mentionsRestaurant(t, r.nombre));
   const menuRef = otherMentioned ?? activeRef(c);
   const searchish =
     (tr0.topic === 'search_food' || tr0.topic === 'browse_directory' || tr0.topic === 'open_now') && tr0.cities.length > 0;

@@ -11,6 +11,7 @@ export {
   patchSummary,
   normalizeSummary,
   formatMemoryForPrompt,
+  WA_MASTER_TURN_CAP,
 } from './memory';
 export {
   createMemoryWaMasterStore,

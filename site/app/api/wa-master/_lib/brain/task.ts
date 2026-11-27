@@ -11,7 +11,10 @@
 import type { WaMasterTask } from '../types';
 import { extractRestaurantName, fold, parseFood } from './topics';
 
+/** How long a consumer task / active restaurant / menu view stays "current". One value for every module. */
 export const TASK_TTL_MS = 45 * 60 * 1000;
+/** Alias: the selected restaurant and any "active" consumer reference share the same TTL. */
+export const ACTIVE_REF_TTL_MS = TASK_TTL_MS;
 
 /** Same length as the input (index-safe): lower-case without accents, char by char. */
 export function lenFold(s: string): string {

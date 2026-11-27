@@ -584,6 +584,7 @@ export async function runWaMasterOrchestrator(
         memory,
         identity,
         topic: brainHit ? brainHit.topic : primary,
+        maxTurnsInPrompt: config.maxTurnsInPrompt,
       },
       deps.compose ?? geminiCompose,
     );

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { normalizeSummary } from './memory';
+import { normalizeSummary, WA_MASTER_TURN_CAP } from './memory';
 import type { WaMasterMemoryStore } from './memory-store';
 import type { WaMasterMemory, WaMasterSummary, WaMasterTurn } from './types';
 
@@ -29,7 +29,7 @@ export function createSupabaseWaMasterMemoryStore(client: SupabaseClient): WaMas
         .select('role,text,at_ms,intent,specialist')
         .eq('from_digits', fromDigits)
         .order('at_ms', { ascending: true })
-        .limit(40);
+        .limit(WA_MASTER_TURN_CAP);
 
       const nowMs = Date.now();
       const summary = normalizeSummary(
@@ -83,7 +83,7 @@ export function createSupabaseWaMasterMemoryStore(client: SupabaseClient): WaMas
         updated_at: new Date().toISOString(),
       });
       await client.from('wa_master_turns').delete().eq('from_digits', fromDigits);
-      const rows = memory.turns.slice(-40).map((t) => ({
+      const rows = memory.turns.slice(-WA_MASTER_TURN_CAP).map((t) => ({
         from_digits: fromDigits,
         role: t.role,
         text: t.text,

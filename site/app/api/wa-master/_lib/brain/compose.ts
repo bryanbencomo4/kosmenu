@@ -12,7 +12,11 @@
 
 import { resolveChatbotModelPair } from '../../../chat/_lib/models';
 import { buildThinkingConfigForModel } from '../../../chat/_lib/thinking';
+import { WA_MASTER_TURN_CAP } from '../memory';
 import type { WaMasterIdentity, WaMasterMemory } from '../types';
+
+/** Low temperature: compose must stay close to the verified draft (deterministic wording). */
+export const COMPOSE_TEMPERATURE = 0.3;
 
 export type ComposeInput = {
   userText: string;
@@ -22,6 +26,8 @@ export type ComposeInput = {
   /** Optional hint about what this turn is (topic / intent) to steer tone. */
   topic?: string;
   timeoutMs?: number;
+  /** History window (same cap as the rest of the Master stack). */
+  maxTurnsInPrompt?: number;
 };
 
 export type ComposeFn = (input: ComposeInput) => Promise<string[] | null>;
@@ -77,7 +83,7 @@ export function validateComposed(drafts: string[], composed: string, userText: s
   return true;
 }
 
-function recentTranscript(memory: WaMasterMemory, max = 10): string {
+function recentTranscript(memory: WaMasterMemory, max = WA_MASTER_TURN_CAP): string {
   const turns = (memory.turns || [])
     .filter((t) => t.role === 'user' || t.role === 'assistant')
     .slice(-max - 1, -1); // exclude the current user turn (passed separately)
@@ -114,7 +120,7 @@ export async function geminiCompose(input: ComposeInput, env: NodeJS.ProcessEnv 
   });
 
   const shops = input.identity.comercios.map((c) => c.publicName).join(', ');
-  const transcript = recentTranscript(input.memory);
+  const transcript = recentTranscript(input.memory, input.maxTurnsInPrompt ?? WA_MASTER_TURN_CAP);
   const user = [
     shops ? `Negocios ligados a este número: ${shops}.` : 'Este número no tiene un negocio ligado.',
     input.topic ? `Tema detectado: ${input.topic}.` : '',
@@ -143,8 +149,8 @@ export async function geminiCompose(input: ComposeInput, env: NodeJS.ProcessEnv 
           systemInstruction: { parts: [{ text: SYSTEM }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],
           generationConfig: {
-            temperature: 0.85,
-            topP: 0.95,
+            temperature: COMPOSE_TEMPERATURE,
+            topP: 0.9,
             maxOutputTokens: 600,
             thinkingConfig: buildThinkingConfigForModel(model),
           },

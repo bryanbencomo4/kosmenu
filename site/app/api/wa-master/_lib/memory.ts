@@ -6,7 +6,12 @@ import type {
   WaMasterTurn,
 } from './types';
 
-const DEFAULT_TURN_CAP = 20;
+/**
+ * Single history window for the whole Master stack: in-process append, Supabase
+ * load/save, Gemini prompts (agent + compose). Keep one number so a turn never
+ * disappears between persistence and the next prompt.
+ */
+export const WA_MASTER_TURN_CAP = 40;
 
 export function emptySummary(nowMs: number): WaMasterSummary {
   return {
@@ -32,6 +37,13 @@ export function emptySummary(nowMs: number): WaMasterSummary {
     misunderstandCount: 0,
     supportIssueText: null,
     brainPending: null,
+    activeRestaurant: null,
+    activeAtMs: null,
+    task: null,
+    foodHint: null,
+    placeText: null,
+    geo: null,
+    lastMenuView: null,
   };
 }
 
@@ -56,6 +68,14 @@ export function normalizeSummary(raw: Partial<WaMasterSummary> | null | undefine
     misunderstandCount: raw.misunderstandCount ?? 0,
     supportIssueText: raw.supportIssueText ?? null,
     brainPending: raw.brainPending ?? null,
+    activeRestaurant: raw.activeRestaurant ?? null,
+    // Missing stamp used to leave an eternal active restaurant — treat as unset.
+    activeAtMs: raw.activeAtMs ?? null,
+    task: raw.task ?? null,
+    foodHint: raw.foodHint ?? null,
+    placeText: raw.placeText ?? null,
+    geo: raw.geo ?? null,
+    lastMenuView: raw.lastMenuView ?? null,
   };
 }
 
@@ -88,7 +108,7 @@ export function createEmptyMemory(
 export function appendTurn(
   memory: WaMasterMemory,
   turn: WaMasterTurn,
-  cap = DEFAULT_TURN_CAP,
+  cap = WA_MASTER_TURN_CAP,
 ): WaMasterMemory {
   const turns = [...memory.turns, turn].slice(-cap);
   return { ...memory, turns };
